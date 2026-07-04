@@ -12,9 +12,11 @@ __v0_jsx-dev-runtime.ts
 backend/.env
 
 # Common ignores
+.claude/
 node_modules
 .next/
 frontend/.next/
 backend/dist/
 .DS_Store
 frontend/.env
+.vscode

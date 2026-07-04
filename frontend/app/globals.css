@@ -166,4 +166,77 @@
   html {
     @apply font-sans;
   }
+
+  /* Smooth scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #252A40;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #7C4DFF66;
+  }
+
+  /* Custom range input */
+  input[type='range'] {
+    cursor: pointer;
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  /* Section header label — reusable across all sections */
+  .section-label {
+    @apply text-xs font-bold text-primary uppercase tracking-widest;
+  }
+
+  /* Muted label inside cards */
+  .field-label {
+    @apply text-xs font-semibold text-muted-foreground uppercase tracking-wider;
+  }
+
+  /* Standard dark input */
+  .input-base {
+    @apply w-full px-4 py-2.5 bg-input border border-border rounded-lg text-sm text-foreground
+           placeholder:text-muted-foreground/60
+           focus:outline-none focus:border-primary/60 focus:ring-2 focus:ring-primary/20
+           transition-colors duration-150;
+  }
+
+  .input-error {
+    @apply border-destructive/70 focus:border-destructive focus:ring-destructive/20;
+  }
+
+  /* Standard card panel */
+  .panel-card {
+    @apply bg-card border border-border rounded-xl p-6;
+  }
+
+  /* Inline error message */
+  .field-error {
+    @apply flex items-center gap-1.5 text-xs text-destructive mt-1.5;
+  }
+
+  /* Clickable row */
+  .row-hover {
+    @apply transition-colors duration-150 hover:bg-muted/30;
+  }
+
+  /* Glow accent on primary elements */
+  .glow-primary {
+    box-shadow: 0 0 20px rgba(124, 77, 255, 0.15);
+  }
 }
