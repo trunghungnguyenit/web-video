@@ -1,1 +1,1 @@
-export { Sidebar, type AppView, type CreativeToolId } from './sidebar';
+export { Sidebar, MobileNav, type AppView, type CreativeToolId } from './sidebar';

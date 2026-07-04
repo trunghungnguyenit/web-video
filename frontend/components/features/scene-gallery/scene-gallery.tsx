@@ -153,18 +153,20 @@ export function SceneGallery() {
         onBulkAction={handleBulkAction}
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
         {scenes.map((scene) => {
           const isSelected = selectedIds.includes(scene.id);
           const isError = scene.status === 'error';
 
           return (
-            <button
+            <div
               key={scene.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => toggleScene(scene.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleScene(scene.id); } }}
               className={cn(
-                'text-left bg-card border rounded-lg overflow-hidden transition-colors',
+                'text-left bg-card border rounded-lg overflow-hidden transition-colors cursor-pointer select-none',
                 isSelected
                   ? 'border-primary ring-1 ring-primary/40'
                   : isError
@@ -221,7 +223,7 @@ export function SceneGallery() {
                   )}
                 </div>
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

@@ -1,1 +1,1 @@
-export { CharacterMaster } from './character-master';
+export { CharacterMaster, type CharacterMasterHandle } from './character-master';
