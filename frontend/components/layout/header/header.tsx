@@ -54,18 +54,6 @@ export function Header({
             {title}
           </h1>
 
-          {/* Demo Project dropdown — chỉ hiện khi không có back button */}
-          {!onBackClick && (
-            <button
-              type="button"
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-card hover:bg-muted/60 border border-border/60 transition-colors duration-150 text-xs text-muted-foreground flex-shrink-0 cursor-pointer"
-              aria-label="Chọn project"
-            >
-              <FolderOpen className="w-3.5 h-3.5" />
-              <span className="font-medium">Demo Project</span>
-              <ChevronDown className="w-3.5 h-3.5 opacity-60" />
-            </button>
-          )}
         </div>
       </div>
 

@@ -34,16 +34,18 @@ export function SceneDurationPanel({ onClose }: SceneDurationPanelProps) {
   const total = scenes.reduce((sum, s) => sum + s.duration, 0);
   const hasErrors = scenes.some((s) => !!s.error);
 
-  const validateDuration = (val: number): string | undefined => {
-    if (isNaN(val)) return 'Không hợp lệ';
-    if (val < MIN_DURATION) return `Tối thiểu ${MIN_DURATION}s`;
-    if (val > MAX_DURATION) return `Tối đa ${MAX_DURATION}s`;
+  const validateDuration = (val: number, raw: string): string | undefined => {
+    if (raw.trim() === '') return 'Không được để trống — nhập số giây từ 1 đến 30.';
+    if (isNaN(val)) return `Giá trị "${raw}" không phải là số hợp lệ.`;
+    if (val < MIN_DURATION) return `Quá ngắn — tối thiểu ${MIN_DURATION}s (nhập: ${val}s).`;
+    if (val > MAX_DURATION) return `Quá dài — tối đa ${MAX_DURATION}s (nhập: ${val}s).`;
+    if (!Number.isInteger(val)) return 'Chỉ chấp nhận số nguyên (không có phần thập phân).';
     return undefined;
   };
 
   const updateDuration = (id: number, raw: string) => {
     const num = parseInt(raw, 10);
-    const error = validateDuration(num);
+    const error = validateDuration(num, raw);
     setScenes((prev) =>
       prev.map((s) => s.id === id ? { ...s, duration: isNaN(num) ? s.duration : num, error } : s),
     );

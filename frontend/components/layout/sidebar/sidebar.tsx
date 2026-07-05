@@ -1,22 +1,50 @@
 'use client';
 
-import { ChevronRight, Settings, Sparkles, Key, Gauge, Palette, Music, Clapperboard, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import {
+  ChevronRight, Settings, Sparkles, Key, Gauge, Palette, Music, Clapperboard,
+  PanelLeftClose, PanelLeftOpen, Clock, UserCircle2, PenSquare, Images, Film,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 import { PRESET_SCRIPTS, type PresetScript } from '@/lib/preset-scripts';
 
 export type AppView = 'project' | 'api-keys' | 'settings';
-export type CreativeToolId = 'voice-speed' | 'scene-style' | 'background-music';
+export type CreativeToolId =
+  | 'character'          // Mục 1 — Master Character
+  | 'content'            // Mục 2 — Nhập nội dung
+  | 'scene-gallery'      // Mục 3 — Danh sách cảnh
+  | 'timeline'           // Mục 4 — Timeline
+  | 'voice-speed'        // Mục 2 — mở accordion Tốc độ giọng
+  | 'scene-style'        // Mục 2 — mở accordion Phong cách cảnh
+  | 'scene-duration'     // Mục 3 — mở panel Thời lượng cảnh
+  | 'background-music';  // Mục 4 — mở panel Nhạc nền
 
 const menuItems: { id: string; view: AppView; icon: typeof Clapperboard; label: string }[] = [
-  { id: 'project',  view: 'project',  icon: Clapperboard, label: 'Dự Án' },
+  { id: 'project',  view: 'project',  icon: Clapperboard, label: 'Video Studio' },
   { id: 'api-keys', view: 'api-keys', icon: Key,          label: 'API Keys' },
 ];
 
-const creativeTools: { id: CreativeToolId; icon: typeof Gauge; label: string; desc: string }[] = [
-  { id: 'voice-speed',      icon: Gauge,   label: 'Tốc độ giọng',   desc: 'TTS speed' },
-  { id: 'scene-style',      icon: Palette, label: 'Phong cách cảnh', desc: 'Visual style' },
-  { id: 'background-music', icon: Music,   label: 'Nhạc nền',        desc: 'BGM track' },
+interface ToolDef {
+  id: CreativeToolId;
+  icon: typeof Gauge;
+  label: string;
+  desc: string;
+}
+
+/** Điều hướng nhanh — nhảy đến các section chính */
+const navigationTools: ToolDef[] = [
+  { id: 'character',     icon: UserCircle2, label: 'Nhân vật',       desc: 'Đi đến Mục 1' },
+  { id: 'content',       icon: PenSquare,   label: 'Nhập nội dung',  desc: 'Đi đến Mục 2' },
+  { id: 'scene-gallery', icon: Images,      label: 'Danh sách cảnh', desc: 'Đi đến Mục 3' },
+  { id: 'timeline',      icon: Film,        label: 'Timeline',       desc: 'Đi đến Mục 4' },
+];
+
+/** Tùy chỉnh chi tiết — mở panel/accordion tại section tương ứng */
+const customizeTools: ToolDef[] = [
+  { id: 'voice-speed',      icon: Gauge,   label: 'Tốc độ giọng',    desc: 'Mục 2 · TTS' },
+  { id: 'scene-style',      icon: Palette, label: 'Phong cách cảnh', desc: 'Mục 2 · Visual' },
+  { id: 'scene-duration',   icon: Clock,   label: 'Thời lượng cảnh', desc: 'Mục 3 · Timing' },
+  { id: 'background-music', icon: Music,   label: 'Nhạc nền',        desc: 'Mục 4 · BGM' },
 ];
 
 interface SidebarProps {
@@ -28,6 +56,63 @@ interface SidebarProps {
   onMenuClick: (menuId: string, view: AppView) => void;
   onToolClick: (toolId: CreativeToolId) => void;
   onPresetSelect: (preset: PresetScript) => void;
+}
+
+// ─── Tool group ──────────────────────────────────────────────────────────────
+
+interface ToolGroupProps {
+  title: string;
+  tools: ToolDef[];
+  activeTool: CreativeToolId | null;
+  collapsed: boolean;
+  onClick: (id: CreativeToolId) => void;
+}
+
+function ToolGroup({ title, tools, activeTool, collapsed, onClick }: ToolGroupProps) {
+  return (
+    <div>
+      {!collapsed && (
+        <p className="text-[10px] font-bold text-sidebar-accent/50 uppercase tracking-widest px-3 mb-1.5">
+          {title}
+        </p>
+      )}
+      <div className="space-y-0.5">
+        {tools.map((tool) => {
+          const isActive = activeTool === tool.id;
+          return (
+            <button
+              key={tool.id}
+              type="button"
+              onClick={() => onClick(tool.id)}
+              title={collapsed ? `${tool.label} — ${tool.desc}` : undefined}
+              aria-pressed={isActive}
+              className={cn(
+                'relative w-full flex items-center rounded-lg transition-all duration-150 cursor-pointer',
+                collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
+                isActive
+                  ? 'bg-primary/10 text-primary border border-primary/20 font-medium'
+                  : 'text-sidebar-accent hover:bg-white/5 hover:text-sidebar-foreground border border-transparent',
+              )}
+            >
+              <tool.icon className="w-4 h-4 flex-shrink-0" />
+              {!collapsed && (
+                <span className="flex-1 text-left min-w-0">
+                  <span className="block text-xs font-medium truncate">{tool.label}</span>
+                  <span className="block text-[10px] text-sidebar-accent/50 mt-0.5 truncate">{tool.desc}</span>
+                </span>
+              )}
+              {!collapsed && isActive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+              )}
+              {collapsed && isActive && (
+                <span className="absolute right-0 top-1/2 -translate-y-1/2 w-0.5 h-4 bg-primary rounded-full" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function Sidebar({
@@ -80,9 +165,9 @@ export function Sidebar({
               </div>
               <div className="min-w-0">
                 <h1 className="font-bold text-xs lg:text-sm text-sidebar-foreground leading-none truncate">
-                  AI Auto Generate
+                  AI Video Studio
                 </h1>
-                <p className="text-[10px] text-sidebar-accent mt-0.5">AI Video Studio</p>
+                <p className="text-[10px] text-sidebar-accent mt-0.5">Video Studio</p>
               </div>
             </div>
             <button
@@ -133,47 +218,22 @@ export function Sidebar({
 
         <div className={cn('my-2 border-t border-sidebar-border/60', collapsed ? 'mx-1.5' : 'mx-2')} />
 
-        {/* Creative tools */}
-        <div className={cn('pb-2', collapsed ? 'px-1.5' : 'px-2')}>
-          {!collapsed && (
-            <p className="text-[10px] font-bold text-sidebar-accent/50 uppercase tracking-widest px-3 mb-1.5">
-              Công cụ
-            </p>
-          )}
-          <div className="space-y-0.5">
-            {creativeTools.map((tool) => {
-              const isActive = activeTool === tool.id;
-              return (
-                <button
-                  key={tool.id}
-                  type="button"
-                  onClick={() => onToolClick(tool.id)}
-                  title={collapsed ? tool.label : undefined}
-                  className={cn(
-                    'w-full flex items-center rounded-lg transition-all duration-150 cursor-pointer',
-                    collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
-                    isActive
-                      ? 'bg-primary/10 text-primary border border-primary/20 font-medium'
-                      : 'text-sidebar-accent hover:bg-white/5 hover:text-sidebar-foreground border border-transparent',
-                  )}
-                >
-                  <tool.icon className="w-4 h-4 flex-shrink-0" />
-                  {!collapsed && (
-                    <span className="flex-1 text-left min-w-0">
-                      <span className="block text-xs font-medium truncate">{tool.label}</span>
-                      <span className="block text-[10px] text-sidebar-accent/50 mt-0.5">{tool.desc}</span>
-                    </span>
-                  )}
-                  {!collapsed && isActive && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                  )}
-                  {collapsed && isActive && (
-                    <span className="absolute right-0 w-0.5 h-4 bg-primary rounded-full" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
+        {/* Creative tools — Điều hướng + Tùy chỉnh */}
+        <div className={cn('pb-2 space-y-2', collapsed ? 'px-1.5' : 'px-2')}>
+          <ToolGroup
+            title="Điều hướng"
+            tools={navigationTools}
+            activeTool={activeTool}
+            collapsed={collapsed}
+            onClick={onToolClick}
+          />
+          <ToolGroup
+            title="Tùy chỉnh"
+            tools={customizeTools}
+            activeTool={activeTool}
+            collapsed={collapsed}
+            onClick={onToolClick}
+          />
         </div>
 
         {/* Preset scripts — hidden when collapsed */}
@@ -236,7 +296,7 @@ interface MobileNavProps {
 
 export function MobileNav({ activeView, onMenuClick, onMenuOpen }: MobileNavProps) {
   const navItems = [
-    { id: 'project',  view: 'project'  as AppView, icon: Clapperboard, label: 'Dự Án' },
+    { id: 'project',  view: 'project'  as AppView, icon: Clapperboard, label: 'Video Studio' },
     { id: 'api-keys', view: 'api-keys' as AppView, icon: Key,          label: 'API Keys' },
     { id: 'settings', view: 'settings' as AppView, icon: Settings,     label: 'Cài đặt' },
   ];

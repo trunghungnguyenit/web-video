@@ -93,9 +93,17 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
 
   const validate = (): boolean => {
     const newErrors: CharacterErrors = {};
-    if (!form.name.trim()) newErrors.name = 'Tên nhân vật không được để trống.';
-    else if (form.name.trim().length < 2) newErrors.name = 'Tên phải có ít nhất 2 ký tự.';
-    if (form.description.length > 500) newErrors.description = 'Mô tả chi tiết tối đa 500 ký tự.';
+    const name = form.name.trim();
+    if (!name) {
+      newErrors.name = 'Tên nhân vật không được để trống.';
+    } else if (name.length < 2) {
+      newErrors.name = `Tên quá ngắn — cần ít nhất 2 ký tự (hiện tại: ${name.length}).`;
+    } else if (name.length > 60) {
+      newErrors.name = `Tên quá dài — tối đa 60 ký tự (hiện tại: ${name.length}).`;
+    }
+    if (form.description.length > 500) {
+      newErrors.description = `Mô tả quá dài — tối đa 500 ký tự (hiện tại: ${form.description.length}).`;
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };

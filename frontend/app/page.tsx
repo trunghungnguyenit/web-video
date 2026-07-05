@@ -9,13 +9,13 @@ import { SceneGallery } from '@/components/features/scene-gallery';
 import { TimelineEditor } from '@/components/features/timeline-editor';
 import { ApiKeysManagement } from '@/components/features/api-keys-management';
 import { SettingsPanel } from '@/components/features/settings/settings-panel';
-import { VoiceSpeedPanel } from '@/components/features/voice-speed';
-import { SceneStylePanel } from '@/components/features/scene-style';
-import { BackgroundMusicPanel } from '@/components/features/background-music';
 import { SceneDurationPanel } from '@/components/features/scene-duration';
 import { PresetScriptModal } from '@/components/features/preset-script-modal';
+import { SavedScriptsPanel } from '@/components/features/saved-scripts';
 import type { QuickActionId } from '@/components/features/quick-actions';
 import type { PresetScript, PresetCharacter, PresetInput } from '@/lib/preset-scripts';
+import type { SavedScript } from '@/lib/saved-scripts';
+import { generateScriptId, deriveTitle } from '@/lib/saved-scripts';
 
 const viewTitles: Record<AppView, string> = {
   project: 'AI Video Studio',
@@ -35,10 +35,21 @@ export default function Page() {
   // Preset modal state
   const [selectedPreset, setSelectedPreset] = useState<PresetScript | null>(null);
 
+  // Saved scripts
+  const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
+  const savedScriptsSectionRef = useRef<HTMLDivElement>(null);
+
   // Applied preset data — dùng key trick để force re-render component nhận preset
   const [appliedCharacter, setAppliedCharacter] = useState<PresetCharacter | null>(null);
   const [appliedInput, setAppliedInput] = useState<PresetInput | null>(null);
   const [applyKey, setApplyKey] = useState(0); // increment để trigger useEffect trong children
+
+  // Focus tool keys — tăng số để trigger useEffect trong con
+  // (mỗi lần user click sidebar → key thay đổi → useEffect fire lại)
+  const [focusVoiceSpeedKey, setFocusVoiceSpeedKey] = useState(0);
+  const [focusSceneStyleKey, setFocusSceneStyleKey] = useState(0);
+  const [focusContentKey,    setFocusContentKey]    = useState(0);
+  const [focusBgmKey,        setFocusBgmKey]        = useState(0);
 
   // Ref để scroll đến từng section
   const characterSectionRef = useRef<HTMLDivElement>(null);
@@ -52,6 +63,50 @@ export default function Page() {
   const scrollToRef = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
+
+  // ── Saved Scripts handlers ────────────────────────────────────────────────
+
+  const handleSaveScript = useCallback((
+    content: string,
+    meta: { language: string; duration: string; videoType: string; voice: string },
+  ) => {
+    const now = new Date().toISOString();
+    const newScript: SavedScript = {
+      id: generateScriptId(),
+      title: deriveTitle(content),
+      content,
+      meta,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setSavedScripts((prev) => [newScript, ...prev]);
+    // Scroll xuống section kịch bản đã lưu
+    setTimeout(() => savedScriptsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+  }, []);
+
+  const handleUpdateScript = useCallback((updated: SavedScript) => {
+    setSavedScripts((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  }, []);
+
+  const handleDeleteScript = useCallback((id: string) => {
+    setSavedScripts((prev) => prev.filter((s) => s.id !== id));
+  }, []);
+
+  const handleApplySavedScript = useCallback((script: SavedScript) => {
+    // Apply vào InputSection qua state
+    setAppliedInput({
+      content: script.content,
+      language: script.meta.language,
+      duration: script.meta.duration,
+      videoType: script.meta.videoType,
+      voice: script.meta.voice,
+    });
+    setApplyKey((k) => k + 1);
+    // Scroll về Input section
+    setTimeout(() => scrollToRef(inputSectionRef), 100);
+  }, [scrollToRef]);
+
+  // ── Menu / navigation handlers ────────────────────────────────────────────
 
   const handleMenuClick = (menuId: string, view: AppView) => {
     setActiveMenuId(menuId);
@@ -67,8 +122,48 @@ export default function Page() {
     setCurrentView('project');
     setActiveMenuId('project');
     setActiveQuickAction(null);
-    setActiveTool((prev) => (prev === toolId ? null : toolId));
     setSidebarOpen(false);
+
+    // Chỉ toggle activeTool cho SceneDurationPanel (panel duy nhất render ngoài section)
+    if (toolId === 'scene-duration') {
+      setActiveTool((prev) => (prev === 'scene-duration' ? null : 'scene-duration'));
+    } else {
+      setActiveTool(null);
+    }
+
+    switch (toolId) {
+      // ── Điều hướng: chỉ scroll đến section ──────────────────────────────
+      case 'character':
+        setTimeout(() => scrollToRef(characterSectionRef), 50);
+        break;
+      case 'content':
+        setFocusContentKey((k) => k + 1); // sẽ focus vào textarea
+        setTimeout(() => scrollToRef(inputSectionRef), 50);
+        break;
+      case 'scene-gallery':
+        setTimeout(() => scrollToRef(sceneSectionRef), 50);
+        break;
+      case 'timeline':
+        setTimeout(() => scrollToRef(timelineSectionRef), 50);
+        break;
+
+      // ── Tùy chỉnh: scroll + mở panel/accordion ──────────────────────────
+      case 'voice-speed':
+        setFocusVoiceSpeedKey((k) => k + 1);
+        setTimeout(() => scrollToRef(inputSectionRef), 50);
+        break;
+      case 'scene-style':
+        setFocusSceneStyleKey((k) => k + 1);
+        setTimeout(() => scrollToRef(inputSectionRef), 50);
+        break;
+      case 'scene-duration':
+        setTimeout(() => scrollToRef(sceneSectionRef), 50);
+        break;
+      case 'background-music':
+        setFocusBgmKey((k) => k + 1); // expand BGM panel trong Timeline
+        setTimeout(() => scrollToRef(timelineSectionRef), 50);
+        break;
+    }
   };
 
   const handleQuickActionClick = useCallback((actionId: QuickActionId) => {
@@ -196,11 +291,8 @@ export default function Page() {
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-8 pb-24 md:pb-6">
             {currentView === 'project' && (
               <>
-                {activeTool === 'voice-speed' && <VoiceSpeedPanel onClose={() => setActiveTool(null)} />}
-                {activeTool === 'scene-style' && <SceneStylePanel onClose={() => setActiveTool(null)} />}
-                {activeTool === 'background-music' && <BackgroundMusicPanel onClose={() => setActiveTool(null)} />}
-                {activeQuickAction === 'scene-duration' && (
-                  <SceneDurationPanel onClose={() => setActiveQuickAction(null)} />
+                {activeTool === 'scene-duration' && (
+                  <SceneDurationPanel onClose={() => setActiveTool(null)} />
                 )}
 
                 {/* Section 1 — Character */}
@@ -215,8 +307,34 @@ export default function Page() {
                     onActionDone={() => setActiveQuickAction(null)}
                     presetData={appliedInput}
                     presetKey={applyKey}
+                    onSaveScript={handleSaveScript}
+                    focusVoiceSpeedKey={focusVoiceSpeedKey}
+                    focusSceneStyleKey={focusSceneStyleKey}
+                    focusContentKey={focusContentKey}
                   />
                 </div>
+
+                {/* Section 2.5 — Kịch bản đã lưu */}
+                {savedScripts.length > 0 && (
+                  <div ref={savedScriptsSectionRef}>
+                    <section className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xs font-bold text-primary uppercase tracking-widest">
+                          2.5. KỊCH BẢN ĐÃ LƯU ({savedScripts.length})
+                        </h2>
+                        <span className="text-xs text-muted-foreground">
+                          Chọn để dùng lại · Sửa · Xóa
+                        </span>
+                      </div>
+                      <SavedScriptsPanel
+                        scripts={savedScripts}
+                        onApply={handleApplySavedScript}
+                        onUpdate={handleUpdateScript}
+                        onDelete={handleDeleteScript}
+                      />
+                    </section>
+                  </div>
+                )}
 
                 {/* Section 3 — Scene Gallery */}
                 <div ref={sceneSectionRef}>
@@ -225,7 +343,7 @@ export default function Page() {
 
                 {/* Section 4 — Timeline */}
                 <div ref={timelineSectionRef}>
-                  <TimelineEditor />
+                  <TimelineEditor focusBgmKey={focusBgmKey} />
                 </div>
               </>
             )}
