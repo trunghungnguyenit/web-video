@@ -2,7 +2,7 @@
 
 export interface SavedScriptMeta {
   language: string;
-  duration: string;
+  sceneCount: string;
   videoType: string;
   voice: string;
 }
@@ -42,12 +42,19 @@ export const LANGUAGE_LABELS: Record<string, string> = {
   ja: '日本語',
 };
 
-export const DURATION_LABELS: Record<string, string> = {
-  '1-3': '1–3 phút',
-  '5-10': '5–10 phút',
-  '10-20': '10–20 phút',
-  '20-30': '20–30 phút',
+export const SCENE_COUNT_LABELS: Record<string, string> = {
+  '3': '3 cảnh',
+  '5': '5 cảnh',
+  '8': '8 cảnh',
+  '10': '10 cảnh',
+  '15': '15 cảnh',
 };
+
+export const SCENE_COUNT_OPTIONS = Object.entries(SCENE_COUNT_LABELS) as [string, string][];
+
+export function formatSceneCount(value: string): string {
+  return SCENE_COUNT_LABELS[value] ?? `${value} cảnh`;
+}
 
 export const VOICE_LABELS: Record<string, string> = {
   'male-natural': 'Nam – tự nhiên',

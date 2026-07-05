@@ -8,7 +8,7 @@ import {
 import { cn } from '@/lib/utils';
 import type { SavedScript, SavedScriptMeta } from '@/lib/saved-scripts';
 import {
-  VIDEO_TYPE_LABELS, LANGUAGE_LABELS, DURATION_LABELS, VOICE_LABELS, formatRelativeDate,
+  VIDEO_TYPE_LABELS, LANGUAGE_LABELS, SCENE_COUNT_LABELS, VOICE_LABELS, formatRelativeDate, formatSceneCount,
 } from '@/lib/saved-scripts';
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               { key: 'language' as const, label: 'Ngôn ngữ', options: LANGUAGE_LABELS },
-              { key: 'duration' as const, label: 'Độ dài', options: DURATION_LABELS },
+              { key: 'sceneCount' as const, label: 'Số lượng cảnh', options: SCENE_COUNT_LABELS },
               { key: 'videoType' as const, label: 'Kiểu video', options: VIDEO_TYPE_LABELS },
               { key: 'voice' as const, label: 'Giọng đọc', options: VOICE_LABELS },
             ].map(({ key, label, options }) => (
@@ -430,7 +430,7 @@ export function SavedScriptsPanel({
                         {VIDEO_TYPE_LABELS[script.meta.videoType] ?? script.meta.videoType}
                       </span>
                       <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
-                        {DURATION_LABELS[script.meta.duration] ?? script.meta.duration}
+                        {formatSceneCount(script.meta.sceneCount)}
                       </span>
                       <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/50 ml-auto">
                         <Clock className="w-3 h-3" />

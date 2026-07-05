@@ -10,7 +10,7 @@ import { PRESET_SCRIPTS, type PresetScript } from '@/lib/preset-scripts';
 
 export type AppView = 'project' | 'api-keys' | 'settings';
 export type CreativeToolId =
-  | 'character'          // Mục 1 — Master Character
+  | 'character'          // Mục 1 — NHÂN VẬT CHÍNH
   | 'content'            // Mục 2 — Nhập nội dung
   | 'scene-gallery'      // Mục 3 — Danh sách cảnh
   | 'timeline'           // Mục 4 — Timeline
@@ -252,8 +252,13 @@ export function Sidebar({
                     onClick={() => onPresetSelect(script)}
                     className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-white/5 transition-colors duration-150 cursor-pointer group"
                   >
-                    <span className="block text-xs font-medium text-sidebar-foreground/80 group-hover:text-primary transition-colors truncate">
-                      {script.title}
+                    <span className="flex items-center gap-1.5">
+                      <span className="block text-xs font-medium text-sidebar-foreground/80 group-hover:text-primary transition-colors truncate">
+                        {script.title}
+                      </span>
+                      <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-primary/15 text-primary border border-primary/25 flex-shrink-0">
+                        DEMO
+                      </span>
                     </span>
                     <span className="block text-[10px] text-sidebar-accent/50 truncate">{script.desc}</span>
                   </button>

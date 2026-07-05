@@ -7,6 +7,8 @@ import {
   Sliders,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { generateScenesFromContent } from '@/lib/scenes';
+import type { SceneGenerationResult } from '@/lib/scenes';
 import type { QuickActionId } from '@/components/features/quick-actions';
 import type { PresetInput } from '@/lib/preset-scripts';
 
@@ -75,7 +77,7 @@ interface FormState {
   content: string;
   linkUrl: string;
   language: string;
-  duration: string;
+  sceneCount: string;
   videoType: string;
   voice: string;
   dragOver: boolean;
@@ -90,7 +92,7 @@ export interface InputSectionProps {
   presetKey?: number;
   onSaveScript?: (
     content: string,
-    meta: { language: string; duration: string; videoType: string; voice: string }
+    meta: { language: string; sceneCount: string; videoType: string; voice: string }
   ) => void;
   /** Sidebar click "Nhập nội dung" → scroll + focus textarea */
   focusContentKey?: number;
@@ -98,6 +100,8 @@ export interface InputSectionProps {
   focusVoiceSpeedKey?: number;
   /** Sidebar click "Phong cách cảnh" → scroll + mở accordion */
   focusSceneStyleKey?: number;
+  /** Sau khi phân tích xong → trả danh sách cảnh cho mục 3 */
+  onScenesGenerated?: (result: SceneGenerationResult) => void;
 }
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
@@ -165,7 +169,7 @@ function validateUpload(file: File | null, tab: 'image' | 'file'): string | unde
 
 export function InputSection({
   activeQuickAction, onActionDone, presetData, presetKey, onSaveScript,
-  focusContentKey, focusVoiceSpeedKey, focusSceneStyleKey,
+  focusContentKey, focusVoiceSpeedKey, focusSceneStyleKey, onScenesGenerated,
 }: InputSectionProps = {}) {
   const fileInputRef  = useRef<HTMLInputElement>(null);
   const textareaRef   = useRef<HTMLTextAreaElement>(null);
@@ -174,7 +178,7 @@ export function InputSection({
 
   const [form, setForm] = useState<FormState>({
     activeTab: 'text', content: '', linkUrl: '',
-    language: 'vi', duration: '1-3', videoType: 'storytelling', voice: 'male-natural',
+    language: 'vi', sceneCount: '5', videoType: 'storytelling', voice: 'male-natural',
     dragOver: false, isSubmitting: false, submitted: false,
   });
   const [errors, setErrors] = useState<FormErrors>({});
@@ -196,8 +200,10 @@ export function InputSection({
     setForm((f) => ({
       ...f, activeTab: 'text',
       content: presetData.content, language: presetData.language,
-      duration: presetData.duration, videoType: presetData.videoType, voice: presetData.voice,
+      sceneCount: presetData.sceneCount, videoType: presetData.videoType, voice: presetData.voice,
     }));
+    if (presetData.voiceSpeed != null) setVoiceSpeed(presetData.voiceSpeed);
+    if (presetData.sceneStyleId) setSceneStyle(presetData.sceneStyleId);
     setErrors({});
     setUploadedFile(null);
     setJustApplied(true);
@@ -258,12 +264,40 @@ export function InputSection({
   const handleSubmit = async () => {
     const e = validate();
     if (Object.keys(e).length > 0) {
-      // Auto-focus vào field lỗi đầu tiên
       if (e.content) textareaRef.current?.focus();
       return;
     }
     setForm((f) => ({ ...f, isSubmitting: true }));
+
     await new Promise((r) => setTimeout(r, 1500));
+
+    const contentForScenes =
+      form.activeTab === 'text'
+        ? form.content
+        : form.activeTab === 'link'
+          ? `Nội dung phân tích từ video: ${form.linkUrl.trim()}`
+          : uploadedFile
+            ? `Nội dung trích xuất từ file "${uploadedFile.name}"`
+            : form.content;
+
+    const styleLabel = SCENE_STYLES.find((s) => s.id === sceneStyle)?.label ?? sceneStyle;
+
+    const scenes = generateScenesFromContent({
+      content: contentForScenes,
+      sceneCount: form.sceneCount,
+      videoType: form.videoType,
+      language: form.language,
+      sceneStyle: styleLabel,
+    });
+
+    onScenesGenerated?.({
+      scenes,
+      sourceContent: contentForScenes,
+      sceneCount: form.sceneCount,
+      videoType: form.videoType,
+      language: form.language,
+    });
+
     setForm((f) => ({ ...f, isSubmitting: false, submitted: true }));
     onActionDone?.();
     setTimeout(() => setForm((f) => ({ ...f, submitted: false })), 3000);
@@ -285,7 +319,7 @@ export function InputSection({
       return;
     }
     onSaveScript?.(form.content, {
-      language: form.language, duration: form.duration,
+      language: form.language, sceneCount: form.sceneCount,
       videoType: form.videoType, voice: form.voice,
     });
     setSavedScript(true);
@@ -536,9 +570,9 @@ export function InputSection({
       {/* Config dropdowns */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
         {[
-          { label: 'Ngôn ngữ',    field: 'language' as const, opts: [['vi','Tiếng Việt'],['en','English'],['zh','中文'],['ja','日本語']] },
-          { label: 'Độ dài video',field: 'duration' as const, opts: [['1-3','1 – 3 phút'],['5-10','5 – 10 phút'],['10-20','10 – 20 phút'],['20-30','20 – 30 phút']] },
-          { label: 'Kiểu video',  field: 'videoType' as const,opts: [['storytelling','Kể chuyện'],['tutorial','Hướng dẫn'],['ads','Quảng cáo'],['review','Review sản phẩm']] },
+          { label: 'Ngôn ngữ',      field: 'language' as const,   opts: [['vi','Tiếng Việt'],['en','English'],['zh','中文'],['ja','日本語']] },
+          { label: 'Số lượng cảnh', field: 'sceneCount' as const, opts: [['3','3 cảnh'],['5','5 cảnh'],['8','8 cảnh'],['10','10 cảnh'],['15','15 cảnh']] },
+          { label: 'Kiểu video',    field: 'videoType' as const,  opts: [['storytelling','Kể chuyện'],['tutorial','Hướng dẫn'],['ads','Quảng cáo'],['review','Review sản phẩm']] },
           { label: 'Giọng đọc',   field: 'voice' as const,   opts: [['male-natural','Giọng nam – tự nhiên'],['female-natural','Giọng nữ – tự nhiên'],['male-pro','Giọng nam – chuyên nghiệp'],['female-young','Giọng nữ – trẻ trung']] },
         ].map(({ label, field, opts }) => (
           <div key={field}>

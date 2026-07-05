@@ -13,9 +13,12 @@ import { SceneDurationPanel } from '@/components/features/scene-duration';
 import { PresetScriptModal } from '@/components/features/preset-script-modal';
 import { SavedScriptsPanel } from '@/components/features/saved-scripts';
 import type { QuickActionId } from '@/components/features/quick-actions';
-import type { PresetScript, PresetCharacter, PresetInput } from '@/lib/preset-scripts';
+import type { PresetScript, PresetCharacter, PresetInput, PresetTimelineDemo } from '@/lib/preset-scripts';
 import type { SavedScript } from '@/lib/saved-scripts';
 import { generateScriptId, deriveTitle } from '@/lib/saved-scripts';
+import type { VideoScene, SceneGenerationResult } from '@/lib/scenes';
+import { buildDemoScenesFromPreset } from '@/lib/preset-demo-builder';
+import { attachVideosToScenes } from '@/lib/scene-video-placeholder';
 
 const viewTitles: Record<AppView, string> = {
   project: 'AI Video Studio',
@@ -38,6 +41,14 @@ export default function Page() {
   // Saved scripts
   const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
   const savedScriptsSectionRef = useRef<HTMLDivElement>(null);
+
+  // Generated scenes (mục 3 — từ mục 2)
+  const [generatedScenes, setGeneratedScenes] = useState<VideoScene[]>([]);
+
+  // Timeline demo config (mục 4 — từ kịch bản mẫu)
+  const [timelineDemo, setTimelineDemo] = useState<PresetTimelineDemo | null>(null);
+  const [demoBanner, setDemoBanner] = useState<string | null>(null);
+  const [isApplyingDemo, setIsApplyingDemo] = useState(false);
 
   // Applied preset data — dùng key trick để force re-render component nhận preset
   const [appliedCharacter, setAppliedCharacter] = useState<PresetCharacter | null>(null);
@@ -68,7 +79,7 @@ export default function Page() {
 
   const handleSaveScript = useCallback((
     content: string,
-    meta: { language: string; duration: string; videoType: string; voice: string },
+    meta: { language: string; sceneCount: string; videoType: string; voice: string },
   ) => {
     const now = new Date().toISOString();
     const newScript: SavedScript = {
@@ -97,13 +108,19 @@ export default function Page() {
     setAppliedInput({
       content: script.content,
       language: script.meta.language,
-      duration: script.meta.duration,
+      sceneCount: script.meta.sceneCount,
       videoType: script.meta.videoType,
       voice: script.meta.voice,
     });
     setApplyKey((k) => k + 1);
     // Scroll về Input section
     setTimeout(() => scrollToRef(inputSectionRef), 100);
+  }, [scrollToRef]);
+
+  const handleScenesGenerated = useCallback(async (result: SceneGenerationResult) => {
+    const withVideos = await attachVideosToScenes(result.scenes);
+    setGeneratedScenes(withVideos);
+    setTimeout(() => scrollToRef(sceneSectionRef), 200);
   }, [scrollToRef]);
 
   // ── Menu / navigation handlers ────────────────────────────────────────────
@@ -214,22 +231,34 @@ export default function Page() {
     setSelectedPreset(preset);
   };
 
-  // Khi user nhấn "Áp dụng kịch bản" trong modal
-  const handlePresetApply = (preset: PresetScript) => {
-    // Đóng modal
+  // Khi user nhấn "Áp dụng kịch bản" — load demo đầy đủ 4 mục
+  const handlePresetApply = useCallback(async (preset: PresetScript) => {
     setSelectedPreset(null);
+    setIsApplyingDemo(true);
+    setDemoBanner(null);
 
-    // Apply vào CharacterMaster qua ref (instant, không cần key trick)
-    characterMasterRef.current?.applyPreset(preset.character);
+    try {
+      characterMasterRef.current?.applyDemoCharacters(preset.characters);
+      setAppliedCharacter(preset.character);
+      setAppliedInput(preset.input);
+      setApplyKey((k) => k + 1);
 
-    // Apply vào InputSection qua state + key increment để trigger useEffect
-    setAppliedCharacter(preset.character);
-    setAppliedInput(preset.input);
-    setApplyKey((k) => k + 1);
+      const demoScenes = buildDemoScenesFromPreset(preset);
+      const withVideos = await attachVideosToScenes(demoScenes);
+      setGeneratedScenes(withVideos);
+      setTimelineDemo(preset.timeline);
+      setFocusBgmKey((k) => k + 1);
 
-    // Scroll về đầu trang (section 1)
-    setTimeout(() => scrollToRef(characterSectionRef), 100);
-  };
+      const totalSec = preset.demoScenes.reduce((s, c) => s + c.durationSeconds, 0);
+      setDemoBanner(
+        `Demo "${preset.title}" — ${preset.characters.length} nhân vật · ${preset.demoScenes.length} cảnh · ${Math.floor(totalSec / 60)}:${String(totalSec % 60).padStart(2, '0')} · Sẵn sàng render FFmpeg`,
+      );
+
+      setTimeout(() => scrollToRef(characterSectionRef), 100);
+    } finally {
+      setIsApplyingDemo(false);
+    }
+  }, [scrollToRef]);
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -291,6 +320,26 @@ export default function Page() {
           <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-8 pb-24 md:pb-6">
             {currentView === 'project' && (
               <>
+                {isApplyingDemo && (
+                  <div className="flex items-center gap-2 px-4 py-3 bg-primary/10 border border-primary/30 rounded-xl text-sm text-primary">
+                    <span className="inline-block w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    Đang tải demo kịch bản mẫu — sinh nhân vật, cảnh video & timeline...
+                  </div>
+                )}
+
+                {demoBanner && !isApplyingDemo && (
+                  <div className="flex items-center justify-between gap-3 px-4 py-3 bg-green-500/10 border border-green-500/25 rounded-xl">
+                    <p className="text-xs text-green-400">{demoBanner}</p>
+                    <button
+                      type="button"
+                      onClick={() => setDemoBanner(null)}
+                      className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                )}
+
                 {activeTool === 'scene-duration' && (
                   <SceneDurationPanel onClose={() => setActiveTool(null)} />
                 )}
@@ -311,6 +360,7 @@ export default function Page() {
                     focusVoiceSpeedKey={focusVoiceSpeedKey}
                     focusSceneStyleKey={focusSceneStyleKey}
                     focusContentKey={focusContentKey}
+                    onScenesGenerated={handleScenesGenerated}
                   />
                 </div>
 
@@ -338,12 +388,19 @@ export default function Page() {
 
                 {/* Section 3 — Scene Gallery */}
                 <div ref={sceneSectionRef}>
-                  <SceneGallery />
+                  <SceneGallery
+                    scenes={generatedScenes}
+                    onScenesChange={setGeneratedScenes}
+                  />
                 </div>
 
                 {/* Section 4 — Timeline */}
                 <div ref={timelineSectionRef}>
-                  <TimelineEditor focusBgmKey={focusBgmKey} />
+                  <TimelineEditor
+                    scenes={generatedScenes}
+                    focusBgmKey={focusBgmKey}
+                    timelineDefaults={timelineDemo}
+                  />
                 </div>
               </>
             )}
