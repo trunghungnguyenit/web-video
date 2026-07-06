@@ -56,11 +56,11 @@ const API_KEYS_CONFIG: ApiKey[] = [
   },
   {
     id: 'tts',
-    name: 'Google TTS API Key',
-    role: 'Tạo giọng đọc · giọng nam/nữ · ngôn ngữ',
-    placeholder: 'AIzaSy...',
-    docsUrl: 'https://cloud.google.com/text-to-speech',
-    prefixHint: 'AIza',
+    name: 'ElevenLabs API Key',
+    role: 'Tạo giọng đọc · giọng nam/nữ · đa ngôn ngữ',
+    placeholder: 'sk_...',
+    docsUrl: 'https://elevenlabs.io/app/settings/api-keys',
+    prefixHint: 'sk_',
     minLength: 20,
   },
 ];

@@ -5,11 +5,14 @@ import {
   BookOpen, Pencil, Trash2, CheckCircle2, AlertCircle,
   Clock, ChevronRight, X, RotateCcw, Search, FileText,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatCount } from '@/lib/utils';
 import type { SavedScript, SavedScriptMeta } from '@/lib/saved-scripts';
 import {
-  VIDEO_TYPE_LABELS, LANGUAGE_LABELS, SCENE_COUNT_LABELS, VOICE_LABELS, formatRelativeDate, formatSceneCount,
+  VIDEO_TYPE_LABELS, LANGUAGE_LABELS, SCENE_COUNT_LABELS,
+  ASPECT_RATIO_LABELS, SCENE_DURATION_LABELS, VIDEO_QUALITY_LABELS,
+  formatRelativeDate, formatSceneCount, formatAspectRatio, formatSceneDuration,
 } from '@/lib/saved-scripts';
+import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
@@ -41,7 +44,11 @@ interface EditModalProps {
 function EditModal({ script, onClose, onSave }: EditModalProps) {
   const [title, setTitle] = useState(script.title);
   const [content, setContent] = useState(script.content);
-  const [meta, setMeta] = useState<SavedScriptMeta>({ ...script.meta });
+  const [meta, setMeta] = useState<SavedScriptMeta>({
+    ...script.meta,
+    aspectRatio: script.meta.aspectRatio ?? '16:9',
+    sceneDuration: script.meta.sceneDuration ?? '6',
+  });
   const [errors, setErrors] = useState<EditErrors>({});
   const [dirty, setDirty] = useState(false);
 
@@ -156,7 +163,7 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
                 'text-xs tabular-nums',
                 charCount > MAX * 0.9 ? 'text-destructive' : charCount > MAX * 0.7 ? 'text-yellow-400' : 'text-muted-foreground',
               )}>
-                {charCount.toLocaleString()} / {MAX.toLocaleString()}
+                {formatCount(charCount)} / {formatCount(MAX)}
               </span>
             </div>
             <textarea
@@ -185,12 +192,14 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
           </div>
 
           {/* Meta settings */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
             {[
               { key: 'language' as const, label: 'Ngôn ngữ', options: LANGUAGE_LABELS },
               { key: 'sceneCount' as const, label: 'Số lượng cảnh', options: SCENE_COUNT_LABELS },
               { key: 'videoType' as const, label: 'Kiểu video', options: VIDEO_TYPE_LABELS },
-              { key: 'voice' as const, label: 'Giọng đọc', options: VOICE_LABELS },
+              { key: 'aspectRatio' as const, label: 'Tỷ lệ video', options: ASPECT_RATIO_LABELS },
+              { key: 'sceneDuration' as const, label: 'Thời lượng cảnh', options: SCENE_DURATION_LABELS },
+              { key: 'videoQuality' as const, label: 'Chất lượng video', options: VIDEO_QUALITY_LABELS },
             ].map(({ key, label, options }) => (
               <div key={key} className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground">{label}</label>
@@ -205,6 +214,16 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
                 </select>
               </div>
             ))}
+          </div>
+          <div className="space-y-1.5 mt-3">
+            <label className="text-xs font-medium text-muted-foreground">Giọng đọc</label>
+            <VoiceSelect
+              value={meta.voice}
+              onChange={(voice) => setM('voice', voice)}
+              language={meta.language}
+              compact
+              selectClassName="w-full px-2.5 py-2 bg-background border border-border rounded-lg text-xs text-foreground focus:outline-none focus:border-primary/50 transition-colors"
+            />
           </div>
         </div>
 
@@ -431,6 +450,12 @@ export function SavedScriptsPanel({
                       </span>
                       <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
                         {formatSceneCount(script.meta.sceneCount)}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
+                        {formatAspectRatio(script.meta.aspectRatio ?? '16:9')}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
+                        {formatSceneDuration(script.meta.sceneDuration ?? '6')}
                       </span>
                       <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground/50 ml-auto">
                         <Clock className="w-3 h-3" />

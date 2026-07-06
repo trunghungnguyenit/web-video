@@ -1,5 +1,10 @@
 import type { VideoScene } from '@/lib/scenes';
 
+function qualityDimensions(quality?: string): { width: number; height: number } {
+  if (quality === '1080p') return { width: 1920, height: 1080 };
+  return { width: 1280, height: 720 };
+}
+
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -29,9 +34,9 @@ function wrapText(
 /** Tạo clip video placeholder (WebM) cho cảnh — mô phỏng output AI video */
 export async function createScenePlaceholderVideo(
   scene: Pick<VideoScene, 'index' | 'prompt' | 'voice' | 'durationSeconds'>,
+  videoQuality = '720p',
 ): Promise<string> {
-  const width = 1280;
-  const height = 720;
+  const { width, height } = qualityDimensions(videoQuality);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -100,7 +105,7 @@ export async function createScenePlaceholderVideo(
 
       ctx.fillStyle = 'rgba(148, 163, 184, 0.8)';
       ctx.font = '16px system-ui, sans-serif';
-      ctx.fillText(`${scene.durationSeconds}s · AI Video Studio`, 72, height - 36);
+      ctx.fillText(`${scene.durationSeconds}s · ${videoQuality} · AI Video Studio`, 72, height - 36);
 
       requestAnimationFrame(draw);
     };
@@ -111,21 +116,4 @@ export async function createScenePlaceholderVideo(
 
 export function revokeSceneVideoUrl(url?: string) {
   if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
-}
-
-/** Gắn clip video placeholder cho các cảnh đã hoàn thành */
-export async function attachVideosToScenes(scenes: VideoScene[]): Promise<VideoScene[]> {
-  const results = await Promise.all(
-    scenes.map(async (scene) => {
-      if (scene.status !== 'success' && scene.status !== 'edited') return scene;
-      revokeSceneVideoUrl(scene.videoUrl);
-      try {
-        const videoUrl = await createScenePlaceholderVideo(scene);
-        return { ...scene, videoUrl, status: 'success' as const };
-      } catch {
-        return { ...scene, status: 'error' as const };
-      }
-    }),
-  );
-  return results;
 }

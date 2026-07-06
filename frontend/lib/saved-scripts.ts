@@ -5,6 +5,9 @@ export interface SavedScriptMeta {
   sceneCount: string;
   videoType: string;
   voice: string;
+  aspectRatio: string;
+  sceneDuration: string;
+  videoQuality?: string;
 }
 
 export interface SavedScript {
@@ -61,7 +64,54 @@ export const VOICE_LABELS: Record<string, string> = {
   'female-natural': 'Nữ – tự nhiên',
   'male-pro': 'Nam – chuyên nghiệp',
   'female-young': 'Nữ – trẻ trung',
+
 };
+
+export const VOICE_OPTIONS = Object.entries(VOICE_LABELS) as [string, string][];
+
+export const ASPECT_RATIO_LABELS: Record<string, string> = {
+  '16:9': 'Ngang (16:9)',
+  '9:16': 'Dọc (9:16)',
+  '1:1': 'Vuông (1:1)',
+};
+
+export const ASPECT_RATIO_OPTIONS = Object.entries(ASPECT_RATIO_LABELS) as [string, string][];
+
+export const VIDEO_QUALITY_LABELS: Record<string, string> = {
+  '720p': '720p – Tiêu chuẩn',
+  '1080p': '1080p – HD cao',
+  '720p-fast': '720p – Nhanh (Veo Fast)',
+};
+
+export const VIDEO_QUALITY_OPTIONS = Object.entries(VIDEO_QUALITY_LABELS) as [string, string][];
+
+export function formatVideoQuality(value: string): string {
+  return VIDEO_QUALITY_LABELS[value] ?? value;
+}
+
+export function formatAspectRatio(value: string): string {
+  return ASPECT_RATIO_LABELS[value] ?? value;
+}
+
+export const SCENE_DURATION_LABELS: Record<string, string> = {
+  auto: 'Tự động (4–8 giây · Veo 3)',
+  '4': '4 giây/cảnh',
+  '6': '6 giây/cảnh',
+  '8': '8 giây/cảnh',
+};
+
+export const SCENE_DURATION_OPTIONS = Object.entries(SCENE_DURATION_LABELS) as [string, string][];
+
+export function formatSceneDuration(value: string): string {
+  return SCENE_DURATION_LABELS[value] ?? `${value}s/cảnh`;
+}
+
+export {
+  getSceneDurationOptions,
+  normalizeSceneDurationSetting,
+  snapToVeoDuration,
+  VEO_SCENE_DURATIONS,
+} from '@/lib/veo-duration';
 
 /** Format thời gian ngắn gọn: "hôm nay 14:30", "hôm qua", "3 ngày trước"... */
 export function formatRelativeDate(isoString: string): string {

@@ -1,17 +1,19 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, Images, Film } from 'lucide-react';
+import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PresetScript } from '@/lib/preset-scripts';
-import { getPresetSummary } from '@/lib/preset-demo-builder';
+import { ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
+import { VoiceSelect } from '@/components/features/voice-select/voice-select';
+import { useDefaultVeoModel, useVeoModels } from '@/hooks/use-veo-models';
 interface PresetScriptModalProps {
   preset: PresetScript | null;
   onClose: () => void;
   onApply: (preset: PresetScript) => void;
 }
 
-type Section = 'character' | 'input' | 'scenes' | 'timeline' | 'none';
+type Section = 'character' | 'input' | 'none';
 export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModalProps) {
   // Bản chỉnh sửa — clone để user có thể sửa mà không ảnh hưởng dữ liệu gốc
   const [draft, setDraft] = useState<PresetScript | null>(null);
@@ -38,7 +40,30 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
     if (preset) setDraft(JSON.parse(JSON.stringify(preset)));
   }, [preset]);
 
+  const { models: veoModels, loading: veoModelsLoading, hasKey: hasVeoKey } = useVeoModels();
+
+  const pickVeoModel = useCallback((modelId: string) => {
+    setDraft((d) => d ? { ...d, input: { ...d.input, veoModel: modelId } } : d);
+  }, []);
+
+  useDefaultVeoModel(
+    veoModels,
+    draft?.input.videoQuality ?? '720p',
+    draft?.input.veoModel ?? '',
+    pickVeoModel,
+  );
+
+  useEffect(() => {
+    setDraft((d) => {
+      if (!d) return d;
+      const next = normalizeSceneDurationSetting(d.input.sceneDuration, d.input.videoQuality);
+      return next === d.input.sceneDuration ? d : { ...d, input: { ...d.input, sceneDuration: next } };
+    });
+  }, [draft?.input.videoQuality]);
+
   if (!preset || !draft) return null;
+
+  const sceneDurationOptions = getSceneDurationOptions(draft.input.videoQuality ?? '720p');
 
   const setChar = (field: keyof PresetScript['character'], value: string) => {
     setDraft((d) => d ? { ...d, character: { ...d.character, [field]: value } } : d);
@@ -55,9 +80,6 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
   const toggleSection = (s: Section) =>
     setOpenSection((prev) => (prev === s ? 'none' : s));
 
-  const summary = getPresetSummary(draft);
-  const totalMin = Math.floor(summary.totalDuration / 60);
-  const totalSec = summary.totalDuration % 60;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
@@ -69,7 +91,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
 
       {/* Modal */}
       <div
-        className="relative z-10 w-full max-w-2xl max-h-[90vh] bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
+        className="relative z-10 w-full max-w-3xl max-h-[90vh] bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-label={`Kịch bản mẫu: ${preset.title}`}
@@ -107,18 +129,11 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto">
           {/* Info banner */}
-          <div className="mx-6 mt-4 mb-2 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl space-y-2">
+          <div className="mx-6 mt-4 mb-2 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl">
             <p className="text-xs text-muted-foreground leading-relaxed">
-              <span className="text-primary font-semibold">Demo đầy đủ 4 mục</span> — Áp dụng sẽ điền nhân vật, nội dung,
-              {summary.sceneCount} cảnh video (prompt + TTS) và timeline FFmpeg (~{totalMin}:{String(totalSec).padStart(2, '0')}).
+              <span className="text-primary font-semibold">Kịch bản mẫu</span> — Áp dụng sẽ điền nhân vật, nội dung và cài đặt vào mục 1 &amp; 2.
+              Nhấn <strong className="text-foreground">Phân tích &amp; Tạo Kịch Bản</strong> ở mục 2 để AI sinh danh sách cảnh và timeline.
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              {['1. Nhân vật', '2. Nội dung', '3. Cảnh', '4. Timeline'].map((tag) => (
-                <span key={tag} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
-                  {tag}
-                </span>
-              ))}
-            </div>
           </div>
           {/* ── Section 1: Character ───────────────────────────────────── */}
           <div className="mx-6 mt-4 border border-border rounded-xl overflow-hidden">
@@ -225,7 +240,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
             >
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold text-foreground">2. Nội dung video</span>
+                <span className="text-sm font-semibold text-foreground">2. Nội dung &amp; cài đặt</span>
                 <span className="text-xs text-muted-foreground">({draft.input.sceneCount} cảnh · {draft.input.videoType})</span>
               </div>
               {openSection === 'input'
@@ -256,131 +271,105 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
                   />
                 </div>
 
-                {/* Config row */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div>
-                    <label className="field-label block mb-1.5">Ngôn ngữ</label>
-                    <select value={draft.input.language} onChange={(e) => setInput('language', e.target.value)} className="input-base">
-                      <option value="vi">Tiếng Việt</option>
-                      <option value="en">English</option>
-                      <option value="zh">中文</option>
-                      <option value="ja">日本語</option>
-                    </select>
+                {/* Config — layout giống form chính (mục 2) */}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="field-label block mb-1.5">Ngôn ngữ</label>
+                      <select value={draft.input.language} onChange={(e) => setInput('language', e.target.value)} className="input-base w-full min-w-0">
+                        <option value="vi">Tiếng Việt</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                        <option value="ja">日本語</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Số lượng cảnh</label>
+                      <select value={draft.input.sceneCount} onChange={(e) => setInput('sceneCount', e.target.value)} className="input-base w-full min-w-0">
+                        <option value="3">3 cảnh</option>
+                        <option value="5">5 cảnh</option>
+                        <option value="8">8 cảnh</option>
+                        <option value="10">10 cảnh</option>
+                        <option value="15">15 cảnh</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Kiểu video</label>
+                      <select value={draft.input.videoType} onChange={(e) => setInput('videoType', e.target.value)} className="input-base w-full min-w-0">
+                        <option value="storytelling">Kể chuyện</option>
+                        <option value="tutorial">Hướng dẫn</option>
+                        <option value="ads">Quảng cáo</option>
+                        <option value="review">Review</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Tỷ lệ video</label>
+                      <select value={draft.input.aspectRatio ?? '16:9'} onChange={(e) => setInput('aspectRatio', e.target.value)} className="input-base w-full min-w-0">
+                        {ASPECT_RATIO_OPTIONS.map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Thời lượng cảnh</label>
+                      <select
+                        value={draft.input.sceneDuration ?? '6'}
+                        onChange={(e) => setInput('sceneDuration', e.target.value)}
+                        disabled={draft.input.videoQuality === '1080p'}
+                        className="input-base w-full min-w-0 disabled:opacity-60"
+                      >
+                        {sceneDurationOptions.map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Chất lượng video</label>
+                      <select value={draft.input.videoQuality ?? '720p'} onChange={(e) => setInput('videoQuality', e.target.value)} className="input-base w-full min-w-0">
+                        {VIDEO_QUALITY_OPTIONS.map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="field-label block mb-1.5">Số lượng cảnh</label>
-                    <select value={draft.input.sceneCount} onChange={(e) => setInput('sceneCount', e.target.value)} className="input-base">
-                      <option value="3">3 cảnh</option>
-                      <option value="5">5 cảnh</option>
-                      <option value="8">8 cảnh</option>
-                      <option value="10">10 cảnh</option>
-                      <option value="15">15 cảnh</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label block mb-1.5">Kiểu video</label>
-                    <select value={draft.input.videoType} onChange={(e) => setInput('videoType', e.target.value)} className="input-base">
-                      <option value="storytelling">Kể chuyện</option>
-                      <option value="tutorial">Hướng dẫn</option>
-                      <option value="ads">Quảng cáo</option>
-                      <option value="review">Review</option>
-                    </select>
-                  </div>
+
+                  {hasVeoKey && (
+                    <div>
+                      <label className="field-label block mb-1.5">Model Veo</label>
+                      <div className="relative">
+                        <select
+                          value={draft.input.veoModel ?? ''}
+                          onChange={(e) => setInput('veoModel', e.target.value)}
+                          disabled={veoModelsLoading || veoModels.length === 0}
+                          className="input-base w-full min-w-0 disabled:opacity-60"
+                        >
+                          {veoModelsLoading && <option value="">Đang tải model...</option>}
+                          {!veoModelsLoading && veoModels.map((m) => (
+                            <option key={m.id} value={m.id}>{m.displayName}</option>
+                          ))}
+                        </select>
+                        {veoModelsLoading && (
+                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin pointer-events-none" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <label className="field-label block mb-1.5">Giọng đọc</label>
-                    <select value={draft.input.voice} onChange={(e) => setInput('voice', e.target.value)} className="input-base">
-                      <option value="male-natural">Nam – tự nhiên</option>
-                      <option value="female-natural">Nữ – tự nhiên</option>
-                      <option value="male-pro">Nam – chuyên nghiệp</option>
-                      <option value="female-young">Nữ – trẻ trung</option>
-                    </select>
+                    <VoiceSelect
+                      value={draft.input.voice}
+                      onChange={(voice) => setInput('voice', voice)}
+                      language={draft.input.language}
+                      voiceSpeed={draft.input.voiceSpeed ?? 1}
+                    />
                   </div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* ── Section 3: Demo scenes ─────────────────────────────────── */}
-          <div className="mx-6 mt-3 border border-border rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => toggleSection('scenes')}
-              className="w-full flex items-center justify-between px-4 py-3 bg-background/50 hover:bg-muted/30 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Images className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold text-foreground">3. Danh sách cảnh</span>
-                <span className="text-xs text-muted-foreground">({draft.demoScenes.length} cảnh demo)</span>
-              </div>
-              {openSection === 'scenes'
-                ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                : <ChevronDown className="w-4 h-4 text-muted-foreground" />
-              }
-            </button>
-
-            {openSection === 'scenes' && (
-              <div className="px-4 py-4 space-y-2 border-t border-border max-h-64 overflow-y-auto">
-                {draft.demoScenes.map((scene, i) => (
-                  <div key={i} className="p-3 rounded-lg bg-muted/20 border border-border/60 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-primary">Cảnh {i + 1}</span>
-                      <span className="text-[10px] text-muted-foreground">{scene.durationSeconds}s</span>
-                    </div>
-                    <p className="text-[11px] text-foreground line-clamp-2"><span className="font-semibold text-muted-foreground">Prompt:</span> {scene.prompt}</p>
-                    <p className="text-[11px] text-foreground line-clamp-1"><span className="font-semibold text-muted-foreground">TTS:</span> {scene.voice}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* ── Section 4: Timeline ────────────────────────────────────── */}
-          <div className="mx-6 mt-3 mb-6 border border-border rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => toggleSection('timeline')}
-              className="w-full flex items-center justify-between px-4 py-3 bg-background/50 hover:bg-muted/30 transition-colors cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Film className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold text-foreground">4. Timeline · FFmpeg</span>
-                <span className="text-xs text-muted-foreground">(chỉnh sửa &amp; tải video)</span>
-              </div>
-              {openSection === 'timeline'
-                ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                : <ChevronDown className="w-4 h-4 text-muted-foreground" />
-              }
-            </button>
-
-            {openSection === 'timeline' && (
-              <div className="px-4 py-4 space-y-2 border-t border-border text-xs">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 rounded-lg bg-muted/20 border border-border/50">
-                    <span className="text-muted-foreground block text-[10px] uppercase">Phụ đề TTS</span>
-                    <span className="font-medium text-foreground">{draft.timeline.includeSubtitles ? 'Bật' : 'Tắt'}</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-muted/20 border border-border/50">
-                    <span className="text-muted-foreground block text-[10px] uppercase">Nhạc nền</span>
-                    <span className="font-medium text-foreground">{draft.timeline.bgmPresetName}</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-muted/20 border border-border/50">
-                    <span className="text-muted-foreground block text-[10px] uppercase">Volume BGM</span>
-                    <span className="font-medium text-foreground">{draft.timeline.bgmVolume}%</span>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-muted/20 border border-border/50">
-                    <span className="text-muted-foreground block text-[10px] uppercase">Tốc độ giọng</span>
-                    <span className="font-medium text-foreground">{draft.timeline.voiceSpeed}×</span>
-                  </div>
-                </div>
-                {draft.timeline.transitionNote && (
-                  <p className="text-muted-foreground pt-1">{draft.timeline.transitionNote}</p>
-                )}
-                <p className="text-[10px] text-primary/80 pt-1">
-                  Sau khi áp dụng: scroll mục 4 → RENDER &amp; TẢI VIDEO để ghép cảnh + nhạc + phụ đề bằng FFmpeg.
-                </p>
-              </div>
-            )}
-          </div>
+          <div className="h-6" />
         </div>
         {/* Footer actions */}
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border flex-shrink-0 bg-background/50">
@@ -397,7 +386,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
             className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors cursor-pointer"
           >
             <CheckCircle2 className="w-4 h-4" />
-            Áp dụng demo đầy đủ
+            Áp dụng kịch bản
           </button>
         </div>
       </div>

@@ -17,6 +17,10 @@ export interface PresetInput {
   sceneCount: string;
   videoType: string;
   voice: string;
+  aspectRatio: string;
+  sceneDuration: string;
+  videoQuality?: string;
+  veoModel?: string;
   /** Demo: tốc độ giọng TTS (mục 2) */
   voiceSpeed?: number;
   /** Demo: id phong cách cảnh (mục 2) */
@@ -136,6 +140,8 @@ export const PRESET_SCRIPTS: PresetScript[] = [
       sceneCount: '5',
       videoType: 'review',
       voice: 'male-natural',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
       voiceSpeed: 1,
       sceneStyleId: 'cinematic',
     },
@@ -161,6 +167,8 @@ export const PRESET_SCRIPTS: PresetScript[] = [
       sceneCount: '5',
       videoType: 'storytelling',
       voice: 'female-young',
+      aspectRatio: '9:16',
+      sceneDuration: '4',
       voiceSpeed: 1.25,
       sceneStyleId: 'anime',
     },
@@ -186,6 +194,8 @@ export const PRESET_SCRIPTS: PresetScript[] = [
       sceneCount: '5',
       videoType: 'ads',
       voice: 'male-pro',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
       voiceSpeed: 1,
       sceneStyleId: 'cinematic',
     },
@@ -209,6 +219,8 @@ export const PRESET_SCRIPTS: PresetScript[] = [
       sceneCount: '10',
       videoType: 'tutorial',
       voice: 'female-natural',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
       voiceSpeed: 0.9,
       sceneStyleId: 'flat-design',
     },

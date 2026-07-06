@@ -1,13 +1,14 @@
 'use client';
 
-import { useState, useCallback, type Dispatch, type SetStateAction } from 'react';
+import { useState, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
 import {
-  ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film,
+  ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film, Volume2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { VideoScene } from '@/lib/scenes';
 import { formatSceneTimeRange, recalculateSceneTimings } from '@/lib/scenes';
-import { createScenePlaceholderVideo, revokeSceneVideoUrl } from '@/lib/scene-video-placeholder';
+import { regenerateSceneAssets } from '@/lib/scene-tts';
+import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { SceneToolbar } from './scene-toolbar';
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
@@ -16,7 +17,7 @@ interface SceneEditModalProps {
   scene: VideoScene;
   onClose: () => void;
   onSave: (updated: Pick<VideoScene, 'prompt' | 'voice'>) => void;
-  onRegenerate: () => void;
+  onRegenerate: (updated: Pick<VideoScene, 'prompt' | 'voice'>) => void;
   isRegenerating: boolean;
 }
 
@@ -31,6 +32,14 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
     if (!voice.trim()) errs.voice = 'Lời thoại TTS không được để trống.';
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
     onSave({ prompt: prompt.trim(), voice: voice.trim() });
+  };
+
+  const handleRegenerate = () => {
+    const errs: typeof errors = {};
+    if (!prompt.trim()) errs.prompt = 'Video prompt không được để trống.';
+    if (!voice.trim()) errs.voice = 'Lời thoại TTS không được để trống.';
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    onRegenerate({ prompt: prompt.trim(), voice: voice.trim() });
   };
 
   const isDirty = prompt.trim() !== scene.prompt || voice.trim() !== scene.voice;
@@ -117,12 +126,12 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
         <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border bg-background/50">
           <button
             type="button"
-            onClick={onRegenerate}
+            onClick={handleRegenerate}
             disabled={isRegenerating}
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-orange-400 border border-orange-500/30 hover:bg-orange-500/10 rounded-lg transition-colors disabled:opacity-50"
           >
             <RefreshCw className={cn('w-3.5 h-3.5', isRegenerating && 'animate-spin')} />
-            {isRegenerating ? 'Đang tạo lại...' : 'Tạo lại video'}
+            {isRegenerating ? 'Đang tạo lại...' : 'Tạo lại TTS + video'}
           </button>
           <div className="flex gap-2">
             <button
@@ -135,10 +144,14 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
             <button
               type="button"
               onClick={handleSave}
-              className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors"
+              disabled={isRegenerating}
+              className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors disabled:opacity-50"
             >
-              <CheckCircle2 className="w-4 h-4" />
-              Lưu thay đổi
+              {isRegenerating ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />Đang tạo lại...</>
+              ) : (
+                <><CheckCircle2 className="w-4 h-4" />Lưu &amp; tạo lại TTS</>
+              )}
             </button>
           </div>
         </div>
@@ -187,9 +200,15 @@ function StatusBadge({ status }: { status: VideoScene['status'] }) {
 interface SceneGalleryProps {
   scenes: VideoScene[];
   onScenesChange: Dispatch<SetStateAction<VideoScene[]>>;
+  ttsInput?: TtsInput | null;
+  veoInput?: VeoInput | null;
+  /** Báo timeline (mục 4) focus đúng cảnh đang sửa */
+  onSceneFocus?: (sceneId: string) => void;
 }
 
-export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
+export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSceneFocus }: SceneGalleryProps) {
+  const scenesRef = useRef(scenes);
+  scenesRef.current = scenes;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [regeneratingIds, setRegeneratingIds] = useState<string[]>([]);
@@ -198,6 +217,8 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
 
   const errorScenes = scenes.filter((s) => s.status === 'error');
   const editedScenes = scenes.filter((s) => s.status === 'edited');
+  const generatingCount = scenes.filter((s) => s.status === 'generating').length;
+  const doneCount = scenes.filter((s) => s.status === 'success').length;
   const allSelected = selectedIds.length === scenes.length && scenes.length > 0;
 
   const showToast = (msg: string) => {
@@ -211,59 +232,68 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
     );
   };
 
-  const regenerateScenes = useCallback(async (ids: string[]) => {
+  const regenerateScenes = useCallback(async (
+    ids: string[],
+    overrides?: Record<string, Pick<VideoScene, 'prompt' | 'voice'>>,
+  ) => {
     if (ids.length === 0) return;
+    if (!ttsInput?.apiKey?.trim()) {
+      showToast('Thiếu ElevenLabs API Key — vào mục API Keys.');
+      return;
+    }
+    if (!veoInput) {
+      showToast('Thiếu cấu hình Veo — submit lại mục 2.');
+      return;
+    }
 
     setIsRegenerating(true);
     setRegeneratingIds(ids);
+    onSceneFocus?.(ids[0]);
     onScenesChange((prev) =>
       prev.map((s) => (ids.includes(s.id) ? { ...s, status: 'generating' as const } : s)),
     );
 
-    await new Promise((r) => setTimeout(r, 1200));
-
-    const updated = await Promise.all(
+    const patches = await Promise.all(
       ids.map(async (id) => {
-        const scene = scenes.find((s) => s.id === id);
+        const scene = scenesRef.current.find((s) => s.id === id);
         if (!scene) return null;
-        revokeSceneVideoUrl(scene.videoUrl);
+        const patch = overrides?.[id];
+        const working: VideoScene = patch ? { ...scene, ...patch } : scene;
         try {
-          const videoUrl = await createScenePlaceholderVideo(scene);
-          return { id, videoUrl, status: 'success' as const };
-        } catch {
-          return { id, videoUrl: undefined, status: 'error' as const };
+          const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput);
+          return { id, scene: rebuilt };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Tạo lại cảnh thất bại';
+          return { id, scene: { ...working, status: 'error' as const }, error: message };
         }
       }),
     );
 
+    let firstError: string | undefined;
     onScenesChange((prev) =>
       recalculateSceneTimings(
         prev.map((s) => {
-          const patch = updated.find((u) => u?.id === s.id);
-          if (!patch) return s;
-          return { ...s, videoUrl: patch.videoUrl, status: patch.status };
+          const result = patches.find((p) => p?.id === s.id);
+          if (!result) return s;
+          if (result.error) firstError = result.error;
+          return result.scene;
         }),
       ),
     );
+
     setIsRegenerating(false);
     setRegeneratingIds([]);
-    showToast(`Đã tạo lại ${ids.length} cảnh thành công`);
-  }, [onScenesChange, scenes]);
+    onSceneFocus?.(ids[0]);
+    if (firstError) {
+      showToast(firstError);
+    } else {
+      showToast(`Đã tạo lại TTS + video cho ${ids.length} cảnh`);
+    }
+  }, [onScenesChange, ttsInput, veoInput, onSceneFocus]);
 
-  const handleSaveEdit = (id: string, data: Pick<VideoScene, 'prompt' | 'voice'>) => {
-    const words = data.voice.split(/\s+/).filter(Boolean).length;
-    const durationSeconds = Math.min(8, Math.max(5, Math.round(words / 2.5) || 5));
-    onScenesChange((prev) =>
-      recalculateSceneTimings(
-        prev.map((s) =>
-          s.id === id
-            ? { ...s, ...data, durationSeconds, status: 'edited' as const }
-            : s,
-        ),
-      ),
-    );
+  const handleSaveEdit = async (id: string, data: Pick<VideoScene, 'prompt' | 'voice'>) => {
     setEditTarget(null);
-    showToast('Đã lưu — bấm "Tạo lại video" để render cảnh đã sửa');
+    await regenerateScenes([id], { [id]: data });
   };
 
   const handleSceneAction = (action: string) => {
@@ -342,11 +372,19 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
             Sinh từ mục 2 · Sửa prompt/TTS từng cảnh · Tạo lại video sau khi chỉnh sửa
           </p>
         </div>
-        {toast && (
-          <span className="text-xs text-primary bg-primary/10 px-3 py-1 rounded-full animate-in fade-in">
-            {toast}
-          </span>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {generatingCount > 0 && (
+            <span className="flex items-center gap-1.5 text-xs text-primary bg-primary/10 border border-primary/20 px-3 py-1 rounded-full">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Đang tạo {doneCount}/{scenes.length} cảnh
+            </span>
+          )}
+          {toast && (
+            <span className="text-xs text-primary bg-primary/10 px-3 py-1 rounded-full animate-in fade-in">
+              {toast}
+            </span>
+          )}
+        </div>
       </div>
 
       <SceneToolbar
@@ -379,7 +417,7 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
                 }
               }}
               className={cn(
-                'text-left bg-card border rounded-lg overflow-hidden transition-colors cursor-pointer select-none',
+                'text-left bg-card border rounded-lg overflow-hidden transition-colors cursor-pointer select-none min-w-0',
                 isSelected
                   ? 'border-primary ring-1 ring-primary/40'
                   : isError
@@ -389,31 +427,49 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
                       : 'border-border hover:border-primary/50',
               )}
             >
-              <div className="w-full aspect-[4/3] bg-muted relative flex items-center justify-center overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-                <ImageIcon className={cn(
-                  'w-12 h-12',
-                  isError ? 'text-destructive/50' : isEdited ? 'text-orange-400/50' : 'text-muted-foreground',
-                )} />
+              <div className="w-full aspect-[4/3] bg-muted relative overflow-hidden isolate">
+                {scene.videoUrl ? (
+                  <>
+                    <video
+                      src={scene.videoUrl}
+                      className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+                      muted
+                      playsInline
+                      preload="metadata"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10 z-[1] pointer-events-none" />
+                  </>
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    {isGenerating ? (
+                      <Loader2 className="w-10 h-10 text-primary animate-spin" />
+                    ) : (
+                      <ImageIcon className={cn(
+                        'w-12 h-12',
+                        isError ? 'text-destructive/50' : isEdited ? 'text-orange-400/50' : 'text-muted-foreground',
+                      )} />
+                    )}
+                  </div>
+                )}
 
-                <div className="absolute top-2 left-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground">
+                <div className="absolute top-2 left-2 w-6 h-6 bg-primary rounded-full flex items-center justify-center text-xs font-bold text-primary-foreground z-[2]">
                   {scene.index}
                 </div>
 
-                <div className="absolute top-2 right-2 text-xs font-semibold bg-background/80 px-2 py-1 rounded text-foreground">
+                <div className="absolute top-2 right-2 text-xs font-semibold bg-background/80 px-2 py-1 rounded text-foreground z-[2]">
                   {formatSceneTimeRange(scene).split(' - ')[1]}
                 </div>
 
                 <StatusBadge status={scene.status} />
 
                 {isSelected && (
-                  <div className="absolute bottom-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                  <div className="absolute bottom-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center z-[2]">
                     <span className="text-primary-foreground text-xs">✓</span>
                   </div>
                 )}
               </div>
 
-              <div className="p-3 space-y-2">
+              <div className="p-3 space-y-2 min-w-0 overflow-hidden">
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Video Prompt</p>
                   <p className="text-xs text-foreground line-clamp-2">{scene.prompt}</p>
@@ -421,7 +477,23 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
 
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Voice (TTS)</p>
-                  <p className="text-xs text-foreground line-clamp-1">{scene.voice}</p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs text-foreground line-clamp-1 flex-1">{scene.voice}</p>
+                    {scene.audioUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const audio = new Audio(scene.audioUrl);
+                          void audio.play();
+                        }}
+                        className="shrink-0 p-1 text-primary hover:bg-primary/10 rounded transition-colors"
+                        title="Nghe thử giọng đọc"
+                      >
+                        <Volume2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-border gap-1">
@@ -467,9 +539,9 @@ export function SceneGallery({ scenes, onScenesChange }: SceneGalleryProps) {
             key={live.id}
             scene={live}
             onClose={() => setEditTarget(null)}
-            onSave={(data) => handleSaveEdit(live.id, data)}
-            onRegenerate={() => {
-              regenerateScenes([live.id]);
+            onSave={(data) => void handleSaveEdit(live.id, data)}
+            onRegenerate={(data) => {
+              void regenerateScenes([live.id], { [live.id]: data });
               setEditTarget(null);
             }}
             isRegenerating={regeneratingIds.includes(live.id)}

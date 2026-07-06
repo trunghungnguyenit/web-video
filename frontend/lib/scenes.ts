@@ -1,5 +1,11 @@
 // ─── Kiểu dữ liệu cảnh video ────────────────────────────────────────────────
 
+import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
+import {
+  resolveSceneDurationSeconds,
+  snapToVeoDuration,
+} from '@/lib/veo-duration';
+
 export type SceneStatus = 'generating' | 'success' | 'error' | 'edited';
 
 export interface VideoScene {
@@ -13,6 +19,10 @@ export interface VideoScene {
   status: SceneStatus;
   /** Blob URL clip video — sinh sau khi cảnh hoàn thiện ở mục 3 */
   videoUrl?: string;
+  /** Blob URL audio MP3 — ElevenLabs TTS từ voiceover */
+  audioUrl?: string;
+  /** Độ dài thực của MP3 (giây) — dùng sync timeline */
+  audioDurationSeconds?: number;
 }
 
 export interface SceneGenerationInput {
@@ -20,6 +30,9 @@ export interface SceneGenerationInput {
   sceneCount: string | number;
   videoType: string;
   language: string;
+  aspectRatio?: string;
+  sceneDuration?: string;
+  videoQuality?: string;
   sceneStyle?: string;
 }
 
@@ -29,6 +42,10 @@ export interface SceneGenerationResult {
   sceneCount: string;
   videoType: string;
   language: string;
+  aspectRatio: string;
+  sceneDuration: string;
+  veoInput: VeoInput;
+  ttsInput: TtsInput;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -106,17 +123,25 @@ function bucketSegments(segments: string[], count: number): string[] {
   return result.slice(0, count);
 }
 
+const ASPECT_RATIO_PROMPT_HINT: Record<string, string> = {
+  '16:9': '16:9 landscape',
+  '9:16': '9:16 vertical portrait',
+  '1:1': '1:1 square',
+};
+
 function buildVideoPrompt(
   chunk: string,
   index: number,
   total: number,
   videoType: string,
   sceneStyle?: string,
+  aspectRatio?: string,
 ): string {
   const hint = VIDEO_TYPE_PROMPT_HINT[videoType] ?? 'Video frame';
   const style = sceneStyle ? `, ${sceneStyle} style` : '';
+  const ratio = aspectRatio ? `, ${ASPECT_RATIO_PROMPT_HINT[aspectRatio] ?? aspectRatio}` : '';
   const visual = chunk.replace(/\n/g, ' ').trim();
-  return `${hint} — Cảnh ${index}/${total}${style}: ${visual.slice(0, 280)}`;
+  return `${hint} — Cảnh ${index}/${total}${style}${ratio}: ${visual.slice(0, 280)}`;
 }
 
 function buildVoiceText(chunk: string): string {
@@ -127,9 +152,12 @@ function buildVoiceText(chunk: string): string {
     .slice(0, 400);
 }
 
-function estimateDuration(voice: string): number {
-  const words = voice.split(/\s+/).filter(Boolean).length;
-  return Math.min(8, Math.max(5, Math.round(words / 2.5) || 5));
+function resolveSceneDuration(
+  raw: string | undefined,
+  voice: string,
+  videoQuality?: string,
+): number {
+  return resolveSceneDurationSeconds(raw, voice, videoQuality);
 }
 
 function formatTime(seconds: number): string {
@@ -142,13 +170,48 @@ export function formatSceneTimeRange(scene: VideoScene): string {
   return `${formatTime(scene.timeStart)} - ${formatTime(scene.timeEnd)}`;
 }
 
+/** Tìm cảnh chứa playhead — fallback cảnh gần nhất, không nhảy về cảnh 1 */
+export function findSceneAtPlayhead(scenes: VideoScene[], playhead: number): VideoScene | null {
+  if (scenes.length === 0) return null;
+
+  const exact = scenes.find((s) => playhead >= s.timeStart && playhead < s.timeEnd);
+  if (exact) return exact;
+
+  if (playhead >= scenes[scenes.length - 1].timeEnd) {
+    return scenes[scenes.length - 1];
+  }
+
+  let best = scenes[0];
+  for (const s of scenes) {
+    if (s.timeStart <= playhead) best = s;
+  }
+  return best;
+}
+
+export function sceneEffectiveDuration(scene: VideoScene): number {
+  if (scene.audioDurationSeconds != null && scene.audioDurationSeconds > 0) {
+    const fromAudio = Math.ceil((scene.audioDurationSeconds + 0.5) * 10) / 10;
+    return Math.max(scene.durationSeconds, fromAudio);
+  }
+  return scene.durationSeconds;
+}
+
+export function scenesTimingSignature(scenes: VideoScene[]): string {
+  return scenes
+    .map((s) =>
+      `${s.id}:${s.timeStart}-${s.timeEnd}:${s.durationSeconds}:${s.audioDurationSeconds ?? ''}:${s.status}`,
+    )
+    .join('|');
+}
+
 export function recalculateSceneTimings(scenes: VideoScene[]): VideoScene[] {
   let cursor = 0;
   return scenes.map((scene, i) => {
+    const durationSeconds = sceneEffectiveDuration(scene);
     const timeStart = cursor;
-    const timeEnd = cursor + scene.durationSeconds;
+    const timeEnd = cursor + durationSeconds;
     cursor = timeEnd;
-    return { ...scene, index: i + 1, timeStart, timeEnd };
+    return { ...scene, index: i + 1, timeStart, timeEnd, durationSeconds };
   });
 }
 
@@ -167,8 +230,13 @@ export function generateScenesFromContent(input: SceneGenerationInput): VideoSce
       count,
       input.videoType,
       input.sceneStyle,
+      input.aspectRatio,
     );
-    const durationSeconds = estimateDuration(voice);
+    const durationSeconds = resolveSceneDuration(
+      input.sceneDuration,
+      voice,
+      input.videoQuality,
+    );
     const timeStart = cursor;
     const timeEnd = cursor + durationSeconds;
     cursor = timeEnd;
@@ -186,4 +254,41 @@ export function generateScenesFromContent(input: SceneGenerationInput): VideoSce
   });
 
   return scenes;
+}
+
+/** Chuyển kịch bản JSON từ Gemini → VideoScene[] cho mục 3 */
+export function scenesFromGeminiScript(
+  script: { scenes: Array<{ visual: string; voiceover: string; durationSeconds?: number }> },
+  sceneDurationSetting?: string,
+  videoQuality?: string,
+): VideoScene[] {
+  const fixedDuration =
+    sceneDurationSetting && sceneDurationSetting !== 'auto'
+      ? parseInt(sceneDurationSetting, 10)
+      : null;
+
+  let cursor = 0;
+  const baseId = Date.now();
+
+  return script.scenes.map((scene, i) => {
+    const durationSeconds = fixedDuration && Number.isFinite(fixedDuration)
+      ? snapToVeoDuration(fixedDuration, videoQuality)
+      : scene.durationSeconds && scene.durationSeconds > 0
+        ? snapToVeoDuration(scene.durationSeconds, videoQuality)
+        : resolveSceneDurationSeconds(undefined, scene.voiceover, videoQuality);
+    const timeStart = cursor;
+    const timeEnd = cursor + durationSeconds;
+    cursor = timeEnd;
+
+    return {
+      id: `scene-${baseId}-${i}`,
+      index: i + 1,
+      timeStart,
+      timeEnd,
+      prompt: scene.visual.trim(),
+      voice: scene.voiceover.trim(),
+      durationSeconds,
+      status: 'success' as const,
+    };
+  });
 }

@@ -4,12 +4,18 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, ZoomIn, ZoomOut, Volume2, Download,
   Music, Upload, CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
-  Loader2, Film, Subtitles, Mic2,
+  Loader2, Film, Subtitles, Mic2, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { VideoScene } from '@/lib/scenes';
 import type { PresetTimelineDemo } from '@/lib/preset-scripts';
-import { formatSceneTimeRange } from '@/lib/scenes';
+import { formatSceneTimeRange, findSceneAtPlayhead, scenesTimingSignature } from '@/lib/scenes';
+import {
+  SCENE_TRANSITION_OPTIONS,
+  crossfadeAudio,
+  crossfadeVideo,
+  transitionMs,
+} from '@/lib/scene-transition';
 import { composeVideo, downloadBlob } from '@/lib/video-composer';
 
 const PRESET_TRACKS = [
@@ -33,22 +39,42 @@ interface TimelineEditorProps {
   scenes?: VideoScene[];
   focusBgmKey?: number;
   timelineDefaults?: PresetTimelineDemo | null;
+  /** Sau khi sửa cảnh ở mục 3 — timeline seek về đúng cảnh đó */
+  focusSceneId?: string | null;
+  onFocusSceneHandled?: () => void;
 }
 
-export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: TimelineEditorProps = {}) {
+export function TimelineEditor({
+  scenes = [],
+  focusBgmKey,
+  timelineDefaults,
+  focusSceneId,
+  onFocusSceneHandled,
+}: TimelineEditorProps = {}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgmSectionRef = useRef<HTMLDivElement>(null);
-  const previewRef = useRef<HTMLVideoElement>(null);
+  const previewARef = useRef<HTMLVideoElement>(null);
+  const previewBRef = useRef<HTMLVideoElement>(null);
+  const frontVideoIsA = useRef(true);
+  const ttsAudioRef = useRef<HTMLAudioElement>(null);
+  const ttsAudioBRef = useRef<HTMLAudioElement>(null);
+  const activeTtsIsMain = useRef(true);
+  const isTransitioningRef = useRef(false);
+  const ttsSceneIdRef = useRef<string | null>(null);
+  const playheadRef = useRef(0);
+  const prevScenesRef = useRef<VideoScene[]>([]);
 
   const readyScenes = useMemo(
-    () => scenes.filter((s) => s.status === 'success' || s.status === 'edited'),
+    () => scenes.filter((s) =>
+      s.status === 'success' || s.status === 'edited' || s.status === 'generating',
+    ),
     [scenes],
   );
 
-  const totalDuration = useMemo(
-    () => readyScenes.reduce((sum, s) => sum + s.durationSeconds, 0),
-    [readyScenes],
-  );
+  const totalDuration = useMemo(() => {
+    if (readyScenes.length === 0) return 0;
+    return readyScenes[readyScenes.length - 1].timeEnd;
+  }, [readyScenes]);
 
   const timelineMarks = useMemo(() => {
     if (totalDuration <= 0) return [0];
@@ -60,9 +86,11 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
   }, [totalDuration]);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSceneId, setPlaybackSceneId] = useState<string | null>(null);
   const [volume, setVolume] = useState(80);
   const [zoom, setZoom] = useState(50);
   const [playhead, setPlayhead] = useState(0);
+  playheadRef.current = playhead;
 
   const [showBgm, setShowBgm] = useState(false);
   const [selectedTrack, setSelectedTrack] = useState<number | null>(null);
@@ -71,6 +99,8 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
   const [bgmVolume, setBgmVolume] = useState(30);
   const [bgmSaved, setBgmSaved] = useState(false);
 
+  const [transitionSec, setTransitionSec] = useState(0.6);
+  const [frontIsA, setFrontIsA] = useState(true);
   const [includeSubtitles, setIncludeSubtitles] = useState(true);
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
@@ -79,6 +109,7 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
   const [renderDone, setRenderDone] = useState(false);
 
   const hasBgm = selectedTrack !== null || uploadedFile !== null;
+  const ttsReadyCount = readyScenes.filter((s) => s.audioUrl).length;
   const progressPct = totalDuration > 0 ? (playhead / totalDuration) * 100 : 0;
 
   useEffect(() => {
@@ -100,21 +131,232 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
   }, [timelineDefaults]);
 
   useEffect(() => {
-    if (!isPlaying || !previewRef.current || readyScenes.length === 0) return;
-    const video = previewRef.current;
-    video.play().catch(() => setIsPlaying(false));
-  }, [isPlaying, readyScenes.length]);
+    const vol = volume / 100;
+    const main = ttsAudioRef.current;
+    const alt = ttsAudioBRef.current;
+    if (main && activeTtsIsMain.current) main.volume = vol;
+    if (alt && !activeTtsIsMain.current) alt.volume = vol;
+  }, [volume]);
+
+  const applySceneMedia = useCallback(async (
+    scene: VideoScene,
+    opts: { animate: boolean; offset?: number; playing: boolean },
+  ) => {
+    if (isTransitioningRef.current) return;
+
+    const ms = opts.animate && transitionSec > 0 ? transitionMs(transitionSec) : 0;
+    isTransitioningRef.current = ms > 0;
+
+    try {
+      const vol = volume / 100;
+      const offset = opts.offset ?? 0;
+
+      const incomingVideo = frontVideoIsA.current ? previewBRef.current : previewARef.current;
+      const outgoingVideo = frontVideoIsA.current ? previewARef.current : previewBRef.current;
+      const incomingAudio = activeTtsIsMain.current ? ttsAudioBRef.current : ttsAudioRef.current;
+      const outgoingAudio = activeTtsIsMain.current ? ttsAudioRef.current : ttsAudioBRef.current;
+
+      const tasks: Promise<void>[] = [];
+
+      if (scene.videoUrl && incomingVideo) {
+        tasks.push(crossfadeVideo(outgoingVideo, incomingVideo, scene.videoUrl, ms, opts.playing));
+      }
+
+      if (scene.audioUrl && incomingAudio) {
+        tasks.push(
+          crossfadeAudio(
+            opts.animate && ms > 0 ? outgoingAudio : null,
+            incomingAudio,
+            scene.audioUrl,
+            vol,
+            ms,
+            offset,
+          ),
+        );
+      } else {
+        outgoingAudio?.pause();
+        incomingAudio?.pause();
+      }
+
+      await Promise.all(tasks);
+
+      if (scene.videoUrl && incomingVideo) {
+        frontVideoIsA.current = !frontVideoIsA.current;
+        setFrontIsA(frontVideoIsA.current);
+      }
+
+      if (scene.audioUrl && incomingAudio) {
+        activeTtsIsMain.current = !activeTtsIsMain.current;
+      }
+
+      ttsSceneIdRef.current = scene.id;
+
+      if (!opts.playing) {
+        incomingVideo?.pause();
+        incomingAudio?.pause();
+      }
+    } finally {
+      isTransitioningRef.current = false;
+    }
+  }, [transitionSec, volume]);
 
   const activeSceneForPreview = useMemo(() => {
-    if (readyScenes.length === 0) return null;
-    return readyScenes.find((s) => playhead >= s.timeStart && playhead < s.timeEnd) ?? readyScenes[0];
-  }, [readyScenes, playhead]);
+    if (isPlaying && playbackSceneId) {
+      const locked = readyScenes.find((s) => s.id === playbackSceneId);
+      if (locked) return locked;
+    }
+    return findSceneAtPlayhead(readyScenes, playhead);
+  }, [readyScenes, playhead, isPlaying, playbackSceneId]);
 
+  const togglePlayback = useCallback(() => {
+    if (isPlaying) {
+      setPlaybackSceneId(null);
+      setIsPlaying(false);
+      previewARef.current?.pause();
+      previewBRef.current?.pause();
+      ttsAudioRef.current?.pause();
+      ttsAudioBRef.current?.pause();
+      return;
+    }
+    const scene = findSceneAtPlayhead(readyScenes, playhead) ?? readyScenes[0];
+    if (!scene?.videoUrl && !scene?.audioUrl) return;
+    const offset = Math.max(0, playhead - scene.timeStart);
+    setPlaybackSceneId(scene.id);
+    setIsPlaying(true);
+    void applySceneMedia(scene, { animate: false, offset, playing: true });
+  }, [isPlaying, readyScenes, playhead, applySceneMedia]);
+
+  const isSceneActive = useCallback((scene: VideoScene) => {
+    if (isPlaying && playbackSceneId) return scene.id === playbackSceneId;
+    return playhead >= scene.timeStart && playhead < scene.timeEnd;
+  }, [isPlaying, playbackSceneId, playhead]);
+
+  // Giữ playhead đúng cảnh khi timing thay đổi (sửa TTS → duration đổi)
   useEffect(() => {
-    const src = activeSceneForPreview?.videoUrl;
-    if (!previewRef.current || !src) return;
-    if (previewRef.current.src !== src) previewRef.current.src = src;
-  }, [activeSceneForPreview?.videoUrl]);
+    const prev = prevScenesRef.current;
+    const curr = readyScenes;
+
+    if (prev.length === 0) {
+      prevScenesRef.current = curr;
+      return;
+    }
+
+    if (scenesTimingSignature(prev) === scenesTimingSignature(curr)) return;
+
+    setIsPlaying(false);
+    ttsAudioRef.current?.pause();
+    ttsAudioBRef.current?.pause();
+    setPlaybackSceneId(null);
+
+    const t = playheadRef.current;
+    const oldScene = findSceneAtPlayhead(prev, t);
+    if (oldScene) {
+      const offset = t - oldScene.timeStart;
+      const newScene = curr.find((s) => s.id === oldScene.id);
+      if (newScene) {
+        const clamped = Math.min(
+          Math.max(0, offset),
+          Math.max(0, newScene.durationSeconds - 0.05),
+        );
+        setPlayhead(newScene.timeStart + clamped);
+        prevScenesRef.current = curr;
+        return;
+      }
+    }
+
+    setPlayhead((p) => Math.min(p, totalDuration));
+    prevScenesRef.current = curr;
+  }, [readyScenes, totalDuration]);
+
+  // Seek timeline về cảnh vừa sửa ở mục 3
+  useEffect(() => {
+    if (!focusSceneId) return;
+    const scene = readyScenes.find((s) => s.id === focusSceneId);
+    if (!scene) return;
+
+    setIsPlaying(false);
+    ttsAudioRef.current?.pause();
+    ttsAudioBRef.current?.pause();
+    setPlaybackSceneId(null);
+    ttsSceneIdRef.current = null;
+    setPlayhead(scene.timeStart);
+    onFocusSceneHandled?.();
+  }, [focusSceneId, readyScenes, onFocusSceneHandled]);
+
+  // Seek preview khi dừng — cắt nhanh, không flip layer nếu cùng cảnh
+  useEffect(() => {
+    if (isPlaying || isTransitioningRef.current) return;
+    const scene = findSceneAtPlayhead(readyScenes, playhead);
+    if (!scene) return;
+    const offset = Math.max(0, playhead - scene.timeStart);
+
+    if (ttsSceneIdRef.current === scene.id) {
+      const audio = activeTtsIsMain.current ? ttsAudioRef.current : ttsAudioBRef.current;
+      if (audio && scene.audioUrl) audio.currentTime = offset;
+      return;
+    }
+
+    void applySceneMedia(scene, { animate: false, offset, playing: false });
+  }, [playhead, isPlaying, readyScenes, applySceneMedia]);
+
+  const handleTtsTimeUpdate = useCallback((e: React.SyntheticEvent<HTMLAudioElement>) => {
+    const isMainEl = e.currentTarget === ttsAudioRef.current;
+    if (isMainEl !== activeTtsIsMain.current) return;
+    const sceneId = playbackSceneId;
+    if (!sceneId || !isPlaying) return;
+    const scene = readyScenes.find((s) => s.id === sceneId);
+    if (!scene?.audioUrl) return;
+    const nextPlayhead = scene.timeStart + e.currentTarget.currentTime;
+    setPlayhead(Math.min(nextPlayhead, totalDuration));
+  }, [readyScenes, isPlaying, playbackSceneId, totalDuration]);
+
+  const handleTtsEnded = useCallback(() => {
+    const idx = readyScenes.findIndex((s) => s.id === playbackSceneId);
+    const next = idx >= 0 ? readyScenes[idx + 1] : undefined;
+    if (next) {
+      setPlaybackSceneId(next.id);
+      setPlayhead(next.timeStart);
+      void applySceneMedia(next, {
+        animate: transitionSec > 0,
+        offset: 0,
+        playing: true,
+      });
+    } else {
+      setPlaybackSceneId(null);
+      setIsPlaying(false);
+      setPlayhead(totalDuration);
+    }
+  }, [readyScenes, playbackSceneId, totalDuration, applySceneMedia, transitionSec]);
+
+  const handlePreviewVideoLoop = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
+    const frontVideo = frontVideoIsA.current ? previewARef.current : previewBRef.current;
+    if (e.currentTarget !== frontVideo || !isPlaying || !playbackSceneId) return;
+
+    const scene = readyScenes.find((s) => s.id === playbackSceneId);
+    if (!scene) return;
+
+    if (scene.audioUrl) {
+      e.currentTarget.currentTime = 0;
+      void e.currentTarget.play();
+      return;
+    }
+
+    const idx = readyScenes.findIndex((s) => s.id === playbackSceneId);
+    const next = idx >= 0 ? readyScenes[idx + 1] : undefined;
+    if (next) {
+      setPlaybackSceneId(next.id);
+      setPlayhead(next.timeStart);
+      void applySceneMedia(next, {
+        animate: transitionSec > 0,
+        offset: 0,
+        playing: true,
+      });
+    } else {
+      setPlaybackSceneId(null);
+      setIsPlaying(false);
+      setPlayhead(totalDuration);
+    }
+  }, [readyScenes, isPlaying, playbackSceneId, totalDuration, applySceneMedia, transitionSec]);
 
   const validateAndSetAudio = (file: File) => {
     setUploadError(null);
@@ -213,29 +455,42 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
       </div>
 
       <div className="bg-card border border-border rounded-xl overflow-hidden flex flex-col">
+        <audio ref={ttsAudioRef} className="hidden" onTimeUpdate={handleTtsTimeUpdate} onEnded={handleTtsEnded} />
+        <audio ref={ttsAudioBRef} className="hidden" onTimeUpdate={handleTtsTimeUpdate} onEnded={handleTtsEnded} />
+
         {/* Preview + playback */}
         <div className="px-5 py-3 border-b border-border flex flex-col sm:flex-row gap-4 bg-background/40">
-          <div className="relative w-full sm:w-48 aspect-video bg-black rounded-lg overflow-hidden flex-shrink-0">
-            {activeSceneForPreview?.videoUrl ? (
-              <video
-                ref={previewRef}
-                className="w-full h-full object-cover"
-                muted
-                playsInline
-                onTimeUpdate={(e) => {
-                  const scene = activeSceneForPreview;
-                  if (!scene) return;
-                  setPlayhead(scene.timeStart + e.currentTarget.currentTime);
-                }}
-                onEnded={() => setIsPlaying(false)}
-              />
+          <div className="relative w-full sm:w-48 aspect-video bg-black rounded-lg overflow-hidden shrink-0">
+            {readyScenes.some((s) => s.videoUrl) ? (
+              <>
+                <video
+                  ref={previewARef}
+                  className={cn(
+                    'absolute inset-0 w-full h-full object-cover',
+                    frontIsA ? 'z-10' : 'z-0',
+                  )}
+                  muted
+                  playsInline
+                  onEnded={handlePreviewVideoLoop}
+                />
+                <video
+                  ref={previewBRef}
+                  className={cn(
+                    'absolute inset-0 w-full h-full object-cover',
+                    frontIsA ? 'z-0' : 'z-10',
+                  )}
+                  muted
+                  playsInline
+                  onEnded={handlePreviewVideoLoop}
+                />
+              </>
             ) : (
               <div className="w-full h-full flex items-center justify-center text-muted-foreground">
                 <Film className="w-8 h-8 opacity-40" />
               </div>
             )}
             {activeSceneForPreview && (
-              <span className="absolute bottom-1 left-1 text-[10px] bg-black/70 text-white px-1.5 py-0.5 rounded">
+              <span className="absolute bottom-1 left-1 z-20 text-[10px] bg-black/70 text-white px-1.5 py-0.5 rounded">
                 Cảnh {activeSceneForPreview.index}
               </span>
             )}
@@ -245,7 +500,7 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => { setPlayhead(0); setIsPlaying(false); }}
+                onClick={() => { setPlayhead(0); setPlaybackSceneId(null); setIsPlaying(false); }}
                 className="p-2 hover:bg-primary/10 rounded-lg text-muted-foreground hover:text-primary"
                 aria-label="Quay về đầu"
               >
@@ -253,8 +508,8 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
               </button>
               <button
                 type="button"
-                onClick={() => setIsPlaying((v) => !v)}
-                disabled={!activeSceneForPreview?.videoUrl}
+                onClick={togglePlayback}
+                disabled={!activeSceneForPreview?.videoUrl && !activeSceneForPreview?.audioUrl}
                 className="p-2 hover:bg-primary/10 rounded-lg text-muted-foreground hover:text-primary disabled:opacity-40"
                 aria-label={isPlaying ? 'Dừng' : 'Phát'}
               >
@@ -303,11 +558,21 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
                 <button
                   key={scene.id}
                   type="button"
-                  onClick={() => setPlayhead(scene.timeStart)}
+                  onClick={() => {
+                    setPlayhead(scene.timeStart);
+                    if (isPlaying) {
+                      setPlaybackSceneId(scene.id);
+                      void applySceneMedia(scene, {
+                        animate: transitionSec > 0,
+                        offset: 0,
+                        playing: true,
+                      });
+                    }
+                  }}
                   style={{ flex: `${scene.durationSeconds} 0 60px` }}
                   className={cn(
                     'h-9 min-w-[48px] rounded-lg flex items-center justify-center text-xs font-bold transition-colors',
-                    playhead >= scene.timeStart && playhead < scene.timeEnd
+                    isSceneActive(scene)
                       ? 'bg-primary/30 border border-primary text-primary'
                       : 'bg-gradient-to-br from-primary/20 to-primary/5 border border-primary/20 text-primary/80',
                   )}
@@ -323,17 +588,34 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
           <div className="flex border-b border-border min-w-[600px]">
             <div className="w-28 flex-shrink-0 px-4 py-3 border-r border-border bg-background/30">
               <span className="block text-xs font-semibold text-foreground">Voice (TTS)</span>
-              <span className="block text-[10px] text-muted-foreground">Lồng tiếng</span>
+              <span className="block text-[10px] text-muted-foreground">
+                {ttsReadyCount}/{readyScenes.length} có audio
+              </span>
             </div>
             <div className="flex-1 px-3 py-2.5 flex items-center gap-1.5 overflow-x-auto min-h-[44px]">
               {readyScenes.map((scene) => (
                 <div
                   key={scene.id}
                   style={{ flex: `${scene.durationSeconds} 0 60px` }}
-                  className="h-9 min-w-[48px] bg-primary/10 border border-primary/20 rounded-lg px-2 flex items-center"
-                  title={scene.voice}
+                  className={cn(
+                    'h-9 min-w-[48px] rounded-lg px-2 flex items-center gap-1',
+                    scene.audioUrl
+                      ? 'bg-primary/10 border border-primary/20'
+                      : 'bg-orange-500/10 border border-orange-500/20',
+                  )}
+                  title={scene.audioUrl ? scene.voice : `${scene.voice} (chưa có audio TTS)`}
                 >
-                  <span className="text-[10px] text-primary/80 truncate">{scene.voice.slice(0, 24)}…</span>
+                  {scene.audioUrl ? (
+                    <Volume2 className="w-3 h-3 text-primary shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-3 h-3 text-orange-400 shrink-0" />
+                  )}
+                  <span className={cn(
+                    'text-[10px] truncate',
+                    scene.audioUrl ? 'text-primary/80' : 'text-orange-400/80',
+                  )}>
+                    {scene.voice.slice(0, 20)}…
+                  </span>
                 </div>
               ))}
             </div>
@@ -460,13 +742,28 @@ export function TimelineEditor({ scenes = [], focusBgmKey, timelineDefaults }: T
         <div className="border-t border-border bg-background/40 px-5 py-4 space-y-4">
           <div className="flex flex-wrap gap-3">
             <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card cursor-pointer hover:border-primary/30">
+              <Sparkles className="w-4 h-4 text-primary" />
+              <span className="text-xs font-medium whitespace-nowrap">Chuyển cảnh</span>
+              <select
+                value={transitionSec}
+                onChange={(e) => setTransitionSec(Number(e.target.value))}
+                className="text-xs bg-background border border-border rounded-md px-2 py-0.5 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+              >
+                {SCENE_TRANSITION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card cursor-pointer hover:border-primary/30">
               <input type="checkbox" checked={includeSubtitles} onChange={(e) => setIncludeSubtitles(e.target.checked)} className="accent-primary" />
               <Subtitles className="w-4 h-4 text-primary" />
               <span className="text-xs font-medium">Phụ đề + lời thoại TTS</span>
             </label>
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card text-xs text-muted-foreground">
               <Mic2 className="w-4 h-4" />
-              Voice track từ mục 3 · {readyScenes.length} cảnh
+              {ttsReadyCount > 0
+                ? `TTS preview · ${ttsReadyCount}/${readyScenes.length} cảnh`
+                : 'Chưa có audio TTS — submit lại mục 2'}
             </div>
           </div>
 

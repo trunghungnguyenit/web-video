@@ -3,6 +3,7 @@
 import {
   ChevronRight, Settings, Sparkles, Key, Gauge, Palette, Music, Clapperboard,
   PanelLeftClose, PanelLeftOpen, Clock, UserCircle2, PenSquare, Images, Film,
+  Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -14,6 +15,7 @@ export type CreativeToolId =
   | 'content'            // Mục 2 — Nhập nội dung
   | 'scene-gallery'      // Mục 3 — Danh sách cảnh
   | 'timeline'           // Mục 4 — Timeline
+  | 'bulk-list'          // Bulk List — drawer trên màn nhỏ
   | 'voice-speed'        // Mục 2 — mở accordion Tốc độ giọng
   | 'scene-style'        // Mục 2 — mở accordion Phong cách cảnh
   | 'scene-duration'     // Mục 3 — mở panel Thời lượng cảnh
@@ -33,6 +35,7 @@ interface ToolDef {
 
 /** Điều hướng nhanh — nhảy đến các section chính */
 const navigationTools: ToolDef[] = [
+  { id: 'bulk-list',      icon: Layers,      label: 'Bulk List',      desc: 'Danh sách dự án bulk' },
   { id: 'character',     icon: UserCircle2, label: 'Nhân vật',       desc: 'Đi đến Mục 1' },
   { id: 'content',       icon: PenSquare,   label: 'Nhập nội dung',  desc: 'Đi đến Mục 2' },
   { id: 'scene-gallery', icon: Images,      label: 'Danh sách cảnh', desc: 'Đi đến Mục 3' },
@@ -79,6 +82,7 @@ function ToolGroup({ title, tools, activeTool, collapsed, onClick }: ToolGroupPr
       <div className="space-y-0.5">
         {tools.map((tool) => {
           const isActive = activeTool === tool.id;
+          const mobileOnly = tool.id === 'bulk-list';
           return (
             <button
               key={tool.id}
@@ -89,6 +93,7 @@ function ToolGroup({ title, tools, activeTool, collapsed, onClick }: ToolGroupPr
               className={cn(
                 'relative w-full flex items-center rounded-lg transition-all duration-150 cursor-pointer',
                 collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
+                mobileOnly && 'xl:hidden',
                 isActive
                   ? 'bg-primary/10 text-primary border border-primary/20 font-medium'
                   : 'text-sidebar-accent hover:bg-white/5 hover:text-sidebar-foreground border border-transparent',

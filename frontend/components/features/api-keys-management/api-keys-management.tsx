@@ -1,8 +1,9 @@
 'use client';
 
 import { Eye, EyeOff, Copy, CheckCircle2, AlertCircle, HelpCircle, Loader2, Pencil, X, Plus, Trash2 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { getApiKey, setApiKey } from '@/lib/api-keys-store';
 
 type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
 
@@ -21,7 +22,7 @@ interface ApiKeyEntry {
  * Theo luồng xử lý:
  * Gemini   → tạo kịch bản (script generation)
  * Veo      → tạo video từng cảnh
- * TTS      → tạo giọng đọc (Google TTS)
+ * TTS      → tạo giọng đọc (ElevenLabs)
  *
  * Backend nhận toàn bộ settings rồi phân phối key cho AI phù hợp.
  * Frontend chỉ lưu key — không xử lý AI trực tiếp.
@@ -40,19 +41,19 @@ const INITIAL_KEYS: ApiKeyEntry[] = [
     id: 'veo',
     name: 'Veo API Key',
     service: 'veo',
-    placeholder: 'veo-...',
+    placeholder: 'AIza... (Gemini API Key)',
     value: '',
     status: 'disconnected',
-    description: 'Tạo video từng cảnh (tỷ lệ khung hình, độ phân giải, thời lượng)',
+    description: 'Veo 3 tạo video cảnh — nhập key sẽ tự load danh sách model Veo để chọn',
   },
   {
-    id: 'google-tts',
-    name: 'Google TTS API Key',
+    id: 'elevenlabs',
+    name: 'ElevenLabs API Key',
     service: 'tts',
-    placeholder: 'AIza...',
+    placeholder: 'sk_...',
     value: '',
     status: 'disconnected',
-    description: 'Tạo giọng đọc cho từng cảnh (giọng nam/nữ, ngôn ngữ)',
+    description: 'Tạo giọng đọc từ voiceover — key cần bật quyền Text to Speech trên elevenlabs.io',
   },
 ];
 
@@ -75,6 +76,17 @@ export function ApiKeysManagement() {
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
 
+  useEffect(() => {
+    setKeys((prev) =>
+      prev.map((k) => {
+        const stored = getApiKey(k.id);
+        return stored
+          ? { ...k, value: stored, status: 'connected' as const }
+          : k;
+      }),
+    );
+  }, []);
+
   const toggleVisibility = (id: string) =>
     setVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -84,23 +96,18 @@ export function ApiKeysManagement() {
   const cancelEdit = (id: string) =>
     setEditing((prev) => { const next = { ...prev }; delete next[id]; return next; });
 
-  const handleSave = async (id: string) => {
-    const draft = editing[id] ?? '';
+  const handleSave = async (id: string, value: string) => {
+    setApiKey(id, value);
+    console.log('[API Key] lưu:', { id });
+
     setKeys((prev) =>
-      prev.map((k) => k.id === id ? { ...k, status: 'verifying', errorMsg: undefined } : k),
-    );
-    const result = await verifyKey(id, draft);
-    setKeys((prev) =>
-      prev.map((k) =>
-        k.id === id
-          ? { ...k, value: draft, status: result.ok ? 'connected' : 'error', errorMsg: result.msg }
-          : k,
-      ),
+      prev.map((k) => k.id === id ? { ...k, value: value, status: 'connected' } : k),
     );
     cancelEdit(id);
   };
 
   const handleDelete = (id: string) => {
+    setApiKey(id, '');
     setKeys((prev) =>
       prev.map((k) => k.id === id ? { ...k, value: '', status: 'disconnected', errorMsg: undefined } : k),
     );
@@ -220,7 +227,7 @@ export function ApiKeysManagement() {
                   <div className="flex gap-2">
                     <button
                       type="button"
-                      onClick={() => handleSave(entry.id)}
+                      onClick={() => handleSave(entry.id, draftValue)}
                       disabled={entry.status === 'verifying'}
                       className="flex-1 px-3 py-1.5 bg-primary/10 border border-primary/30 hover:bg-primary/20 text-primary text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >

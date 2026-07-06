@@ -21,10 +21,13 @@ type CharacterFormField = 'name' | 'role' | 'traits' | 'outfit' | 'description';
 export interface CharacterMasterHandle {
   applyPreset: (data: PresetCharacter) => void;
   applyDemoCharacters: (list: PresetCharacter[]) => void;
+  getCharacters: () => SavedCharacter[];
 }
 
 interface CharacterMasterProps {
   presetData?: PresetCharacter | null;
+  initialCharacters?: SavedCharacter[];
+  onCharactersChange?: (characters: SavedCharacter[]) => void;
 }
 
 function presetToCharacter(data: PresetCharacter, base: SavedCharacter): SavedCharacter {
@@ -41,9 +44,11 @@ function presetToCharacter(data: PresetCharacter, base: SavedCharacter): SavedCh
 }
 
 export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMasterProps>(
-  function CharacterMaster({ presetData }, ref) {
+  function CharacterMaster({ presetData, initialCharacters, onCharactersChange }, ref) {
     const avatarInputRef = useRef<HTMLInputElement>(null);
-    const [characters, setCharacters] = useState<SavedCharacter[]>(() => [createEmptyCharacter()]);
+    const [characters, setCharacters] = useState<SavedCharacter[]>(
+      () => (initialCharacters?.length ? initialCharacters : [createEmptyCharacter()]),
+    );
     const [activeId, setActiveId] = useState(() => characters[0]?.id ?? '');
     const [avatarPreviews, setAvatarPreviews] = useState<Record<string, string>>({});
     const [showStylePicker, setShowStylePicker] = useState(false);
@@ -74,12 +79,17 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
     useImperativeHandle(ref, () => ({
       applyPreset: applyPresetToActive,
       applyDemoCharacters,
-    }), [applyPresetToActive, applyDemoCharacters]);
+      getCharacters: () => characters,
+    }), [applyPresetToActive, applyDemoCharacters, characters]);
 
     useEffect(() => {
       if (!presetData) return;
       applyPresetToActive(presetData);
     }, [presetData, applyPresetToActive]);
+
+    useEffect(() => {
+      onCharactersChange?.(characters);
+    }, [characters, onCharactersChange]);
 
     const updateActive = (field: CharacterFormField | 'style', value: string) => {
       setCharacters((prev) =>
@@ -197,17 +207,24 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
         </div>
 
         {/* Character strip */}
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+        <div className="flex gap-2 overflow-x-auto overflow-y-visible py-1 scrollbar-thin">
           {characters.map((char, index) => {
             const isActive = char.id === activeId;
             const preview = avatarPreviews[char.id];
             return (
-              <div key={char.id} className="relative flex-shrink-0 group">
+              <div
+                key={char.id}
+                className={cn(
+                  'relative flex-shrink-0 group',
+                  isActive ? 'z-20' : 'z-0 hover:z-10',
+                )}
+              >
                 <button
                   type="button"
                   onClick={() => handleSelectCharacter(char.id)}
                   className={cn(
-                    'flex items-center gap-2.5 pl-2 pr-3 py-2 rounded-xl border transition-all min-w-[140px] max-w-[200px]',
+                    'flex items-center gap-2.5 pl-2 py-2 rounded-xl border transition-all min-w-[140px] max-w-[200px] w-full',
+                    characters.length > 1 ? 'pr-8' : 'pr-3',
                     isActive
                       ? 'bg-primary/10 border-primary/40 text-primary shadow-sm'
                       : 'bg-card border-border text-foreground hover:border-primary/25 hover:bg-muted/30',
@@ -239,9 +256,12 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
                 {characters.length > 1 && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); handleDeleteCharacter(char.id); }}
+                    onClick={() => handleDeleteCharacter(char.id)}
                     title="Xóa nhân vật"
-                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-destructive/90 text-destructive-foreground flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm hover:bg-destructive"
+                    className={cn(
+                      'absolute top-1.5 right-1.5 z-10 w-5 h-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-sm hover:bg-destructive/90 transition-opacity',
+                      isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                    )}
                   >
                     <Trash2 className="w-2.5 h-2.5" />
                   </button>
@@ -269,9 +289,9 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
         </div>
 
         {/* Active character form */}
-        <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 lg:p-8 flex flex-col sm:flex-row gap-5 sm:gap-8">
+        <div className="w-full bg-card border border-border rounded-2xl p-4 sm:p-6 lg:p-8 flex flex-col md:flex-row gap-5 md:gap-8 lg:gap-10">
           {/* Avatar */}
-          <div className="flex sm:flex-col items-center sm:items-start gap-4 sm:gap-3 flex-shrink-0">
+          <div className="flex md:flex-col items-center md:items-start gap-4 md:gap-3 shrink-0 md:w-36 lg:w-40">
             <input
               ref={avatarInputRef}
               type="file"
@@ -328,7 +348,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
           </div>
 
           {/* Form fields */}
-          <div className="flex-1 space-y-4">
+          <div className="flex-1 min-w-0 w-full space-y-4">
             {/* Name */}
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
@@ -356,7 +376,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
             </div>
 
             {/* Role / Traits / Outfit */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
               {([
                 { field: 'role' as const, label: 'Vai trò', placeholder: 'VD: Nhà thám hiểm' },
                 { field: 'traits' as const, label: 'Đặc điểm', placeholder: 'Tính cách, ngoại hình...' },

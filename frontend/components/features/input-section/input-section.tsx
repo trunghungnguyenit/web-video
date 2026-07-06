@@ -1,16 +1,20 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type RefObject } from 'react';
 import {
   Type, Link2, Image, File, Send, AlertCircle, Loader2,
   CheckCircle2, Bookmark, Gauge, Palette, ChevronDown, ChevronUp,
-  Sliders,
+  Sliders, X, Plus,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { generateScenesFromContent } from '@/lib/scenes';
+import { cn, formatCount } from '@/lib/utils';
 import type { SceneGenerationResult } from '@/lib/scenes';
-import type { QuickActionId } from '@/components/features/quick-actions';
+import type { CharacterMasterHandle } from '@/components/features/character-master';
 import type { PresetInput } from '@/lib/preset-scripts';
+import { getApiKey, API_KEY_IDS } from '@/lib/api-keys-store';
+import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
+import { logAnalyzePipeline } from '@/lib/pipeline-debug-log';
+import { useProjectSettings } from '@/contexts/project-settings-context';
+import { useBulkProjects } from '@/contexts/bulk-projects-context';
 
 // ─── Voice Speed config ───────────────────────────────────────────────────────
 const SPEED_OPTIONS = [
@@ -51,6 +55,7 @@ const tabs: { id: TabId; icon: typeof Type; label: string; desc: string }[] = [
 const MAX_CHARS         = 5000;
 const MIN_CONTENT_CHARS = 20;
 const MAX_IMAGE_MB      = 10;
+const MAX_IMAGES        = 12;
 const MAX_FILE_MB       = 20;
 const IMAGE_MIME        = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const FILE_MIME         = [
@@ -70,29 +75,26 @@ interface FormErrors {
   content?: string;
   linkUrl?: string;
   upload?: string;
+  submit?: string;
+  /** Lỗi prompt theo id ảnh */
+  imagePrompts?: Record<string, string>;
 }
 
 interface FormState {
   activeTab: TabId;
   content: string;
   linkUrl: string;
-  language: string;
-  sceneCount: string;
-  videoType: string;
-  voice: string;
   dragOver: boolean;
   isSubmitting: boolean;
   submitted: boolean;
 }
 
 export interface InputSectionProps {
-  activeQuickAction?: QuickActionId | null;
-  onActionDone?: () => void;
   presetData?: PresetInput | null;
   presetKey?: number;
   onSaveScript?: (
     content: string,
-    meta: { language: string; sceneCount: string; videoType: string; voice: string }
+    meta: { language: string; sceneCount: string; videoType: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality: string }
   ) => void;
   /** Sidebar click "Nhập nội dung" → scroll + focus textarea */
   focusContentKey?: number;
@@ -100,8 +102,15 @@ export interface InputSectionProps {
   focusVoiceSpeedKey?: number;
   /** Sidebar click "Phong cách cảnh" → scroll + mở accordion */
   focusSceneStyleKey?: number;
-  /** Sau khi phân tích xong → trả danh sách cảnh cho mục 3 */
-  onScenesGenerated?: (result: SceneGenerationResult) => void;
+  /** Sau khi phân tích xong — optional legacy callback */
+  onScenesGenerated?: (result: SceneGenerationResult, projectId: string) => void | Promise<void>;
+  /** ID bulk project — khóa kết quả phân tích đúng dự án */
+  projectId?: string;
+  /** Nội dung prompt lưu theo bulk */
+  initialContent?: string;
+  onContentChange?: (content: string) => void;
+  /** Ref mục 1 — lấy danh sách nhân vật khi gửi Gemini */
+  characterMasterRef?: RefObject<CharacterMasterHandle | null>;
 }
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
@@ -113,7 +122,7 @@ function validateContent(raw: string): string | undefined {
     return `Nội dung quá ngắn — cần ít nhất ${MIN_CONTENT_CHARS} ký tự (hiện tại: ${s.length}).`;
   }
   if (s.length > MAX_CHARS) {
-    return `Nội dung quá dài — tối đa ${MAX_CHARS.toLocaleString()} ký tự (hiện tại: ${s.length.toLocaleString()}).`;
+    return `Nội dung quá dài — tối đa ${formatCount(MAX_CHARS)} ký tự (hiện tại: ${formatCount(s.length)}).`;
   }
   return undefined;
 }
@@ -138,29 +147,66 @@ function validateUrl(raw: string): string | undefined {
   return undefined;
 }
 
-function validateUpload(file: File | null, tab: 'image' | 'file'): string | undefined {
-  if (!file) {
-    return tab === 'image'
-      ? 'Vui lòng tải lên ít nhất một hình ảnh.'
-      : 'Vui lòng tải lên file nội dung (PDF, DOC, DOCX hoặc TXT).';
+const MIN_IMAGE_PROMPT_CHARS = 10;
+
+interface UploadedImageItem {
+  id: string;
+  file: File;
+  previewUrl: string;
+  prompt: string;
+}
+
+function createImageId(): string {
+  return `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function revokeImagePreview(url: string) {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+function validateImagePrompt(raw: string): string | undefined {
+  const s = raw.trim();
+  if (!s) return 'Nhập prompt mô tả cảnh muốn tạo từ ảnh này.';
+  if (s.length < MIN_IMAGE_PROMPT_CHARS) {
+    return `Prompt quá ngắn — cần ít nhất ${MIN_IMAGE_PROMPT_CHARS} ký tự (hiện tại: ${s.length}).`;
   }
+  return undefined;
+}
+
+function buildImagePipelineContent(images: UploadedImageItem[]): string {
+  const lines = [
+    `Tạo video từ ${images.length} hình ảnh. Mỗi ảnh tương ứng một cảnh — dùng prompt bên dưới làm hướng dẫn visual cho từng cảnh.`,
+    '',
+  ];
+  images.forEach((img, i) => {
+    lines.push(`## Ảnh ${i + 1} (${img.file.name})`);
+    lines.push(img.prompt.trim());
+    lines.push('');
+  });
+  return lines.join('\n').trim();
+}
+
+function validateImageFile(file: File): string | undefined {
   const sizeMB = file.size / 1024 / 1024;
-  if (tab === 'image') {
-    if (!IMAGE_MIME.includes(file.type) && !file.type.startsWith('image/')) {
-      return `File "${file.name}" không phải là hình ảnh hợp lệ. Chấp nhận: JPG, PNG, WebP, GIF.`;
-    }
-    if (sizeMB > MAX_IMAGE_MB) {
-      return `File "${file.name}" quá lớn (${sizeMB.toFixed(1)} MB) — tối đa ${MAX_IMAGE_MB} MB.`;
-    }
-  } else {
-    const okMime = FILE_MIME.includes(file.type);
-    const okExt  = FILE_EXT_HINT.test(file.name);
-    if (!okMime && !okExt) {
-      return `File "${file.name}" không đúng định dạng. Chấp nhận: PDF, DOC, DOCX, TXT.`;
-    }
-    if (sizeMB > MAX_FILE_MB) {
-      return `File "${file.name}" quá lớn (${sizeMB.toFixed(1)} MB) — tối đa ${MAX_FILE_MB} MB.`;
-    }
+  if (!IMAGE_MIME.includes(file.type) && !file.type.startsWith('image/')) {
+    return `File "${file.name}" không phải hình ảnh hợp lệ. Chấp nhận: JPG, PNG, WebP, GIF.`;
+  }
+  if (sizeMB > MAX_IMAGE_MB) {
+    return `File "${file.name}" quá lớn (${sizeMB.toFixed(1)} MB) — tối đa ${MAX_IMAGE_MB} MB.`;
+  }
+  return undefined;
+}
+
+function validateDocumentFile(file: File | null): string | undefined {
+  if (!file) return 'Vui lòng tải lên file nội dung (PDF, DOC, DOCX hoặc TXT).';
+  const sizeMB = file.size / 1024 / 1024;
+  const okMime = FILE_MIME.includes(file.type);
+  const okExt = FILE_EXT_HINT.test(file.name);
+  if (!okMime && !okExt) {
+    return `File "${file.name}" không đúng định dạng. Chấp nhận: PDF, DOC, DOCX, TXT.`;
+  }
+  if (sizeMB > MAX_FILE_MB) {
+    return `File "${file.name}" quá lớn (${sizeMB.toFixed(1)} MB) — tối đa ${MAX_FILE_MB} MB.`;
   }
   return undefined;
 }
@@ -168,8 +214,9 @@ function validateUpload(file: File | null, tab: 'image' | 'file'): string | unde
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function InputSection({
-  activeQuickAction, onActionDone, presetData, presetKey, onSaveScript,
+  presetData, presetKey, onSaveScript,
   focusContentKey, focusVoiceSpeedKey, focusSceneStyleKey, onScenesGenerated,
+  characterMasterRef, projectId, initialContent = '', onContentChange,
 }: InputSectionProps = {}) {
   const fileInputRef  = useRef<HTMLInputElement>(null);
   const textareaRef   = useRef<HTMLTextAreaElement>(null);
@@ -177,48 +224,46 @@ export function InputSection({
   const sceneStyleRef = useRef<HTMLDivElement>(null);
 
   const [form, setForm] = useState<FormState>({
-    activeTab: 'text', content: '', linkUrl: '',
-    language: 'vi', sceneCount: '5', videoType: 'storytelling', voice: 'male-natural',
+    activeTab: 'text', content: initialContent, linkUrl: '',
     dragOver: false, isSubmitting: false, submitted: false,
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImageItem[]>([]);
+  const uploadedImagesRef = useRef<UploadedImageItem[]>([]);
+  uploadedImagesRef.current = uploadedImages;
   const [justApplied, setJustApplied]   = useState(false);
   const [savedScript, setSavedScript]   = useState(false);
 
-  // Voice speed state
-  const [voiceSpeed, setVoiceSpeed]         = useState(1);
-  const [showVoiceSpeed, setShowVoiceSpeed] = useState(false);
+  const { settings, patchSettings, applyFromPreset, hasVeoKey } = useProjectSettings();
+  const { startBulkAnalyze, projects } = useBulkProjects();
+  const { voiceSpeed, sceneStyle } = settings;
 
-  // Scene style state
-  const [sceneStyle, setSceneStyle]         = useState('cinematic');
+  const bulkStatus = projects.find((p) => p.id === projectId)?.status;
+  const isBulkBusy = bulkStatus === 'analyzing' || bulkStatus === 'generating';
+
+  const [showVoiceSpeed, setShowVoiceSpeed] = useState(false);
   const [showSceneStyle, setShowSceneStyle] = useState(false);
 
   // ── Preset apply ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!presetData) return;
+    applyFromPreset(presetData);
     setForm((f) => ({
-      ...f, activeTab: 'text',
-      content: presetData.content, language: presetData.language,
-      sceneCount: presetData.sceneCount, videoType: presetData.videoType, voice: presetData.voice,
+      ...f,
+      activeTab: 'text',
+      content: presetData.content,
     }));
-    if (presetData.voiceSpeed != null) setVoiceSpeed(presetData.voiceSpeed);
-    if (presetData.sceneStyleId) setSceneStyle(presetData.sceneStyleId);
     setErrors({});
     setUploadedFile(null);
+    setUploadedImages((prev) => {
+      prev.forEach((img) => revokeImagePreview(img.previewUrl));
+      return [];
+    });
     setJustApplied(true);
     setTimeout(() => setJustApplied(false), 2500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presetKey]);
-
-  // ── Quick action focus ─────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!activeQuickAction) return;
-    if (activeQuickAction === 'analyze' || activeQuickAction === 'script') {
-      setForm((f) => ({ ...f, activeTab: 'text' }));
-      setTimeout(() => textareaRef.current?.focus(), 80);
-    }
-  }, [activeQuickAction]);
 
   // ── Sidebar navigation triggers ───────────────────────────────────────────
   useEffect(() => {
@@ -239,6 +284,15 @@ export function InputSection({
     setTimeout(() => sceneStyleRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80);
   }, [focusSceneStyleKey]);
 
+  useEffect(() => () => {
+    uploadedImagesRef.current.forEach((img) => revokeImagePreview(img.previewUrl));
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => onContentChange?.(form.content), 400);
+    return () => clearTimeout(timer);
+  }, [form.content, onContentChange]);
+
   // ── Helpers ────────────────────────────────────────────────────────────────
   const charCount   = form.content.length;
   const charPercent = Math.min((charCount / MAX_CHARS) * 100, 100);
@@ -253,8 +307,27 @@ export function InputSection({
       const msg = validateUrl(form.linkUrl);
       if (msg) e.linkUrl = msg;
     }
-    if (form.activeTab === 'image' || form.activeTab === 'file') {
-      const msg = validateUpload(uploadedFile, form.activeTab);
+    if (form.activeTab === 'image') {
+      if (uploadedImages.length === 0) {
+        e.upload = 'Vui lòng tải lên ít nhất một hình ảnh.';
+      } else {
+        const promptErrors: Record<string, string> = {};
+        for (const img of uploadedImages) {
+          const fileMsg = validateImageFile(img.file);
+          if (fileMsg) {
+            e.upload = fileMsg;
+            break;
+          }
+          const promptMsg = validateImagePrompt(img.prompt);
+          if (promptMsg) promptErrors[img.id] = promptMsg;
+        }
+        if (Object.keys(promptErrors).length > 0) {
+          e.imagePrompts = promptErrors;
+        }
+      }
+    }
+    if (form.activeTab === 'file') {
+      const msg = validateDocumentFile(uploadedFile);
       if (msg) e.upload = msg;
     }
     setErrors(e);
@@ -267,39 +340,83 @@ export function InputSection({
       if (e.content) textareaRef.current?.focus();
       return;
     }
-    setForm((f) => ({ ...f, isSubmitting: true }));
 
-    await new Promise((r) => setTimeout(r, 1500));
+    const geminiKey = getApiKey('gemini');
+    if (!geminiKey.trim()) {
+      setErrors((p) => ({
+        ...p,
+        submit: 'Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.',
+      }));
+      return;
+    }
+
+    setErrors((p) => ({ ...p, submit: undefined }));
+    const submitProjectId = projectId ?? 'default';
 
     const contentForScenes =
       form.activeTab === 'text'
         ? form.content
         : form.activeTab === 'link'
           ? `Nội dung phân tích từ video: ${form.linkUrl.trim()}`
-          : uploadedFile
-            ? `Nội dung trích xuất từ file "${uploadedFile.name}"`
-            : form.content;
+          : form.activeTab === 'image' && uploadedImages.length > 0
+            ? buildImagePipelineContent(uploadedImages)
+            : uploadedFile
+              ? `Nội dung trích xuất từ file "${uploadedFile.name}"`
+              : form.content;
 
     const styleLabel = SCENE_STYLES.find((s) => s.id === sceneStyle)?.label ?? sceneStyle;
+    const characters = toPipelineCharacters(characterMasterRef?.current?.getCharacters() ?? []);
 
-    const scenes = generateScenesFromContent({
-      content: contentForScenes,
-      sceneCount: form.sceneCount,
-      videoType: form.videoType,
-      language: form.language,
-      sceneStyle: styleLabel,
+    // Gom form → geminiInput / veoInput / ttsInput (pipeline-payload.ts)
+    const pipeline = buildAnalyzePipeline({
+      // ── API Keys (đọc từ localStorage, user lưu ở mục API Keys) ──
+      geminiApiKey: geminiKey,              // Gemini — dùng ngay để gọi /api/gemini/analyze
+      veoApiKey: getApiKey('veo') || getApiKey('gemini'), // Veo 3 — dùng Gemini API Key nếu chưa có key riêng
+      ttsApiKey: getApiKey(API_KEY_IDS.elevenlabs), // ElevenLabs — voiceover → audio MP3
+
+      // ── Nội dung đầu vào (mục 2 — tab đang chọn) ──
+      content: contentForScenes,            // Text / link / tên file upload
+      inputType: form.activeTab,            // 'text' | 'link' | 'image' | 'file'
+
+      // ── Cài đặt kịch bản → geminiInput ──
+      language: settings.language,
+      sceneCount: settings.sceneCount,
+      videoType: settings.videoType,
+      characters,
+
+      aspectRatio: settings.aspectRatio,
+      sceneDuration: settings.sceneDuration,
+      videoQuality: settings.videoQuality,
+      veoModel: hasVeoKey && settings.veoModel ? settings.veoModel : undefined,
+      sceneStyleLabel: styleLabel,
+      sceneStyleId: sceneStyle,
+
+      voice: settings.voice,
+      voiceSpeed,
     });
 
-    onScenesGenerated?.({
-      scenes,
+    logAnalyzePipeline(
+      pipeline,
+      form.activeTab === 'image'
+        ? {
+            images: uploadedImages.map((img) => ({
+              fileName: img.file.name,
+              sizeMB: (img.file.size / 1024 / 1024).toFixed(2),
+              prompt: img.prompt.trim(),
+            })),
+          }
+        : undefined,
+    );
+
+    startBulkAnalyze(submitProjectId, {
+      pipeline,
       sourceContent: contentForScenes,
-      sceneCount: form.sceneCount,
-      videoType: form.videoType,
-      language: form.language,
+      sceneCount: settings.sceneCount,
+      videoType: settings.videoType,
+      language: settings.language,
     });
 
-    setForm((f) => ({ ...f, isSubmitting: false, submitted: true }));
-    onActionDone?.();
+    setForm((f) => ({ ...f, submitted: true }));
     setTimeout(() => setForm((f) => ({ ...f, submitted: false })), 3000);
   };
 
@@ -319,8 +436,13 @@ export function InputSection({
       return;
     }
     onSaveScript?.(form.content, {
-      language: form.language, sceneCount: form.sceneCount,
-      videoType: form.videoType, voice: form.voice,
+      language: settings.language,
+      sceneCount: settings.sceneCount,
+      videoType: settings.videoType,
+      voice: settings.voice,
+      aspectRatio: settings.aspectRatio,
+      sceneDuration: settings.sceneDuration,
+      videoQuality: settings.videoQuality,
     });
     setSavedScript(true);
     setTimeout(() => setSavedScript(false), 2500);
@@ -330,11 +452,100 @@ export function InputSection({
     setForm((f) => ({ ...f, activeTab: tab }));
     setErrors({});
     setUploadedFile(null);
+    setUploadedImages((prev) => {
+      prev.forEach((img) => revokeImagePreview(img.previewUrl));
+      return [];
+    });
+  };
+
+  const addImages = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    setUploadedImages((prev) => {
+      const remaining = MAX_IMAGES - prev.length;
+      if (remaining <= 0) {
+        setErrors((p) => ({ ...p, upload: `Tối đa ${MAX_IMAGES} hình ảnh.` }));
+        return prev;
+      }
+
+      const toAdd = list.slice(0, remaining);
+      const nextItems: UploadedImageItem[] = [];
+      let firstError: string | undefined;
+
+      for (const file of toAdd) {
+        const msg = validateImageFile(file);
+        if (msg) {
+          firstError = msg;
+          continue;
+        }
+        const duplicate = prev.some(
+          (img) => img.file.name === file.name && img.file.size === file.size,
+        ) || nextItems.some(
+          (img) => img.file.name === file.name && img.file.size === file.size,
+        );
+        if (duplicate) continue;
+
+        nextItems.push({
+          id: createImageId(),
+          file,
+          previewUrl: URL.createObjectURL(file),
+          prompt: '',
+        });
+      }
+
+      if (nextItems.length === 0) {
+        if (firstError) setErrors((p) => ({ ...p, upload: firstError }));
+        return prev;
+      }
+
+      if (list.length > remaining) {
+        setErrors((p) => ({
+          ...p,
+          upload: `Chỉ thêm được ${remaining} ảnh nữa (tối đa ${MAX_IMAGES}).`,
+        }));
+      } else {
+        setErrors((p) => ({ ...p, upload: undefined }));
+      }
+
+      return [...prev, ...nextItems];
+    });
+  };
+
+  const removeImage = (id: string) => {
+    setUploadedImages((prev) => {
+      const target = prev.find((img) => img.id === id);
+      if (target) revokeImagePreview(target.previewUrl);
+      return prev.filter((img) => img.id !== id);
+    });
+    setErrors((p) => {
+      const nextPrompts = p.imagePrompts ? { ...p.imagePrompts } : undefined;
+      if (nextPrompts) delete nextPrompts[id];
+      return {
+        ...p,
+        upload: undefined,
+        imagePrompts: nextPrompts && Object.keys(nextPrompts).length > 0 ? nextPrompts : undefined,
+      };
+    });
+  };
+
+  const updateImagePrompt = (id: string, prompt: string) => {
+    setUploadedImages((prev) =>
+      prev.map((img) => (img.id === id ? { ...img, prompt } : img)),
+    );
+    setErrors((p) => {
+      if (!p.imagePrompts?.[id]) return p;
+      const next = { ...p.imagePrompts };
+      delete next[id];
+      return {
+        ...p,
+        imagePrompts: Object.keys(next).length > 0 ? next : undefined,
+      };
+    });
   };
 
   const acceptFile = (file: File) => {
-    const tab = form.activeTab as 'image' | 'file';
-    const msg = validateUpload(file, tab);
+    const msg = validateDocumentFile(file);
     if (msg) {
       setErrors((p) => ({ ...p, upload: msg }));
       setUploadedFile(null);
@@ -347,19 +558,29 @@ export function InputSection({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setForm((f) => ({ ...f, dragOver: false }));
+    if (form.activeTab === 'image') {
+      addImages(e.dataTransfer.files);
+      return;
+    }
     const file = e.dataTransfer.files[0];
     if (file) acceptFile(file);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (form.activeTab === 'image') {
+      if (e.target.files?.length) addImages(e.target.files);
+      e.target.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (file) acceptFile(file);
+    e.target.value = '';
   };
 
   const acceptedTypes = form.activeTab === 'image'
     ? 'image/jpeg,image/png,image/webp,image/gif'
     : '.pdf,.doc,.docx,.txt';
-  const isHighlighted = activeQuickAction === 'analyze' || activeQuickAction === 'script' || justApplied;
+  const isHighlighted = justApplied;
 
   const currentStyle = SCENE_STYLES.find((s) => s.id === sceneStyle);
   const currentSpeed = SPEED_OPTIONS.find((o) => o.value === voiceSpeed);
@@ -457,7 +678,7 @@ export function InputSection({
                   : 'text-muted-foreground',
                 )}
               >
-                {charCount.toLocaleString()} / {MAX_CHARS.toLocaleString()}
+                {formatCount(charCount)} / {formatCount(MAX_CHARS)}
               </span>
             </div>
             {charPercent > 0 && (
@@ -508,7 +729,113 @@ export function InputSection({
           </div>
         )}
 
-        {(form.activeTab === 'image' || form.activeTab === 'file') && (
+        {form.activeTab === 'image' && (
+          <div className="space-y-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={acceptedTypes}
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            {uploadedImages.length > 0 && (
+              <div className="space-y-3">
+                {uploadedImages.map((img, index) => (
+                  <div
+                    key={img.id}
+                    className="flex gap-3 rounded-xl border border-border bg-card/50 p-3"
+                  >
+                    <div className="relative shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-lg overflow-hidden border border-border bg-muted">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.previewUrl}
+                        alt={img.file.name}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+
+                    <div className="flex-1 min-w-0 flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-foreground">
+                            Ảnh {index + 1}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {img.file.name} · {(img.file.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeImage(img.id)}
+                          title="Xóa ảnh"
+                          className="shrink-0 w-7 h-7 rounded-lg border border-border bg-muted/60 text-muted-foreground hover:text-destructive hover:border-destructive/50 hover:bg-destructive/10 flex items-center justify-center transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      <textarea
+                        value={img.prompt}
+                        onChange={(e) => updateImagePrompt(img.id, e.target.value)}
+                        placeholder="Prompt cho ảnh này — mô tả cảnh, chuyển động, góc quay..."
+                        rows={3}
+                        className={cn(
+                          'w-full resize-y min-h-[72px] px-3 py-2 text-xs rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
+                          errors.imagePrompts?.[img.id]
+                            ? 'border-destructive/60 focus:ring-destructive/30'
+                            : 'border-border focus:ring-primary/30',
+                        )}
+                      />
+
+                      {errors.imagePrompts?.[img.id] && (
+                        <p className="flex items-start gap-1 text-[11px] text-destructive leading-relaxed">
+                          <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                          <span>{errors.imagePrompts[img.id]}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setForm((f) => ({ ...f, dragOver: true })); }}
+              onDragLeave={() => setForm((f) => ({ ...f, dragOver: false }))}
+              onDrop={handleDrop}
+              onClick={() => uploadedImages.length < MAX_IMAGES && fileInputRef.current?.click()}
+              className={cn(
+                'w-full border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors px-4 text-center',
+                uploadedImages.length > 0 ? 'h-28' : 'h-40',
+                form.dragOver ? 'border-primary bg-primary/5'
+                : errors.upload ? 'border-destructive/60 bg-destructive/5 hover:border-destructive'
+                : 'border-border hover:border-primary/50 hover:bg-card',
+                uploadedImages.length >= MAX_IMAGES && 'opacity-50 cursor-not-allowed',
+              )}
+            >
+              <Plus className={cn('w-7 h-7', uploadedImages.length > 0 ? 'text-primary' : 'text-muted-foreground')} />
+              <p className="text-sm text-muted-foreground">
+                {uploadedImages.length > 0
+                  ? `Thêm ảnh (${uploadedImages.length}/${MAX_IMAGES})`
+                  : 'Kéo thả hoặc chọn nhiều hình ảnh'}
+              </p>
+              <p className="text-xs text-muted-foreground/70">
+                JPG, PNG, WebP, GIF — tối đa {MAX_IMAGE_MB} MB/ảnh
+              </p>
+            </div>
+
+            {errors.upload && (
+              <p className="flex items-start gap-1 text-xs text-destructive leading-relaxed">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{errors.upload}</span>
+              </p>
+            )}
+          </div>
+        )}
+
+        {form.activeTab === 'file' && (
           <div>
             <input
               ref={fileInputRef}
@@ -531,9 +858,7 @@ export function InputSection({
             >
               {uploadedFile ? (
                 <>
-                  {form.activeTab === 'image'
-                    ? <Image className="w-8 h-8 text-primary" />
-                    : <File className="w-8 h-8 text-primary" />}
+                  <File className="w-8 h-8 text-primary" />
                   <p className="text-sm font-medium text-foreground truncate max-w-full">{uploadedFile.name}</p>
                   <p className="text-xs text-muted-foreground">
                     {(uploadedFile.size / 1024 / 1024).toFixed(2)} MB — Nhấn để thay thế
@@ -541,54 +866,24 @@ export function InputSection({
                 </>
               ) : (
                 <>
-                  {form.activeTab === 'image'
-                    ? <Image className="w-8 h-8 text-muted-foreground" />
-                    : <File className="w-8 h-8 text-muted-foreground" />}
+                  <File className="w-8 h-8 text-muted-foreground" />
                   <p className="text-sm text-muted-foreground">
-                    {form.activeTab === 'image'
-                      ? 'Kéo thả hình ảnh vào đây, hoặc nhấn để chọn'
-                      : 'Kéo thả file PDF/Word vào đây, hoặc nhấn để chọn'}
+                    Kéo thả file PDF/Word vào đây, hoặc nhấn để chọn
                   </p>
                   <p className="text-xs text-muted-foreground/70">
-                    {form.activeTab === 'image'
-                      ? `JPG, PNG, WebP, GIF — tối đa ${MAX_IMAGE_MB} MB`
-                      : `PDF, DOC, DOCX, TXT — tối đa ${MAX_FILE_MB} MB`}
+                    PDF, DOC, DOCX, TXT — tối đa {MAX_FILE_MB} MB
                   </p>
                 </>
               )}
             </div>
             {errors.upload && (
               <p className="flex items-start gap-1 text-xs text-destructive mt-1.5 leading-relaxed">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                 <span>{errors.upload}</span>
               </p>
             )}
           </div>
         )}
-      </div>
-
-      {/* Config dropdowns */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        {[
-          { label: 'Ngôn ngữ',      field: 'language' as const,   opts: [['vi','Tiếng Việt'],['en','English'],['zh','中文'],['ja','日本語']] },
-          { label: 'Số lượng cảnh', field: 'sceneCount' as const, opts: [['3','3 cảnh'],['5','5 cảnh'],['8','8 cảnh'],['10','10 cảnh'],['15','15 cảnh']] },
-          { label: 'Kiểu video',    field: 'videoType' as const,  opts: [['storytelling','Kể chuyện'],['tutorial','Hướng dẫn'],['ads','Quảng cáo'],['review','Review sản phẩm']] },
-          { label: 'Giọng đọc',   field: 'voice' as const,   opts: [['male-natural','Giọng nam – tự nhiên'],['female-natural','Giọng nữ – tự nhiên'],['male-pro','Giọng nam – chuyên nghiệp'],['female-young','Giọng nữ – trẻ trung']] },
-        ].map(({ label, field, opts }) => (
-          <div key={field}>
-            <label htmlFor={`config-${field}`} className="text-xs font-semibold text-muted-foreground block mb-2">
-              {label}
-            </label>
-            <select
-              id={`config-${field}`}
-              value={form[field]}
-              onChange={(e) => setForm((f) => ({ ...f, [field]: e.target.value }))}
-              className="w-full px-3 py-2.5 bg-card border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors"
-            >
-              {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </div>
-        ))}
       </div>
 
       {/* ── Tùy chỉnh nâng cao — nhóm Voice Speed + Scene Style ─────────── */}
@@ -638,7 +933,7 @@ export function InputSection({
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => setVoiceSpeed(opt.value)}
+                      onClick={() => patchSettings({ voiceSpeed: opt.value })}
                       aria-pressed={isActive}
                       className={cn(
                         'flex flex-col items-center px-4 py-2 rounded-xl border text-xs font-medium transition-all',
@@ -699,7 +994,7 @@ export function InputSection({
                     <button
                       key={style.id}
                       type="button"
-                      onClick={() => setSceneStyle(style.id)}
+                      onClick={() => patchSettings({ sceneStyle: style.id })}
                       aria-pressed={isActive}
                       className={cn(
                         'flex flex-col items-start gap-1 p-3 rounded-xl border text-left transition-all',
@@ -723,20 +1018,26 @@ export function InputSection({
       </div>
 
       {/* Actions row */}
+      {errors.submit && (
+        <p className="flex items-start gap-1.5 text-xs text-destructive leading-relaxed">
+          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <span>{errors.submit}</span>
+        </p>
+      )}
       <div className="flex flex-col sm:flex-row gap-2">
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={form.isSubmitting}
+          disabled={isBulkBusy}
           className={cn(
             'flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2',
-            form.submitted
+            form.submitted && !isBulkBusy
               ? 'bg-green-600 text-white cursor-default'
               : 'bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-60 disabled:cursor-not-allowed',
           )}
         >
-          {form.isSubmitting
-            ? <><Loader2 className="w-4 h-4 animate-spin" />Đang phân tích...</>
+          {isBulkBusy
+            ? <><Loader2 className="w-4 h-4 animate-spin" />{bulkStatus === 'analyzing' ? 'Đang phân tích...' : 'Đang tạo cảnh...'}</>
             : form.submitted
               ? <>✓ Kịch bản đã được tạo</>
               : <><Send className="w-4 h-4" />Phân Tích &amp; Tạo Kịch Bản</>}
