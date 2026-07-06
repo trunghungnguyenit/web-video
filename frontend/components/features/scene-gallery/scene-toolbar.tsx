@@ -83,7 +83,7 @@ export function SceneToolbar({
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-orange-500/30 text-orange-400 hover:bg-orange-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <RefreshCw className={cn('w-3.5 h-3.5', isRegenerating && 'animate-spin')} />
-          {isRegenerating ? 'Đang gen lại...' : 'Gen lại lỗi'}
+          {isRegenerating ? 'Đang tạo lại...' : 'Tạo lại cảnh đã sửa / lỗi'}
         </button>
         <button
           onClick={() => onSceneAction('delete')}

@@ -1,11 +1,11 @@
 'use client';
 
-import { Settings, Key, Clock, Shield } from 'lucide-react';
+import { Settings, Key, Film, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GeneralSettings } from '../general-settings';
 import { KeySetupSettings } from '../key-setup-settings';
-import { ApiKeysSettings } from '../api-keys-settings';
 import { RenderHistorySettings } from '../render-history-settings';
+import { ExportSettings } from '../export-settings/export-settings';
 
 interface Tab {
   id: string;
@@ -15,10 +15,10 @@ interface Tab {
 }
 
 const settingsTabs: Tab[] = [
-  { id: 'general', label: 'Cài đặt chung',   icon: Settings, desc: 'Ngôn ngữ, theme, tài khoản' },
-  { id: 'key',     label: 'License & Key',    icon: Key,      desc: 'License key, OpenAI API' },
-  { id: 'api',     label: 'API Keys',         icon: Shield,   desc: 'Kết nối dịch vụ AI' },
-  { id: 'history', label: 'Lịch sử render',   icon: Clock,    desc: 'Video đã xuất' },
+  { id: 'general', label: 'Cài đặt chung', icon: Settings, desc: 'Ngôn ngữ, theme, tài khoản' },
+  { id: 'key',     label: 'License & API', icon: Key,      desc: 'License key, Gemini, Veo, TTS' },
+  { id: 'export',  label: 'Xuất & Render', icon: Film,     desc: 'Thư mục, phụ đề, watermark' },
+  { id: 'history', label: 'Lịch sử render',icon: Clock,    desc: 'Video đã xuất' },
 ];
 
 interface SettingsPanelProps {
@@ -29,12 +29,11 @@ interface SettingsPanelProps {
 export function SettingsPanel({ activeTab, onTabChange }: SettingsPanelProps) {
   return (
     <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 lg:gap-8 items-start">
-      {/* Tab nav — horizontal on mobile, vertical sidebar on sm+ */}
+      {/* Tab nav */}
       <nav className="w-full sm:w-44 lg:w-52 flex-shrink-0 sm:sticky sm:top-4">
         <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest px-3 mb-2 hidden sm:block">
           Cài đặt
         </p>
-        {/* Mobile: horizontal scroll tabs */}
         <div className="flex sm:flex-col gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
           {settingsTabs.map((tab) => {
             const Icon = tab.icon;
@@ -48,7 +47,7 @@ export function SettingsPanel({ activeTab, onTabChange }: SettingsPanelProps) {
                   'flex items-center gap-2 sm:gap-3 px-3 py-2 sm:py-2.5 rounded-xl text-left transition-all duration-150 cursor-pointer whitespace-nowrap sm:whitespace-normal flex-shrink-0 sm:flex-shrink sm:w-full',
                   isActive
                     ? 'bg-primary/10 border border-primary/20 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30',
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted/30 border border-transparent',
                 )}
               >
                 <Icon className={cn('w-4 h-4 flex-shrink-0', isActive ? 'text-primary' : 'text-muted-foreground')} />
@@ -68,7 +67,7 @@ export function SettingsPanel({ activeTab, onTabChange }: SettingsPanelProps) {
       <div className="flex-1 min-w-0 w-full">
         {activeTab === 'general' && <GeneralSettings />}
         {activeTab === 'key'     && <KeySetupSettings />}
-        {activeTab === 'api'     && <ApiKeysSettings />}
+        {activeTab === 'export'  && <ExportSettings />}
         {activeTab === 'history' && <RenderHistorySettings />}
       </div>
     </div>

@@ -1,4 +1,6 @@
-// ─── Dữ liệu kịch bản mẫu ────────────────────────────────────────────────────
+// ─── Dữ liệu kịch bản mẫu (demo đầy đủ 4 mục) ───────────────────────────────
+
+import { PRESET_DEMO_SCENES, PRESET_DEMO_TIMELINES } from '@/lib/preset-demos';
 
 export interface PresetCharacter {
   name: string;
@@ -12,153 +14,217 @@ export interface PresetCharacter {
 export interface PresetInput {
   content: string;
   language: string;
-  duration: string;
+  sceneCount: string;
   videoType: string;
   voice: string;
+  aspectRatio: string;
+  sceneDuration: string;
+  videoQuality?: string;
+  veoModel?: string;
+  /** Demo: tốc độ giọng TTS (mục 2) */
+  voiceSpeed?: number;
+  /** Demo: id phong cách cảnh (mục 2) */
+  sceneStyleId?: string;
+}
+
+/** Cảnh demo sẵn có — mục 3 & 4 */
+export interface PresetDemoScene {
+  prompt: string;
+  voice: string;
+  durationSeconds: number;
+}
+
+/** Cấu hình timeline demo — mục 4 */
+export interface PresetTimelineDemo {
+  includeSubtitles: boolean;
+  bgmPresetName: string;
+  bgmVolume: number;
+  voiceSpeed: number;
+  sceneStyle: string;
+  transitionNote?: string;
 }
 
 export interface PresetScript {
   id: number;
   title: string;
   desc: string;
-  badge: string; // nhãn hiển thị trong modal
+  badge: string;
+  /** @deprecated dùng characters — giữ để tương thích */
   character: PresetCharacter;
+  /** Nhân vật demo (mục 1) — có thể nhiều nhân vật */
+  characters: PresetCharacter[];
   input: PresetInput;
+  /** Cảnh video demo (mục 3) */
+  demoScenes: PresetDemoScene[];
+  /** Timeline demo (mục 4) */
+  timeline: PresetTimelineDemo;
 }
+
+const CHAR_PRODUCT_MAIN: PresetCharacter = {
+  name: 'Alex — Chuyên gia sản phẩm',
+  role: 'Product Specialist',
+  traits: 'Tự tin, nhiệt tình, am hiểu công nghệ',
+  outfit: 'Áo sơ mi xanh navy, quần tây đen, đeo tai nghe chuyên nghiệp',
+  description:
+    'Alex là chuyên gia tư vấn sản phẩm công nghệ với hơn 5 năm kinh nghiệm. Phong cách trình bày rõ ràng, dễ hiểu, luôn tập trung vào lợi ích thực tiễn của người dùng.',
+  style: 'Cinematic',
+};
+
+const CHAR_PRODUCT_SUPPORT: PresetCharacter = {
+  name: 'Sam — Khách hàng thử nghiệm',
+  role: 'Early Adopter',
+  traits: 'Tò mò, thực tế, dễ đồng cảm',
+  outfit: 'Áo thun trắng, quần jeans, smartwatch',
+  description:
+    'Sam đại diện cho người dùng gia đình — thử nghiệm SmartHome Pro trong căn hộ thực tế và phản hồi chân thực.',
+  style: 'Realistic',
+};
+
+const CHAR_MIA: PresetCharacter = {
+  name: 'Mia — Content Creator',
+  role: 'Social Media Creator',
+  traits: 'Năng động, sáng tạo, gần gũi với giới trẻ',
+  outfit: 'Áo thun pastel, jeans rách, mũ bucket, giày sneaker',
+  description:
+    'Mia là content creator nổi tiếng với phong cách trẻ trung, vui nhộn. Cô chuyên tạo video ngắn viral trên TikTok và Reels.',
+  style: 'Anime / Manga',
+};
+
+const CHAR_RYAN: PresetCharacter = {
+  name: 'Ryan — Brand Ambassador',
+  role: 'Brand Spokesperson',
+  traits: 'Lôi cuốn, đáng tin cậy, quyền uy',
+  outfit: 'Suit đen đẳng cấp, cà vạt đỏ, đồng hồ cao cấp',
+  description:
+    'Ryan là đại sứ thương hiệu B2B. Giọng trầm ấm, phong thái chuyên nghiệp, truyền đạt thông điệp thuyết phục.',
+  style: 'Cinematic',
+};
+
+const CHAR_LINH: PresetCharacter = {
+  name: 'Dr. Linh — Giảng viên',
+  role: 'Expert Instructor',
+  traits: 'Kiên nhẫn, tỉ mỉ, truyền đạt dễ hiểu',
+  outfit: 'Áo blazer xanh lam nhạt, quần âu, kính gọng tròn, cầm bảng viết',
+  description:
+    'Dr. Linh là giảng viên đại học 10 năm kinh nghiệm dạy lập trình. Chuyên nội dung giáo dục từ cơ bản đến nâng cao.',
+  style: 'Flat Design',
+};
+
+const CHAR_LINH_TA: PresetCharacter = {
+  name: 'Minh — Trợ giảng',
+  role: 'Teaching Assistant',
+  traits: 'Nhiệt tình, am hiểu code thực hành',
+  outfit: 'Hoodie tech, laptop sticker, tai nghe cổ',
+  description:
+    'Minh hỗ trợ demo code trực tiếp, giải đáp thắc mắc và recap bài học ở cuối mỗi phần.',
+  style: 'Flat Design',
+};
 
 export const PRESET_SCRIPTS: PresetScript[] = [
   {
     id: 1,
     title: 'Product Demo',
-    desc: 'Giới thiệu sản phẩm',
+    desc: 'Demo đầy đủ · 2 nhân vật · 5 cảnh',
     badge: '🎯 Giới thiệu sản phẩm',
-    character: {
-      name: 'Alex — Chuyên gia sản phẩm',
-      role: 'Product Specialist',
-      traits: 'Tự tin, nhiệt tình, am hiểu công nghệ',
-      outfit: 'Áo sơ mi xanh navy, quần tây đen, đeo tai nghe chuyên nghiệp',
-      description:
-        'Alex là chuyên gia tư vấn sản phẩm công nghệ với hơn 5 năm kinh nghiệm. Phong cách trình bày rõ ràng, dễ hiểu, luôn tập trung vào lợi ích thực tiễn của người dùng.',
-      style: 'Cinematic',
-    },
+    character: CHAR_PRODUCT_MAIN,
+    characters: [CHAR_PRODUCT_MAIN, CHAR_PRODUCT_SUPPORT],
     input: {
       content:
         'Giới thiệu sản phẩm SmartHome Pro — thiết bị điều khiển nhà thông minh thế hệ mới.\n\n' +
-        '✅ Tính năng nổi bật:\n' +
-        '- Điều khiển toàn bộ thiết bị trong nhà qua app di động\n' +
-        '- Tiết kiệm điện năng lên đến 40% nhờ AI tự động hóa\n' +
-        '- Kết nối 200+ thiết bị thông minh, tương thích mọi nền tảng\n' +
-        '- Bảo mật 2 lớp, dữ liệu mã hóa end-to-end\n\n' +
-        '📦 Phù hợp với: Hộ gia đình, văn phòng, căn hộ cao cấp\n' +
-        '💰 Giá: 2.990.000đ — Bảo hành 2 năm chính hãng',
+        '1. Mở đầu — Alex giới thiệu sản phẩm và lợi ích chính\n' +
+        '2. Demo app điều khiển toàn bộ thiết bị từ xa\n' +
+        '3. AI tiết kiệm 40% điện năng tự động\n' +
+        '4. Tương thích 200+ thiết bị, đa nền tảng\n' +
+        '5. Giá, bảo hành và kêu gọi mua hàng',
       language: 'vi',
-      duration: '1-3',
+      sceneCount: '5',
       videoType: 'review',
       voice: 'male-natural',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
+      voiceSpeed: 1,
+      sceneStyleId: 'cinematic',
     },
+    demoScenes: PRESET_DEMO_SCENES[1],
+    timeline: PRESET_DEMO_TIMELINES[1],
   },
   {
     id: 2,
     title: 'Social Media',
-    desc: 'TikTok / Reels',
+    desc: 'Demo TikTok · 1 nhân vật · 5 cảnh',
     badge: '📱 TikTok / Reels',
-    character: {
-      name: 'Mia — Content Creator',
-      role: 'Social Media Creator',
-      traits: 'Năng động, sáng tạo, gần gũi với giới trẻ',
-      outfit: 'Áo thun pastel, jeans rách, mũ bucket, giày sneaker',
-      description:
-        'Mia là content creator nổi tiếng với phong cách trẻ trung, vui nhộn. Cô nàng chuyên tạo ra những video ngắn viral trên TikTok và Instagram Reels, luôn bắt trend nhanh và có góc nhìn độc đáo.',
-      style: 'Anime / Manga',
-    },
+    character: CHAR_MIA,
+    characters: [CHAR_MIA],
     input: {
       content:
-        '🔥 Video viral: "5 mẹo học tiếng Anh siêu tốc mà trường học không dạy bạn"\n\n' +
-        'Hook mở đầu (3 giây): "Bạn đã học tiếng Anh bao nhiêu năm mà vẫn không nói được?"\n\n' +
-        'Nội dung chính:\n' +
-        '1. Nghe nhạc/podcast tiếng Anh mỗi sáng — 15 phút/ngày\n' +
-        '2. Shadowing — bắt chước giọng người bản ngữ\n' +
-        '3. Học qua series phim yêu thích có phụ đề\n' +
-        '4. App Anki — học từ vựng bằng spaced repetition\n' +
-        '5. Tìm speaking partner online — italki, HelloTalk\n\n' +
-        'CTA: "Follow để nhận thêm tips học ngoại ngữ mỗi ngày! 🎯"',
+        '🔥 Video viral: "5 mẹo học tiếng Anh siêu tốc"\n\n' +
+        '1. Hook gây tò mò — câu hỏi mở đầu\n' +
+        '2. Mẹo nghe podcast mỗi sáng\n' +
+        '3. Shadowing giọng bản ngữ\n' +
+        '4. Học qua phim + app Anki\n' +
+        '5. CTA follow nhận tips mỗi ngày',
       language: 'vi',
-      duration: '1-3',
+      sceneCount: '5',
       videoType: 'storytelling',
       voice: 'female-young',
+      aspectRatio: '9:16',
+      sceneDuration: '4',
+      voiceSpeed: 1.25,
+      sceneStyleId: 'anime',
     },
+    demoScenes: PRESET_DEMO_SCENES[2],
+    timeline: PRESET_DEMO_TIMELINES[2],
   },
   {
     id: 3,
     title: 'Marketing',
-    desc: 'Quảng cáo sản phẩm',
+    desc: 'Demo quảng cáo B2B · 5 cảnh',
     badge: '📣 Quảng cáo',
-    character: {
-      name: 'Ryan — Brand Ambassador',
-      role: 'Brand Spokesperson',
-      traits: 'Lôi cuốn, đáng tin cậy, quyền uy',
-      outfit: 'Suit đen đẳng cấp, cà vạt đỏ, đồng hồ cao cấp',
-      description:
-        'Ryan là đại sứ thương hiệu có uy tín trong lĩnh vực marketing B2B. Giọng nói trầm ấm, phong thái chuyên nghiệp, chuyên truyền đạt thông điệp thương hiệu một cách thuyết phục và đáng nhớ.',
-      style: 'Cinematic',
-    },
+    character: CHAR_RYAN,
+    characters: [CHAR_RYAN],
     input: {
       content:
-        'Chiến dịch quảng cáo: "CloudSync — Giải pháp lưu trữ doanh nghiệp thế hệ mới"\n\n' +
-        'Thông điệp chính: An toàn • Nhanh chóng • Không giới hạn\n\n' +
-        'Kịch bản video 60 giây:\n\n' +
-        '[0-10s] Vấn đề: Doanh nghiệp bạn đang mất dữ liệu, chậm trễ vì hệ thống cũ kỹ?\n\n' +
-        '[10-40s] Giải pháp CloudSync:\n' +
-        '- Backup tự động 24/7, không bao giờ mất dữ liệu\n' +
-        '- Tốc độ upload/download nhanh gấp 10x đối thủ\n' +
-        '- Mã hóa military-grade, đạt chuẩn ISO 27001\n' +
-        '- Đội ngũ support 24/7, SLA 99.99% uptime\n\n' +
-        '[40-60s] CTA: Dùng thử miễn phí 30 ngày — cloudSync.vn/trial',
+        'Chiến dịch CloudSync — lưu trữ doanh nghiệp\n\n' +
+        '1. Nêu vấn đề — mất dữ liệu, hệ thống cũ\n' +
+        '2. Giải pháp backup 24/7\n' +
+        '3. Tốc độ gấp 10 lần\n' +
+        '4. Bảo mật ISO 27001\n' +
+        '5. CTA dùng thử 30 ngày',
       language: 'vi',
-      duration: '1-3',
+      sceneCount: '5',
       videoType: 'ads',
       voice: 'male-pro',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
+      voiceSpeed: 1,
+      sceneStyleId: 'cinematic',
     },
+    demoScenes: PRESET_DEMO_SCENES[3],
+    timeline: PRESET_DEMO_TIMELINES[3],
   },
   {
     id: 4,
     title: 'Tutorial',
-    desc: 'Hướng dẫn chi tiết',
+    desc: 'Demo hướng dẫn · 2 nhân vật · 10 cảnh',
     badge: '📚 Hướng dẫn',
-    character: {
-      name: 'Dr. Linh — Giảng viên',
-      role: 'Expert Instructor',
-      traits: 'Kiên nhẫn, tỉ mỉ, am hiểu sâu, truyền đạt dễ hiểu',
-      outfit: 'Áo blazer xanh lam nhạt, quần âu, kính gọng tròn, cầm bảng viết',
-      description:
-        'Dr. Linh là giảng viên đại học với 10 năm kinh nghiệm giảng dạy lập trình và công nghệ. Chuyên xây dựng nội dung giáo dục từ cơ bản đến nâng cao, luôn dùng ví dụ thực tế để minh họa khái niệm phức tạp.',
-      style: 'Flat Design',
-    },
+    character: CHAR_LINH,
+    characters: [CHAR_LINH, CHAR_LINH_TA],
     input: {
       content:
-        'Hướng dẫn: "Cách xây dựng REST API với Node.js và Express từ A đến Z"\n\n' +
-        'Đối tượng: Lập trình viên mới bắt đầu, đã biết JavaScript cơ bản\n\n' +
-        'Nội dung bài học:\n\n' +
-        '1. REST API là gì? — Khái niệm, HTTP methods (GET/POST/PUT/DELETE)\n\n' +
-        '2. Cài đặt môi trường:\n' +
-        '   - Node.js v20+, npm\n' +
-        '   - VS Code + extensions hữu ích\n' +
-        '   - Postman để test API\n\n' +
-        '3. Tạo project Express cơ bản:\n' +
-        '   - npm init, cài express\n' +
-        '   - File cấu trúc chuẩn (routes, controllers, models)\n\n' +
-        '4. Xây dựng CRUD API cho "Task Manager":\n' +
-        '   - GET /tasks — lấy danh sách\n' +
-        '   - POST /tasks — tạo task mới\n' +
-        '   - PUT /tasks/:id — cập nhật\n' +
-        '   - DELETE /tasks/:id — xóa\n\n' +
-        '5. Kết nối MongoDB với Mongoose\n\n' +
-        '6. Middleware: xác thực JWT, error handling\n\n' +
-        'Kết quả: Có được API hoàn chỉnh, deploy lên Railway miễn phí',
+        'REST API với Node.js & Express — từ A đến Z\n\n' +
+        '1. REST API là gì\n2. Cài môi trường\n3. Tạo project Express\n' +
+        '4. GET /tasks\n5. POST /tasks\n6. PUT & DELETE\n' +
+        '7. MongoDB + Mongoose\n8. JWT middleware\n9. Test & deploy\n10. Tổng kết',
       language: 'vi',
-      duration: '5-10',
+      sceneCount: '10',
       videoType: 'tutorial',
       voice: 'female-natural',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
+      voiceSpeed: 0.9,
+      sceneStyleId: 'flat-design',
     },
+    demoScenes: PRESET_DEMO_SCENES[4],
+    timeline: PRESET_DEMO_TIMELINES[4],
   },
 ];

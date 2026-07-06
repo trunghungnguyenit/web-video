@@ -1,18 +1,19 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PresetScript } from '@/lib/preset-scripts';
-
+import { ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
+import { VoiceSelect } from '@/components/features/voice-select/voice-select';
+import { useDefaultVeoModel, useVeoModels } from '@/hooks/use-veo-models';
 interface PresetScriptModalProps {
   preset: PresetScript | null;
   onClose: () => void;
   onApply: (preset: PresetScript) => void;
 }
 
-type Section = 'character' | 'input';
-
+type Section = 'character' | 'input' | 'none';
 export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModalProps) {
   // Bản chỉnh sửa — clone để user có thể sửa mà không ảnh hưởng dữ liệu gốc
   const [draft, setDraft] = useState<PresetScript | null>(null);
@@ -39,7 +40,30 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
     if (preset) setDraft(JSON.parse(JSON.stringify(preset)));
   }, [preset]);
 
+  const { models: veoModels, loading: veoModelsLoading, hasKey: hasVeoKey } = useVeoModels();
+
+  const pickVeoModel = useCallback((modelId: string) => {
+    setDraft((d) => d ? { ...d, input: { ...d.input, veoModel: modelId } } : d);
+  }, []);
+
+  useDefaultVeoModel(
+    veoModels,
+    draft?.input.videoQuality ?? '720p',
+    draft?.input.veoModel ?? '',
+    pickVeoModel,
+  );
+
+  useEffect(() => {
+    setDraft((d) => {
+      if (!d) return d;
+      const next = normalizeSceneDurationSetting(d.input.sceneDuration, d.input.videoQuality);
+      return next === d.input.sceneDuration ? d : { ...d, input: { ...d.input, sceneDuration: next } };
+    });
+  }, [draft?.input.videoQuality]);
+
   if (!preset || !draft) return null;
+
+  const sceneDurationOptions = getSceneDurationOptions(draft.input.videoQuality ?? '720p');
 
   const setChar = (field: keyof PresetScript['character'], value: string) => {
     setDraft((d) => d ? { ...d, character: { ...d.character, [field]: value } } : d);
@@ -54,7 +78,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
   };
 
   const toggleSection = (s: Section) =>
-    setOpenSection((prev) => (prev === s ? ('none' as Section) : s));
+    setOpenSection((prev) => (prev === s ? 'none' : s));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -67,7 +91,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
 
       {/* Modal */}
       <div
-        className="relative z-10 w-full max-w-2xl max-h-[90vh] bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
+        className="relative z-10 w-full max-w-3xl max-h-[90vh] bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-label={`Kịch bản mẫu: ${preset.title}`}
@@ -105,11 +129,12 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto">
           {/* Info banner */}
-          <div className="mx-6 mt-4 mb-2 px-4 py-2.5 bg-primary/5 border border-primary/20 rounded-xl text-xs text-muted-foreground leading-relaxed">
-            Đọc và chỉnh sửa nội dung bên dưới theo ý muốn. Nhấn{' '}
-            <span className="text-primary font-semibold">Áp dụng kịch bản</span> để điền vào các trường tương ứng.
+          <div className="mx-6 mt-4 mb-2 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              <span className="text-primary font-semibold">Kịch bản mẫu</span> — Áp dụng sẽ điền nhân vật, nội dung và cài đặt vào mục 1 &amp; 2.
+              Nhấn <strong className="text-foreground">Phân tích &amp; Tạo Kịch Bản</strong> ở mục 2 để AI sinh danh sách cảnh và timeline.
+            </p>
           </div>
-
           {/* ── Section 1: Character ───────────────────────────────────── */}
           <div className="mx-6 mt-4 border border-border rounded-xl overflow-hidden">
             <button
@@ -120,8 +145,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
               <div className="flex items-center gap-2">
                 <User className="w-4 h-4 text-primary" />
                 <span className="text-sm font-semibold text-foreground">1. Nhân vật chính</span>
-                <span className="text-xs text-muted-foreground">(Master Character)</span>
-              </div>
+                <span className="text-xs text-muted-foreground">({draft.characters.length} nhân vật demo)</span>              </div>
               {openSection === 'character'
                 ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
                 : <ChevronDown className="w-4 h-4 text-muted-foreground" />
@@ -130,7 +154,15 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
 
             {openSection === 'character' && (
               <div className="px-4 py-4 space-y-3 border-t border-border">
-                {/* Name */}
+                {draft.characters.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5 pb-2 border-b border-border/50">
+                    {draft.characters.map((c, i) => (
+                      <span key={i} className="text-[10px] px-2 py-1 rounded-lg bg-muted/50 text-muted-foreground border border-border">
+                        {c.name.split('—')[0]?.trim() || c.name}
+                      </span>
+                    ))}
+                  </div>
+                )}                {/* Name */}
                 <div>
                   <label className="field-label block mb-1.5">Tên nhân vật</label>
                   <input
@@ -200,7 +232,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
           </div>
 
           {/* ── Section 2: Input content ──────────────────────────────── */}
-          <div className="mx-6 mt-3 mb-6 border border-border rounded-xl overflow-hidden">
+          <div className="mx-6 mt-3 border border-border rounded-xl overflow-hidden">
             <button
               type="button"
               onClick={() => toggleSection('input')}
@@ -208,8 +240,8 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
             >
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary" />
-                <span className="text-sm font-semibold text-foreground">2. Nội dung video</span>
-                <span className="text-xs text-muted-foreground">(Input Section)</span>
+                <span className="text-sm font-semibold text-foreground">2. Nội dung &amp; cài đặt</span>
+                <span className="text-xs text-muted-foreground">({draft.input.sceneCount} cảnh · {draft.input.videoType})</span>
               </div>
               {openSection === 'input'
                 ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
@@ -239,50 +271,106 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
                   />
                 </div>
 
-                {/* Config row */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div>
-                    <label className="field-label block mb-1.5">Ngôn ngữ</label>
-                    <select value={draft.input.language} onChange={(e) => setInput('language', e.target.value)} className="input-base">
-                      <option value="vi">Tiếng Việt</option>
-                      <option value="en">English</option>
-                      <option value="zh">中文</option>
-                      <option value="ja">日本語</option>
-                    </select>
+                {/* Config — layout giống form chính (mục 2) */}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="field-label block mb-1.5">Ngôn ngữ</label>
+                      <select value={draft.input.language} onChange={(e) => setInput('language', e.target.value)} className="input-base w-full min-w-0">
+                        <option value="vi">Tiếng Việt</option>
+                        <option value="en">English</option>
+                        <option value="zh">中文</option>
+                        <option value="ja">日本語</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Số lượng cảnh</label>
+                      <select value={draft.input.sceneCount} onChange={(e) => setInput('sceneCount', e.target.value)} className="input-base w-full min-w-0">
+                        <option value="3">3 cảnh</option>
+                        <option value="5">5 cảnh</option>
+                        <option value="8">8 cảnh</option>
+                        <option value="10">10 cảnh</option>
+                        <option value="15">15 cảnh</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Kiểu video</label>
+                      <select value={draft.input.videoType} onChange={(e) => setInput('videoType', e.target.value)} className="input-base w-full min-w-0">
+                        <option value="storytelling">Kể chuyện</option>
+                        <option value="tutorial">Hướng dẫn</option>
+                        <option value="ads">Quảng cáo</option>
+                        <option value="review">Review</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Tỷ lệ video</label>
+                      <select value={draft.input.aspectRatio ?? '16:9'} onChange={(e) => setInput('aspectRatio', e.target.value)} className="input-base w-full min-w-0">
+                        {ASPECT_RATIO_OPTIONS.map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Thời lượng cảnh</label>
+                      <select
+                        value={draft.input.sceneDuration ?? '6'}
+                        onChange={(e) => setInput('sceneDuration', e.target.value)}
+                        disabled={draft.input.videoQuality === '1080p'}
+                        className="input-base w-full min-w-0 disabled:opacity-60"
+                      >
+                        {sceneDurationOptions.map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="field-label block mb-1.5">Chất lượng video</label>
+                      <select value={draft.input.videoQuality ?? '720p'} onChange={(e) => setInput('videoQuality', e.target.value)} className="input-base w-full min-w-0">
+                        {VIDEO_QUALITY_OPTIONS.map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="field-label block mb-1.5">Độ dài</label>
-                    <select value={draft.input.duration} onChange={(e) => setInput('duration', e.target.value)} className="input-base">
-                      <option value="1-3">1 – 3 phút</option>
-                      <option value="5-10">5 – 10 phút</option>
-                      <option value="10-20">10 – 20 phút</option>
-                      <option value="20-30">20 – 30 phút</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="field-label block mb-1.5">Kiểu video</label>
-                    <select value={draft.input.videoType} onChange={(e) => setInput('videoType', e.target.value)} className="input-base">
-                      <option value="storytelling">Kể chuyện</option>
-                      <option value="tutorial">Hướng dẫn</option>
-                      <option value="ads">Quảng cáo</option>
-                      <option value="review">Review</option>
-                    </select>
-                  </div>
+
+                  {hasVeoKey && (
+                    <div>
+                      <label className="field-label block mb-1.5">Model Veo</label>
+                      <div className="relative">
+                        <select
+                          value={draft.input.veoModel ?? ''}
+                          onChange={(e) => setInput('veoModel', e.target.value)}
+                          disabled={veoModelsLoading || veoModels.length === 0}
+                          className="input-base w-full min-w-0 disabled:opacity-60"
+                        >
+                          {veoModelsLoading && <option value="">Đang tải model...</option>}
+                          {!veoModelsLoading && veoModels.map((m) => (
+                            <option key={m.id} value={m.id}>{m.displayName}</option>
+                          ))}
+                        </select>
+                        {veoModelsLoading && (
+                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin pointer-events-none" />
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <label className="field-label block mb-1.5">Giọng đọc</label>
-                    <select value={draft.input.voice} onChange={(e) => setInput('voice', e.target.value)} className="input-base">
-                      <option value="male-natural">Nam – tự nhiên</option>
-                      <option value="female-natural">Nữ – tự nhiên</option>
-                      <option value="male-pro">Nam – chuyên nghiệp</option>
-                      <option value="female-young">Nữ – trẻ trung</option>
-                    </select>
+                    <VoiceSelect
+                      value={draft.input.voice}
+                      onChange={(voice) => setInput('voice', voice)}
+                      language={draft.input.language}
+                      voiceSpeed={draft.input.voiceSpeed ?? 1}
+                    />
                   </div>
                 </div>
               </div>
             )}
           </div>
-        </div>
 
+          <div className="h-6" />
+        </div>
         {/* Footer actions */}
         <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-border flex-shrink-0 bg-background/50">
           <button

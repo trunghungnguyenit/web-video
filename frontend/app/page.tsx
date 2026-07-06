@@ -9,13 +9,16 @@ import { SceneGallery } from '@/components/features/scene-gallery';
 import { TimelineEditor } from '@/components/features/timeline-editor';
 import { ApiKeysManagement } from '@/components/features/api-keys-management';
 import { SettingsPanel } from '@/components/features/settings/settings-panel';
-import { VoiceSpeedPanel } from '@/components/features/voice-speed';
-import { SceneStylePanel } from '@/components/features/scene-style';
-import { BackgroundMusicPanel } from '@/components/features/background-music';
 import { SceneDurationPanel } from '@/components/features/scene-duration';
 import { PresetScriptModal } from '@/components/features/preset-script-modal';
-import type { QuickActionId } from '@/components/features/quick-actions';
-import type { PresetScript, PresetCharacter, PresetInput } from '@/lib/preset-scripts';
+import { SavedScriptsPanel } from '@/components/features/saved-scripts';
+import { BulkListPanel, BulkListDrawer } from '@/components/features/bulk-list/bulk-list-panel';
+import type { PresetScript } from '@/lib/preset-scripts';
+import type { SavedScript } from '@/lib/saved-scripts';
+import { generateScriptId, deriveTitle } from '@/lib/saved-scripts';
+import type { SavedCharacter } from '@/lib/saved-characters';
+import { BulkProjectsProvider, useBulkProjects } from '@/contexts/bulk-projects-context';
+import { ProjectSettingsProvider, type VideoSettings } from '@/contexts/project-settings-context';
 
 const viewTitles: Record<AppView, string> = {
   project: 'AI Video Studio',
@@ -23,234 +26,398 @@ const viewTitles: Record<AppView, string> = {
   settings: 'Cài đặt',
 };
 
+function ProjectWorkspace({
+  activeTool,
+  setActiveTool,
+  focusVoiceSpeedKey,
+  focusSceneStyleKey,
+  focusContentKey,
+  setFocusContentKey,
+  focusBgmKey,
+  setFocusBgmKey,
+  selectedPreset,
+  setSelectedPreset,
+  characterSectionRef,
+  inputSectionRef,
+  sceneSectionRef,
+  timelineSectionRef,
+  characterMasterRef,
+  savedScripts,
+  savedScriptsSectionRef,
+  onSaveScript,
+  onUpdateScript,
+  onDeleteScript,
+  scrollToRef,
+  onMenuOpen,
+}: {
+  activeTool: CreativeToolId | null;
+  setActiveTool: (v: CreativeToolId | null) => void;
+  focusVoiceSpeedKey: number;
+  focusSceneStyleKey: number;
+  focusContentKey: number;
+  setFocusContentKey: React.Dispatch<React.SetStateAction<number>>;
+  focusBgmKey: number;
+  setFocusBgmKey: React.Dispatch<React.SetStateAction<number>>;
+  selectedPreset: PresetScript | null;
+  setSelectedPreset: (p: PresetScript | null) => void;
+  characterSectionRef: React.RefObject<HTMLDivElement | null>;
+  inputSectionRef: React.RefObject<HTMLDivElement | null>;
+  sceneSectionRef: React.RefObject<HTMLDivElement | null>;
+  timelineSectionRef: React.RefObject<HTMLDivElement | null>;
+  characterMasterRef: React.RefObject<CharacterMasterHandle | null>;
+  savedScripts: SavedScript[];
+  savedScriptsSectionRef: React.RefObject<HTMLDivElement | null>;
+  onSaveScript: (
+    content: string,
+    meta: { language: string; sceneCount: string; videoType: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality?: string },
+  ) => void;
+  onUpdateScript: (script: SavedScript) => void;
+  onDeleteScript: (id: string) => void;
+  scrollToRef: (ref: React.RefObject<HTMLDivElement | null>) => void;
+  onMenuOpen: () => void;
+}) {
+  const {
+    activeProject,
+    setActiveScenes,
+    setActiveTimelineFocus,
+    syncSettingsForProject,
+    applyPresetToActive,
+    updateActiveProject,
+  } = useBulkProjects();
+
+  const [applyKey, setApplyKey] = useState(0);
+
+  const handleContentChange = useCallback((inputContent: string) => {
+    updateActiveProject({ inputContent });
+  }, [updateActiveProject]);
+
+  const handleCharactersChange = useCallback((characters: SavedCharacter[]) => {
+    updateActiveProject({ characters });
+  }, [updateActiveProject]);
+
+  const handleApplySavedScript = useCallback((script: SavedScript) => {
+    updateActiveProject({
+      appliedInput: {
+        content: script.content,
+        language: script.meta.language,
+        sceneCount: script.meta.sceneCount,
+        videoType: script.meta.videoType,
+        voice: script.meta.voice,
+        aspectRatio: script.meta.aspectRatio ?? '16:9',
+        sceneDuration: script.meta.sceneDuration ?? '6',
+        videoQuality: script.meta.videoQuality ?? '720p',
+      },
+      inputContent: script.content,
+    });
+    setApplyKey((k) => k + 1);
+    setFocusContentKey((k) => k + 1);
+    setTimeout(() => scrollToRef(inputSectionRef), 100);
+  }, [updateActiveProject, setFocusContentKey, scrollToRef, inputSectionRef]);
+
+  const handleSettingsChange = useCallback((settings: VideoSettings) => {
+    syncSettingsForProject(activeProject.id, settings);
+  }, [syncSettingsForProject, activeProject.id]);
+
+  return (
+    <ProjectSettingsProvider
+      projectKey={activeProject.id}
+      initialSettings={activeProject.settings}
+      onSettingsChange={handleSettingsChange}
+    >
+      <div className="flex flex-1 flex-col overflow-hidden min-h-0">
+        <Header
+          title={viewTitles.project}
+          showVideoSettings
+          onMenuOpen={onMenuOpen}
+        />
+
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <BulkListPanel />
+
+        <div className="flex-1 overflow-y-auto min-w-0">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-8 pb-24 md:pb-6">
+            <div className="flex items-center gap-2 px-1">
+              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Bulk</span>
+              <h2 className="text-sm font-bold text-foreground truncate">{activeProject.title}</h2>
+              {(activeProject.status === 'generating' || activeProject.status === 'analyzing') && (
+                <span className="text-[10px] text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0">Đang chạy</span>
+              )}
+            </div>
+
+            {activeTool === 'scene-duration' && (
+              <SceneDurationPanel onClose={() => setActiveTool(null)} />
+            )}
+
+            <div ref={characterSectionRef}>
+              <CharacterMaster
+                key={activeProject.id}
+                ref={characterMasterRef}
+                initialCharacters={activeProject.characters}
+                onCharactersChange={handleCharactersChange}
+              />
+            </div>
+
+            <div ref={inputSectionRef}>
+              <InputSection
+                key={activeProject.id}
+                projectId={activeProject.id}
+                presetData={activeProject.appliedInput}
+                presetKey={applyKey}
+                initialContent={activeProject.inputContent}
+                onContentChange={handleContentChange}
+                onSaveScript={onSaveScript}
+                focusVoiceSpeedKey={focusVoiceSpeedKey}
+                focusSceneStyleKey={focusSceneStyleKey}
+                focusContentKey={focusContentKey}
+                characterMasterRef={characterMasterRef}
+              />
+            </div>
+
+            {savedScripts.length > 0 && (
+              <div ref={savedScriptsSectionRef}>
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-xs font-bold text-primary uppercase tracking-widest">
+                      2.5. KỊCH BẢN ĐÃ LƯU ({savedScripts.length})
+                    </h2>
+                    <span className="text-xs text-muted-foreground">
+                      Chọn để dùng lại · Sửa · Xóa
+                    </span>
+                  </div>
+                  <SavedScriptsPanel
+                    scripts={savedScripts}
+                    onApply={handleApplySavedScript}
+                    onUpdate={onUpdateScript}
+                    onDelete={onDeleteScript}
+                  />
+                </section>
+              </div>
+            )}
+
+            <div ref={sceneSectionRef}>
+              <SceneGallery
+                scenes={activeProject.scenes}
+                onScenesChange={setActiveScenes}
+                ttsInput={activeProject.ttsInput}
+                veoInput={activeProject.veoInput}
+                onSceneFocus={setActiveTimelineFocus}
+              />
+            </div>
+
+            <div ref={timelineSectionRef}>
+              <TimelineEditor
+                key={activeProject.id}
+                scenes={activeProject.scenes}
+                focusBgmKey={focusBgmKey}
+                timelineDefaults={activeProject.timelineDemo}
+                focusSceneId={activeProject.timelineFocusSceneId}
+                onFocusSceneHandled={() => setActiveTimelineFocus(null)}
+              />
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <PresetScriptModal
+        preset={selectedPreset}
+        onClose={() => setSelectedPreset(null)}
+        onApply={(preset) => {
+          setSelectedPreset(null);
+          characterMasterRef.current?.applyDemoCharacters(preset.characters);
+          applyPresetToActive(preset.input, preset.timeline);
+          setApplyKey((k) => k + 1);
+          setTimeout(() => scrollToRef(inputSectionRef), 100);
+        }}
+      />
+    </ProjectSettingsProvider>
+  );
+}
+
 export default function Page() {
   const [currentView, setCurrentView] = useState<AppView>('project');
   const [activeMenuId, setActiveMenuId] = useState('project');
   const [activeTool, setActiveTool] = useState<CreativeToolId | null>(null);
-  const [activeQuickAction, setActiveQuickAction] = useState<QuickActionId | null>(null);
   const [settingsTab, setSettingsTab] = useState('general');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  // Preset modal state
+  const [bulkDrawerOpen, setBulkDrawerOpen] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<PresetScript | null>(null);
+  const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
+  const savedScriptsSectionRef = useRef<HTMLDivElement>(null);
 
-  // Applied preset data — dùng key trick để force re-render component nhận preset
-  const [appliedCharacter, setAppliedCharacter] = useState<PresetCharacter | null>(null);
-  const [appliedInput, setAppliedInput] = useState<PresetInput | null>(null);
-  const [applyKey, setApplyKey] = useState(0); // increment để trigger useEffect trong children
+  const [focusVoiceSpeedKey, setFocusVoiceSpeedKey] = useState(0);
+  const [focusSceneStyleKey, setFocusSceneStyleKey] = useState(0);
+  const [focusContentKey, setFocusContentKey] = useState(0);
+  const [focusBgmKey, setFocusBgmKey] = useState(0);
 
-  // Ref để scroll đến từng section
   const characterSectionRef = useRef<HTMLDivElement>(null);
   const inputSectionRef = useRef<HTMLDivElement>(null);
   const sceneSectionRef = useRef<HTMLDivElement>(null);
   const timelineSectionRef = useRef<HTMLDivElement>(null);
-
-  // Ref để gọi applyPreset trực tiếp qua CharacterMasterHandle
   const characterMasterRef = useRef<CharacterMasterHandle>(null);
 
   const scrollToRef = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
     ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
+  const handleSaveScript = useCallback((
+    content: string,
+    meta: { language: string; sceneCount: string; videoType: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality?: string },
+  ) => {
+    const now = new Date().toISOString();
+    const newScript: SavedScript = {
+      id: generateScriptId(),
+      title: deriveTitle(content),
+      content,
+      meta,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setSavedScripts((prev) => [newScript, ...prev]);
+    setTimeout(() => savedScriptsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
+  }, []);
+
+  const handleUpdateScript = useCallback((updated: SavedScript) => {
+    setSavedScripts((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+  }, []);
+
+  const handleDeleteScript = useCallback((id: string) => {
+    setSavedScripts((prev) => prev.filter((s) => s.id !== id));
+  }, []);
+
   const handleMenuClick = (menuId: string, view: AppView) => {
     setActiveMenuId(menuId);
     setCurrentView(view);
     setSidebarOpen(false);
-    if (view !== 'project') {
-      setActiveTool(null);
-      setActiveQuickAction(null);
-    }
+    if (view !== 'project') setActiveTool(null);
   };
 
   const handleToolClick = (toolId: CreativeToolId) => {
     setCurrentView('project');
     setActiveMenuId('project');
-    setActiveQuickAction(null);
-    setActiveTool((prev) => (prev === toolId ? null : toolId));
     setSidebarOpen(false);
+
+    if (toolId === 'bulk-list') {
+      setBulkDrawerOpen(true);
+      setActiveTool('bulk-list');
+      return;
+    }
+
+    setActiveTool(toolId === 'scene-duration' ? (activeTool === 'scene-duration' ? null : 'scene-duration') : null);
+
+    switch (toolId) {
+      case 'character': setTimeout(() => scrollToRef(characterSectionRef), 50); break;
+      case 'content': setFocusContentKey((k) => k + 1); setTimeout(() => scrollToRef(inputSectionRef), 50); break;
+      case 'scene-gallery': setTimeout(() => scrollToRef(sceneSectionRef), 50); break;
+      case 'timeline': setTimeout(() => scrollToRef(timelineSectionRef), 50); break;
+      case 'voice-speed': setFocusVoiceSpeedKey((k) => k + 1); setTimeout(() => scrollToRef(inputSectionRef), 50); break;
+      case 'scene-style': setFocusSceneStyleKey((k) => k + 1); setTimeout(() => scrollToRef(inputSectionRef), 50); break;
+      case 'scene-duration': setTimeout(() => scrollToRef(sceneSectionRef), 50); break;
+      case 'background-music': setFocusBgmKey((k) => k + 1); setTimeout(() => scrollToRef(timelineSectionRef), 50); break;
+    }
   };
 
-  const handleQuickActionClick = useCallback((actionId: QuickActionId) => {
-    setCurrentView('project');
-    setActiveMenuId('project');
-    switch (actionId) {
-      case 'analyze':
-        setActiveQuickAction('analyze');
-        setTimeout(() => {
-          scrollToRef(inputSectionRef);
-          inputSectionRef.current?.querySelector('textarea')?.focus();
-        }, 50);
-        break;
-      case 'script':
-        setActiveQuickAction('script');
-        setTimeout(() => scrollToRef(inputSectionRef), 50);
-        break;
-      case 'split':
-        setActiveQuickAction('split');
-        setTimeout(() => scrollToRef(sceneSectionRef), 50);
-        break;
-      case 'scene-duration':
-        setActiveTool(null);
-        setActiveQuickAction((prev) => (prev === 'scene-duration' ? null : 'scene-duration'));
-        break;
-      case 'generate':
-        setActiveQuickAction('generate');
-        setTimeout(() => scrollToRef(sceneSectionRef), 50);
-        break;
-      case 'render':
-        setActiveQuickAction('render');
-        setTimeout(() => {
-          scrollToRef(timelineSectionRef);
-          timelineSectionRef.current?.querySelector<HTMLButtonElement>('button[data-render]')?.focus();
-        }, 50);
-        break;
-      default:
-        setActiveQuickAction(actionId);
-    }
-  }, [scrollToRef]);
-
-  // Khi user click kịch bản mẫu trong sidebar → mở modal preview
   const handlePresetSelect = (preset: PresetScript) => {
-    // Chuyển về màn project trước
     setCurrentView('project');
     setActiveMenuId('project');
     setSidebarOpen(false);
     setSelectedPreset(preset);
   };
 
-  // Khi user nhấn "Áp dụng kịch bản" trong modal
-  const handlePresetApply = (preset: PresetScript) => {
-    // Đóng modal
-    setSelectedPreset(null);
-
-    // Apply vào CharacterMaster qua ref (instant, không cần key trick)
-    characterMasterRef.current?.applyPreset(preset.character);
-
-    // Apply vào InputSection qua state + key increment để trigger useEffect
-    setAppliedCharacter(preset.character);
-    setAppliedInput(preset.input);
-    setApplyKey((k) => k + 1);
-
-    // Scroll về đầu trang (section 1)
-    setTimeout(() => scrollToRef(characterSectionRef), 100);
-  };
-
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
-      {/* Desktop sidebar */}
-      <div className="hidden md:flex flex-shrink-0">
-        <Sidebar
-          activeView={currentView}
-          activeMenuId={activeMenuId}
-          activeTool={activeTool}
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
-          onMenuClick={handleMenuClick}
-          onToolClick={handleToolClick}
-          onPresetSelect={handlePresetSelect}
-        />
-      </div>
-
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 md:hidden"
-          onClick={() => setSidebarOpen(false)}
-        >
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-          <div
-            className="absolute left-0 top-0 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Sidebar
-              activeView={currentView}
-              activeMenuId={activeMenuId}
-              activeTool={activeTool}
-              collapsed={false}
-              onToggleCollapse={() => setSidebarOpen(false)}
-              onMenuClick={handleMenuClick}
-              onToolClick={handleToolClick}
-              onPresetSelect={handlePresetSelect}
-            />
-          </div>
+    <BulkProjectsProvider>
+      <div className="flex h-screen bg-background overflow-hidden">
+        <div className="hidden md:flex flex-shrink-0">
+          <Sidebar
+            activeView={currentView}
+            activeMenuId={activeMenuId}
+            activeTool={activeTool}
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+            onMenuClick={handleMenuClick}
+            onToolClick={handleToolClick}
+            onPresetSelect={handlePresetSelect}
+          />
         </div>
-      )}
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <Header
-          title={viewTitles[currentView]}
-          showQuickActions={currentView === 'project'}
-          activeQuickAction={activeQuickAction}
-          onQuickActionClick={handleQuickActionClick}
-          onBackClick={
-            currentView === 'settings'
-              ? () => handleMenuClick('project', 'project')
-              : undefined
-          }
+        {sidebarOpen && (
+          <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+            <div className="absolute left-0 top-0 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <Sidebar
+                activeView={currentView}
+                activeMenuId={activeMenuId}
+                activeTool={activeTool}
+                collapsed={false}
+                onToggleCollapse={() => setSidebarOpen(false)}
+                onMenuClick={handleMenuClick}
+                onToolClick={handleToolClick}
+                onPresetSelect={handlePresetSelect}
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+          {currentView === 'project' ? (
+            <ProjectWorkspace
+              activeTool={activeTool}
+              setActiveTool={setActiveTool}
+              focusVoiceSpeedKey={focusVoiceSpeedKey}
+              focusSceneStyleKey={focusSceneStyleKey}
+              focusContentKey={focusContentKey}
+              setFocusContentKey={setFocusContentKey}
+              focusBgmKey={focusBgmKey}
+              setFocusBgmKey={setFocusBgmKey}
+              selectedPreset={selectedPreset}
+              setSelectedPreset={setSelectedPreset}
+              characterSectionRef={characterSectionRef}
+              inputSectionRef={inputSectionRef}
+              sceneSectionRef={sceneSectionRef}
+              timelineSectionRef={timelineSectionRef}
+              characterMasterRef={characterMasterRef}
+              savedScripts={savedScripts}
+              savedScriptsSectionRef={savedScriptsSectionRef}
+              onSaveScript={handleSaveScript}
+              onUpdateScript={handleUpdateScript}
+              onDeleteScript={handleDeleteScript}
+              scrollToRef={scrollToRef}
+              onMenuOpen={() => setSidebarOpen(true)}
+            />
+          ) : (
+            <>
+              <Header
+                title={viewTitles[currentView]}
+                onBackClick={currentView === 'settings' ? () => handleMenuClick('project', 'project') : undefined}
+                onMenuOpen={() => setSidebarOpen(true)}
+              />
+              <div className="flex-1 overflow-y-auto">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+                  {currentView === 'api-keys' && <ApiKeysManagement />}
+                  {currentView === 'settings' && (
+                    <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <MobileNav
+          activeView={currentView}
+          onMenuClick={handleMenuClick}
           onMenuOpen={() => setSidebarOpen(true)}
         />
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-8 pb-24 md:pb-6">
-            {currentView === 'project' && (
-              <>
-                {activeTool === 'voice-speed' && <VoiceSpeedPanel onClose={() => setActiveTool(null)} />}
-                {activeTool === 'scene-style' && <SceneStylePanel onClose={() => setActiveTool(null)} />}
-                {activeTool === 'background-music' && <BackgroundMusicPanel onClose={() => setActiveTool(null)} />}
-                {activeQuickAction === 'scene-duration' && (
-                  <SceneDurationPanel onClose={() => setActiveQuickAction(null)} />
-                )}
-
-                {/* Section 1 — Character */}
-                <div ref={characterSectionRef}>
-                  <CharacterMaster ref={characterMasterRef} />
-                </div>
-
-                {/* Section 2 — Input */}
-                <div ref={inputSectionRef}>
-                  <InputSection
-                    activeQuickAction={activeQuickAction}
-                    onActionDone={() => setActiveQuickAction(null)}
-                    presetData={appliedInput}
-                    presetKey={applyKey}
-                  />
-                </div>
-
-                {/* Section 3 — Scene Gallery */}
-                <div ref={sceneSectionRef}>
-                  <SceneGallery />
-                </div>
-
-                {/* Section 4 — Timeline */}
-                <div ref={timelineSectionRef}>
-                  <TimelineEditor />
-                </div>
-              </>
-            )}
-
-            {currentView === 'api-keys' && <ApiKeysManagement />}
-            {currentView === 'settings' && (
-              <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} />
-            )}
-          </div>
-        </div>
+        <BulkListDrawer
+          open={bulkDrawerOpen}
+          onClose={() => {
+            setBulkDrawerOpen(false);
+            setActiveTool((t) => (t === 'bulk-list' ? null : t));
+          }}
+        />
       </div>
-
-      {/* Mobile bottom nav */}
-      <MobileNav
-        activeView={currentView}
-        onMenuClick={handleMenuClick}
-        onMenuOpen={() => setSidebarOpen(true)}
-      />
-
-      {/* Preset Script Modal */}
-      <PresetScriptModal
-        preset={selectedPreset}
-        onClose={() => setSelectedPreset(null)}
-        onApply={handlePresetApply}
-      />
-    </div>
+    </BulkProjectsProvider>
   );
 }

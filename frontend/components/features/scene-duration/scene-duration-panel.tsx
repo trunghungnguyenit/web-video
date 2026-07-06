@@ -4,8 +4,8 @@ import { Clock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
-const MIN_DURATION = 1;
-const MAX_DURATION = 30;
+const MIN_DURATION = 4;
+const MAX_DURATION = 8;
 
 interface SceneDuration {
   id: number;
@@ -13,14 +13,16 @@ interface SceneDuration {
   error?: string;
 }
 
+const VEO_DURATION_OPTIONS = [4, 6, 8];
+
 const initialScenes: SceneDuration[] = [
-  { id: 1, duration: 5 }, { id: 2, duration: 6 }, { id: 3, duration: 6 },
-  { id: 4, duration: 6 }, { id: 5, duration: 5 }, { id: 6, duration: 5 },
+  { id: 1, duration: 4 }, { id: 2, duration: 6 }, { id: 3, duration: 6 },
+  { id: 4, duration: 6 }, { id: 5, duration: 4 }, { id: 6, duration: 4 },
   { id: 7, duration: 6 }, { id: 8, duration: 6 }, { id: 9, duration: 6 },
   { id: 10, duration: 8 },
 ];
 
-const defaultOptions = [3, 5, 6, 8, 10];
+const defaultOptions = VEO_DURATION_OPTIONS;
 
 interface SceneDurationPanelProps {
   onClose: () => void;
@@ -34,16 +36,17 @@ export function SceneDurationPanel({ onClose }: SceneDurationPanelProps) {
   const total = scenes.reduce((sum, s) => sum + s.duration, 0);
   const hasErrors = scenes.some((s) => !!s.error);
 
-  const validateDuration = (val: number): string | undefined => {
-    if (isNaN(val)) return 'Không hợp lệ';
-    if (val < MIN_DURATION) return `Tối thiểu ${MIN_DURATION}s`;
-    if (val > MAX_DURATION) return `Tối đa ${MAX_DURATION}s`;
+  const validateDuration = (val: number, raw: string): string | undefined => {
+    if (raw.trim() === '') return 'Không được để trống — chọn 4, 6 hoặc 8 giây (Veo 3).';
+    if (isNaN(val)) return `Giá trị "${raw}" không phải là số hợp lệ.`;
+    if (!VEO_DURATION_OPTIONS.includes(val)) return `Veo 3 chỉ hỗ trợ 4, 6 hoặc 8 giây (nhập: ${val}s).`;
+    if (!Number.isInteger(val)) return 'Chỉ chấp nhận số nguyên (không có phần thập phân).';
     return undefined;
   };
 
   const updateDuration = (id: number, raw: string) => {
     const num = parseInt(raw, 10);
-    const error = validateDuration(num);
+    const error = validateDuration(num, raw);
     setScenes((prev) =>
       prev.map((s) => s.id === id ? { ...s, duration: isNaN(num) ? s.duration : num, error } : s),
     );
@@ -79,7 +82,7 @@ export function SceneDurationPanel({ onClose }: SceneDurationPanelProps) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Thiết lập thời lượng từng cảnh (giây). Tổng:{' '}
+        Thiết lập thời lượng từng cảnh theo Veo 3 (4 / 6 / 8 giây). Tổng:{' '}
         <span className={cn('font-semibold', total > 300 ? 'text-yellow-400' : 'text-primary')}>
           {total}s ({Math.floor(total / 60)}:{String(total % 60).padStart(2, '0')})
         </span>
@@ -166,7 +169,7 @@ export function SceneDurationPanel({ onClose }: SceneDurationPanelProps) {
       {/* Footer */}
       <div className="flex items-center justify-between pt-1 border-t border-border">
         <span className="text-xs text-muted-foreground">
-          {scenes.length} cảnh · {MIN_DURATION}–{MAX_DURATION}s mỗi cảnh
+          {scenes.length} cảnh · Veo 3: {MIN_DURATION} / 6 / {MAX_DURATION}s
         </span>
         <button
           type="button"
