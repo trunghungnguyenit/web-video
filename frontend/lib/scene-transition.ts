@@ -1,5 +1,6 @@
-/** Crossfade video / audio giữa các cảnh trong timeline preview */
+// ─── Crossfade video/audio giữa các cảnh — timeline preview ──────────────────
 
+/** Tuỳ chọn thời lượng crossfade giữa các cảnh (giây) */
 export const SCENE_TRANSITION_OPTIONS = [
   { value: 0, label: 'Cắt nhanh' },
   { value: 0.4, label: 'Crossfade 0.4s' },
@@ -7,14 +8,17 @@ export const SCENE_TRANSITION_OPTIONS = [
   { value: 1, label: 'Crossfade 1s' },
 ] as const;
 
+/** Chuyển giây → milliseconds (làm tròn, không âm) */
 export function transitionMs(seconds: number): number {
   return Math.max(0, Math.round(seconds * 1000));
 }
 
+/** Easing ease-in-out cho ramp opacity/volume */
 function easeInOut(t: number): number {
   return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 }
 
+/** Ramp volume từ `from` → `to` trong `durationMs` (requestAnimationFrame) */
 export function runVolumeRamp(
   el: HTMLMediaElement,
   from: number,
@@ -38,6 +42,7 @@ export function runVolumeRamp(
   });
 }
 
+/** Crossfade audio: fade out outgoing, fade in incoming theo masterVolume */
 export async function crossfadeAudio(
   outgoing: HTMLAudioElement | null,
   incoming: HTMLAudioElement,
@@ -66,6 +71,7 @@ export async function crossfadeAudio(
   outgoing?.pause();
 }
 
+/** Ramp opacity qua callback (dùng cho crossfade video overlay) */
 export function runOpacityRamp(
   setOpacity: (v: number) => void,
   from: number,
@@ -89,17 +95,19 @@ export function runOpacityRamp(
   });
 }
 
+/** Crossfade video: fade out outgoing, fade in incoming (opacity trên DOM) */
 export async function crossfadeVideo(
   outgoing: HTMLVideoElement | null,
   incoming: HTMLVideoElement,
   incomingSrc: string,
   durationMs: number,
   shouldPlay: boolean,
+  startOffset = 0,
 ): Promise<void> {
   if (!incomingSrc) return;
 
   incoming.src = incomingSrc;
-  incoming.currentTime = 0;
+  incoming.currentTime = Math.max(0, startOffset);
 
   if (durationMs <= 0 || !outgoing?.src) {
     outgoing?.pause();

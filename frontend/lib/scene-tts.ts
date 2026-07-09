@@ -1,3 +1,5 @@
+// ─── ElevenLabs TTS cho từng cảnh — gắn audioUrl + duration ──────────────────
+
 import type { VideoScene } from '@/lib/scenes';
 import { recalculateSceneTimings } from '@/lib/scenes';
 import type { TtsInput } from '@/lib/pipeline-payload';
@@ -6,10 +8,12 @@ import { revokeSceneVideoUrl } from '@/lib/scene-video-placeholder';
 import { createSceneVideo } from '@/lib/scene-video';
 import type { VeoInput } from '@/lib/pipeline-payload';
 
+/** Thu hồi blob URL audio TTS (tránh rò bộ nhớ) */
 export function revokeSceneAudioUrl(url?: string) {
   if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
 }
 
+/** Đọc metadata audio blob → độ dài giây */
 function getAudioDurationSeconds(blobUrl: string): Promise<number> {
   return new Promise((resolve, reject) => {
     const audio = document.createElement('audio');
@@ -29,11 +33,13 @@ function getAudioDurationSeconds(blobUrl: string): Promise<number> {
   });
 }
 
+/** Cập nhật durationSeconds cảnh theo độ dài audio (+ buffer 0.5s) */
 function durationForAudio(baseSeconds: number, audioSeconds: number): number {
   const needed = Math.ceil((audioSeconds + 0.5) * 10) / 10;
   return Math.max(baseSeconds, needed);
 }
 
+/** Gọi ElevenLabs TTS → trả blob URL audio (undefined nếu voice rỗng) */
 export async function synthesizeSceneAudio(
   scene: Pick<VideoScene, 'voice'>,
   ttsInput: TtsInput,
@@ -93,6 +99,7 @@ export async function regenerateSceneAssets(
   }
 }
 
+/** TTS tuần tự cho tất cả cảnh — throw nếu mọi cảnh có voice đều thất bại */
 export async function attachAudioToScenes(
   scenes: VideoScene[],
   ttsInput: TtsInput,

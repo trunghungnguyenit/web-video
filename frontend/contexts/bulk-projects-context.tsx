@@ -23,6 +23,8 @@ import { geminiService } from '@/services/gemini.service';
 import {
   countScenesDone,
   createBulkProject,
+  createInitialBulkProject,
+  formatBulkTitle,
   resolveVeoModelLabel,
   type CreateBulkOptions,
   type VideoBulkProject,
@@ -67,7 +69,7 @@ function patchProject(
 }
 
 export function BulkProjectsProvider({ children }: { children: ReactNode }) {
-  const initial = useMemo(() => [createBulkProject()], []);
+  const initial = useMemo(() => [createInitialBulkProject()], []);
   const [projects, setProjects] = useState<VideoBulkProject[]>(initial);
   const [activeProjectId, setActiveProjectId] = useState(initial[0].id);
   const projectsRef = useRef(projects);
@@ -104,7 +106,7 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
     setProjects((prev) => {
       const next = prev.filter((p) => p.id !== id);
       if (next.length === 0) {
-        const fresh = createBulkProject();
+        const fresh = createBulkProject({ title: formatBulkTitle(), settings: DEFAULT_VIDEO_SETTINGS });
         setActiveProjectId(fresh.id);
         return [fresh];
       }
@@ -116,7 +118,7 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
   }, [activeProjectId]);
 
   const deleteAllProjects = useCallback(() => {
-    const fresh = createBulkProject();
+    const fresh = createBulkProject({ title: formatBulkTitle(), settings: DEFAULT_VIDEO_SETTINGS });
     setProjects([fresh]);
     setActiveProjectId(fresh.id);
   }, []);

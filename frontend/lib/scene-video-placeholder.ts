@@ -1,10 +1,14 @@
+// ─── Clip WebM placeholder khi chưa có Veo / API lỗi ───────────────────────
+
 import type { VideoScene } from '@/lib/scenes';
 
+/** Kích thước canvas placeholder theo chất lượng (720p / 1080p) */
 function qualityDimensions(quality?: string): { width: number; height: number } {
   if (quality === '1080p') return { width: 1920, height: 1080 };
   return { width: 1280, height: 720 };
 }
 
+/** Vẽ text xuống dòng trên canvas — trả về y sau dòng cuối */
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -114,6 +118,7 @@ export async function createScenePlaceholderVideo(
   });
 }
 
+/** Thu hồi blob URL video cảnh (tránh rò bộ nhớ) */
 export function revokeSceneVideoUrl(url?: string) {
   if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
 }

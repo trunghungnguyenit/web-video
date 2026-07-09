@@ -1,6 +1,9 @@
+// ─── Helpers UI: cn (tailwind merge), formatCount ────────────────────────────
+
 import { clsx, type ClassValue } from 'clsx'
 import { twMerge } from 'tailwind-merge'
 
+/** Gộp class Tailwind — clsx + twMerge (tránh conflict utility) */
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }

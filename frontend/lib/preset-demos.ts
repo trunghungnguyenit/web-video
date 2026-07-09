@@ -1,6 +1,8 @@
+// ─── Dữ liệu cảnh demo + timeline theo id kịch bản mẫu ───────────────────────
+
 import type { PresetDemoScene, PresetTimelineDemo } from '@/lib/preset-scripts';
 
-/** Dữ liệu ảo cảnh + timeline theo từng kịch bản mẫu */
+/** Cảnh demo ảo theo id preset — dùng buildDemoScenesFromPreset */
 export const PRESET_DEMO_SCENES: Record<number, PresetDemoScene[]> = {
   1: [
     {
@@ -137,6 +139,7 @@ export const PRESET_DEMO_SCENES: Record<number, PresetDemoScene[]> = {
   ],
 };
 
+/** Timeline demo (playhead, BGM…) theo id preset */
 export const PRESET_DEMO_TIMELINES: Record<number, PresetTimelineDemo> = {
   1: {
     includeSubtitles: true,
@@ -169,5 +172,13 @@ export const PRESET_DEMO_TIMELINES: Record<number, PresetTimelineDemo> = {
     voiceSpeed: 0.9,
     sceneStyle: 'flat-design',
     transitionNote: 'Chuyển cảnh mượt cho tutorial dài',
+  },
+  5: {
+    includeSubtitles: true,
+    bgmPresetName: 'Cinematic Epic',
+    bgmVolume: 28,
+    voiceSpeed: 1,
+    sceneStyle: '2d-explainer',
+    transitionNote: 'Crossfade + slow motion cảnh 9 — trailer chiến tranh stickman',
   },
 };

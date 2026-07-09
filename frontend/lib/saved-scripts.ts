@@ -21,6 +21,7 @@ export interface SavedScript {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Sinh id kịch bản duy nhất: `script-{timestamp}-{random}` */
 export function generateScriptId(): string {
   return `script-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -55,6 +56,7 @@ export const SCENE_COUNT_LABELS: Record<string, string> = {
 
 export const SCENE_COUNT_OPTIONS = Object.entries(SCENE_COUNT_LABELS) as [string, string][];
 
+/** Nhãn hiển thị số cảnh từ giá trị form */
 export function formatSceneCount(value: string): string {
   return SCENE_COUNT_LABELS[value] ?? `${value} cảnh`;
 }
@@ -85,10 +87,12 @@ export const VIDEO_QUALITY_LABELS: Record<string, string> = {
 
 export const VIDEO_QUALITY_OPTIONS = Object.entries(VIDEO_QUALITY_LABELS) as [string, string][];
 
+/** Nhãn hiển thị chất lượng video từ giá trị form */
 export function formatVideoQuality(value: string): string {
   return VIDEO_QUALITY_LABELS[value] ?? value;
 }
 
+/** Nhãn hiển thị tỷ lệ khung hình từ giá trị form */
 export function formatAspectRatio(value: string): string {
   return ASPECT_RATIO_LABELS[value] ?? value;
 }
@@ -102,6 +106,7 @@ export const SCENE_DURATION_LABELS: Record<string, string> = {
 
 export const SCENE_DURATION_OPTIONS = Object.entries(SCENE_DURATION_LABELS) as [string, string][];
 
+/** Nhãn hiển thị thời lượng cảnh từ giá trị form (re-export veo-duration) */
 export function formatSceneDuration(value: string): string {
   return SCENE_DURATION_LABELS[value] ?? `${value}s/cảnh`;
 }

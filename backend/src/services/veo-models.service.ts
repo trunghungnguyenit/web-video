@@ -51,7 +51,6 @@ export async function listVeoModels(apiKey: string): Promise<VeoModelInfo[]> {
   const res = await fetch(`${BASE_URL}/models?pageSize=1000`, {
     headers: { 'X-goog-api-key': key },
   });
-
   const data = (await res.json()) as ListModelsResponse;
   if (!res.ok) {
     throw new Error(data.error?.message ?? `Không lấy được danh sách model (${res.status}).`);
@@ -68,10 +67,11 @@ export async function listVeoModels(apiKey: string): Promise<VeoModelInfo[]> {
       };
     })
     .sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi'));
-
+    console.log("models", models);
   if (models.length === 0) {
     throw new Error('Key hợp lệ nhưng không có model Veo — kiểm tra quyền Veo 3 trên tài khoản Google AI.');
   }
 
   return models;
+ 
 }

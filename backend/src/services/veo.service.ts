@@ -88,7 +88,7 @@ export async function generateSceneVideo(params: GenerateSceneVideoParams): Prom
   if (!prompt) throw new Error('Prompt video không được để trống.');
 
   const quality = params.veoInput.videoQuality ?? '720p';
-  const model = resolveVeoModel(quality, params.veoInput.veoModel);
+  const model = resolveVeoModel(params.veoInput.veoModel);
   const resolution = resolveVeoResolution(quality);
   const aspectRatio = resolveVeoAspectRatio(params.veoInput.aspectRatio);
   const durationSeconds = resolveVeoDurationSeconds(params.durationSeconds, quality);

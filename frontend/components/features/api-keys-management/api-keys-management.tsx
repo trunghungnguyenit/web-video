@@ -41,10 +41,10 @@ const INITIAL_KEYS: ApiKeyEntry[] = [
     id: 'veo',
     name: 'Veo API Key',
     service: 'veo',
-    placeholder: 'AIza... (Gemini API Key)',
+    placeholder: 'AIza... (key riêng cho Veo)',
     value: '',
     status: 'disconnected',
-    description: 'Veo 3 tạo video cảnh — nhập key sẽ tự load danh sách model Veo để chọn',
+    description: 'Veo 3 tạo video cảnh — bắt buộc nhập key riêng; lưu xong sẽ load danh sách model Veo',
   },
   {
     id: 'elevenlabs',

@@ -1,15 +1,14 @@
+// ─── Gợi ý model Veo theo chất lượng video (danh sách lấy từ API) ───────────
+
+import { API_KEY_IDS, getApiKey } from '@/lib/api-keys-store';
+
 export interface VeoModelOption {
   id: string;
   displayName: string;
   description?: string;
 }
 
-/** Danh sách dự phòng khi không gọi được API */
-export const VEO_MODEL_FALLBACKS: VeoModelOption[] = [
-  { id: 'veo-3.0-generate-001', displayName: 'Veo 3.0' },
-  { id: 'veo-3.0-fast-generate-001', displayName: 'Veo 3.0 Fast' },
-];
-
+/** Gợi ý model Veo phù hợp chất lượng (720p-fast → fast model) */
 export function suggestVeoModelForQuality(
   quality: string,
   models: VeoModelOption[],
@@ -27,14 +26,7 @@ export function suggestVeoModelForQuality(
   return standard?.id ?? models[0].id;
 }
 
+/** Chỉ đọc Veo API key riêng — không dùng chung Gemini key */
 export function getVeoApiKey(): string {
-  if (typeof window === 'undefined') return '';
-  try {
-    const raw = localStorage.getItem('web-video-api-keys');
-    if (!raw) return '';
-    const all = JSON.parse(raw) as Record<string, string>;
-    return (all.veo ?? all.gemini ?? '').trim();
-  } catch {
-    return '';
-  }
+  return getApiKey(API_KEY_IDS.veo).trim();
 }

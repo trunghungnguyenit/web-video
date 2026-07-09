@@ -1,10 +1,12 @@
+// ─── Chuyển preset → VideoScene[] / SavedCharacter[] cho demo UI ─────────────
+
 import type { PresetCharacter, PresetScript, PresetDemoScene, PresetTimelineDemo } from '@/lib/preset-scripts';
 import type { VideoScene } from '@/lib/scenes';
 import { recalculateSceneTimings } from '@/lib/scenes';
 import type { SavedCharacter } from '@/lib/saved-characters';
 import { createEmptyCharacter } from '@/lib/saved-characters';
 
-/** Chuyển nhân vật preset → SavedCharacter */
+/** Chuyển nhân vật peset → SavedCharacter */
 export function presetCharactersToSaved(list: PresetCharacter[]): SavedCharacter[] {
   const now = new Date().toISOString();
   return list.map((data, i) => ({
@@ -45,6 +47,7 @@ export function buildDemoScenesFromPreset(preset: PresetScript): VideoScene[] {
   return recalculateSceneTimings(scenes);
 }
 
+/** Thống kê preset: số nhân vật, cảnh, tổng giây, timeline demo */
 export function getPresetSummary(preset: PresetScript) {
   const totalSec = preset.demoScenes.reduce((s, c) => s + c.durationSeconds, 0);
   return {
