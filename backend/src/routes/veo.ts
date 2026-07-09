@@ -62,7 +62,7 @@ veoRoute.post('/generate', async (c) => {
       durationSeconds: body.durationSeconds ?? 6,
     });
 
-    return new Response(video, {
+    return new Response(new Uint8Array(video), {
       status: 200,
       headers: {
         'Content-Type': 'video/mp4',

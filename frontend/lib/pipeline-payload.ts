@@ -1,3 +1,5 @@
+// ─── Gom form → geminiInput / veoInput / ttsInput gửi backend ─────────────────
+
 import type { SavedCharacter } from '@/lib/saved-characters';
 
 export interface PipelineCharacter {
@@ -43,7 +45,7 @@ export interface AnalyzePipelineRequest {
   veoInput: VeoInput;
   ttsInput: TtsInput;
 }
-
+/** Chuyển đổi danh sách nhân vật từ SavedCharacter sang PipelineCharacter */
 export function toPipelineCharacters(list: SavedCharacter[]): PipelineCharacter[] {
   return list
     .filter((c) => c.name.trim())

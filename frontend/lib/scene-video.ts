@@ -1,8 +1,11 @@
+// ─── Tạo clip video cảnh qua Veo API (hoặc placeholder) ──────────────────────
+
 import type { VideoScene } from '@/lib/scenes';
 import type { VeoInput } from '@/lib/pipeline-payload';
 import { veoService } from '@/services/veo.service';
 import { createScenePlaceholderVideo, revokeSceneVideoUrl } from '@/lib/scene-video-placeholder';
 
+/** Tạo clip video cảnh — Veo API nếu có key, không thì placeholder WebM */
 export async function createSceneVideo(
   scene: VideoScene,
   veoInput: VeoInput,
@@ -11,17 +14,13 @@ export async function createSceneVideo(
   const quality = veoInput.videoQuality ?? '720p';
 
   if (apiKey) {
-    try {
-      const blob = await veoService.generate({
-        apiKey,
-        prompt: scene.prompt,
-        veoInput,
-        durationSeconds: scene.durationSeconds,
-      });
-      return URL.createObjectURL(blob);
-    } catch {
-      // Fallback placeholder khi Veo lỗi hoặc chưa bật billing
-    }
+    const blob = await veoService.generate({
+      apiKey,
+      prompt: scene.prompt,
+      veoInput,
+      durationSeconds: scene.durationSeconds,
+    });
+    return URL.createObjectURL(blob);
   }
 
   return createScenePlaceholderVideo(scene, quality);

@@ -1,3 +1,5 @@
+// ─── Ghép cảnh + BGM + phụ đề → xuất MP4 (FFmpeg.wasm client-side) ──────────
+
 import type { VideoScene } from '@/lib/scenes';
 import { recalculateSceneTimings } from '@/lib/scenes';
 import { buildSrtFromScenes } from '@/lib/subtitle-utils';
@@ -18,12 +20,14 @@ export interface VideoRenderResult {
   durationSeconds: number;
 }
 
+/** Lọc cảnh success/edited và tính lại timing trước khi render */
 function readyScenes(scenes: VideoScene[]): VideoScene[] {
   return recalculateSceneTimings(
     scenes.filter((s) => s.status === 'success' || s.status === 'edited'),
   );
 }
 
+/** Chuẩn hóa clip cảnh → MP4 H.264 qua FFmpeg (placeholder nếu thiếu videoUrl) */
 async function ensureSceneClip(
   ffmpeg: Awaited<ReturnType<typeof getFFmpeg>>,
   scene: VideoScene,
@@ -39,7 +43,9 @@ async function ensureSceneClip(
 
   await ffmpeg.writeFile(inName, await fetchFile(sourceUrl));
 
+  // Loop nếu clip nguồn ngắn hơn durationSeconds — giữ đủ độ dài từng cảnh
   await ffmpeg.exec([
+    '-stream_loop', '-1',
     '-i', inName,
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
@@ -55,6 +61,59 @@ async function ensureSceneClip(
   return outName;
 }
 
+/** Ghép TTS từng cảnh theo thứ tự timeline → một track AAC */
+async function buildVoiceTrack(
+  ffmpeg: Awaited<ReturnType<typeof getFFmpeg>>,
+  timeline: VideoScene[],
+): Promise<string | null> {
+  const hasVoice = timeline.some((s) => s.audioUrl);
+  if (!hasVoice) return null;
+
+  const segmentNames: string[] = [];
+
+  for (let i = 0; i < timeline.length; i++) {
+    const scene = timeline[i];
+    const outName = `voice_${i}.aac`;
+
+    if (scene.audioUrl) {
+      const inName = `voice_in_${i}.mp3`;
+      await ffmpeg.writeFile(inName, await fetchFile(scene.audioUrl));
+      // Pad TTS đủ durationSeconds — tránh audio ngắn hơn video → lệch timeline
+      await ffmpeg.exec([
+        '-i', inName,
+        '-af', `apad=whole_dur=${scene.durationSeconds}`,
+        '-t', String(scene.durationSeconds),
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+        outName,
+      ]);
+      await ffmpeg.deleteFile(inName);
+    } else {
+      await ffmpeg.exec([
+        '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+        '-t', String(scene.durationSeconds),
+        '-c:a', 'aac', '-b:a', '128k',
+        outName,
+      ]);
+    }
+
+    segmentNames.push(outName);
+  }
+
+  const listContent = segmentNames.map((n) => `file '${n}'`).join('\n');
+  await ffmpeg.writeFile('voice_concat.txt', listContent);
+  await ffmpeg.exec([
+    '-f', 'concat', '-safe', '0', '-i', 'voice_concat.txt',
+    '-c:a', 'aac', '-b:a', '128k',
+    'voice_track.aac',
+  ]);
+
+  for (const name of segmentNames) await ffmpeg.deleteFile(name);
+  await ffmpeg.deleteFile('voice_concat.txt');
+
+  return 'voice_track.aac';
+}
+
+/** Ghép các cảnh + BGM + phụ đề SRT → xuất blob MP4 client-side */
 export async function composeVideo(options: VideoRenderOptions): Promise<VideoRenderResult> {
   const {
     scenes,
@@ -120,23 +179,35 @@ export async function composeVideo(options: VideoRenderOptions): Promise<VideoRe
     }
   }
 
-  onProgress?.(72, 'Tạo track âm thanh...');
-  await ffmpeg.exec([
-    '-f', 'lavfi', '-i', `anullsrc=channel_layout=stereo:sample_rate=44100`,
-    '-t', String(totalDuration),
-    '-c:a', 'aac', '-b:a', '128k',
-    'silent.aac',
-  ]);
+  onProgress?.(72, 'Tạo track lời thoại TTS...');
+  const voiceTrack = await buildVoiceTrack(ffmpeg, timeline);
 
-  onProgress?.(78, 'Ghép âm thanh video...');
+  if (!voiceTrack) {
+    onProgress?.(74, 'Không có TTS — tạo track im lặng...');
+    await ffmpeg.exec([
+      '-f', 'lavfi', '-i', `anullsrc=channel_layout=stereo:sample_rate=44100`,
+      '-t', String(totalDuration),
+      '-c:a', 'aac', '-b:a', '128k',
+      'silent.aac',
+    ]);
+  }
+
+  const audioTrack = voiceTrack ?? 'silent.aac';
+
+  onProgress?.(78, 'Ghép âm thanh vào video...');
   await ffmpeg.exec([
     '-i', currentVideo,
-    '-i', 'silent.aac',
-    '-c:v', 'copy', '-c:a', 'aac', '-shortest',
+    '-i', audioTrack,
+    '-map', '0:v:0',
+    '-map', '1:a:0',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-t', String(totalDuration),
     'video_with_audio.mp4',
   ]);
 
-  await ffmpeg.deleteFile('silent.aac');
+  if (!voiceTrack) await ffmpeg.deleteFile('silent.aac');
+  else await ffmpeg.deleteFile(voiceTrack);
   if (currentVideo !== 'combined.mp4') await ffmpeg.deleteFile(currentVideo);
   currentVideo = 'video_with_audio.mp4';
 
@@ -183,6 +254,7 @@ export async function composeVideo(options: VideoRenderOptions): Promise<VideoRe
   };
 }
 
+/** Tải blob xuống máy qua thẻ `<a download>` tạm */
 export function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

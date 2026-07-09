@@ -1,3 +1,5 @@
+// ─── Thời lượng cảnh Veo 3: snap 4/6/8s, 1080p bắt buộc 8s ─────────────────
+
 /** Thời lượng cảnh theo giới hạn Veo 3 API */
 
 export const VEO_SCENE_DURATIONS = [4, 6, 8] as const;
@@ -10,6 +12,7 @@ export const SCENE_DURATION_LABELS: Record<string, string> = {
   '8': '8 giây/cảnh',
 };
 
+/** true nếu chất lượng video là 1080p (Veo bắt buộc 8s/cảnh) */
 export function is1080pQuality(videoQuality?: string): boolean {
   return videoQuality === '1080p';
 }
@@ -43,6 +46,7 @@ export function normalizeSceneDurationSetting(
   return String(snapToVeoDuration(Number.isFinite(n) ? n : 6, videoQuality));
 }
 
+/** Ước lượng thời lượng cảnh từ số từ voiceover (auto mode) */
 function estimateDurationFromVoice(voice: string): number {
   const words = voice.split(/\s+/).filter(Boolean).length;
   return Math.min(8, Math.max(4, Math.round(words / 2.5) || 6));
@@ -63,6 +67,7 @@ export function resolveSceneDurationSeconds(
   return snapToVeoDuration(Number.isFinite(n) ? n : 6, videoQuality);
 }
 
+/** Nhãn hiển thị thời lượng cảnh từ giá trị form */
 export function formatSceneDuration(value: string): string {
   return SCENE_DURATION_LABELS[value] ?? `${value}s/cảnh`;
 }

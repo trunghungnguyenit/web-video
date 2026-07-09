@@ -132,7 +132,10 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
           <div className="mx-6 mt-4 mb-2 px-4 py-3 bg-primary/5 border border-primary/20 rounded-xl">
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="text-primary font-semibold">Kịch bản mẫu</span> — Áp dụng sẽ điền nhân vật, nội dung và cài đặt vào mục 1 &amp; 2.
-              Nhấn <strong className="text-foreground">Phân tích &amp; Tạo Kịch Bản</strong> ở mục 2 để AI sinh danh sách cảnh và timeline.
+              {draft.input.inputType === 'image' && (
+                <> Tab <strong className="text-foreground">Từ hình ảnh</strong> mở sẵn 10 cảnh — tải ảnh stickman cho từng cảnh.</>
+              )}
+              {' '}Nhấn <strong className="text-foreground">Phân tích &amp; Tạo Kịch Bản</strong> ở mục 2 để AI sinh danh sách cảnh và timeline.
             </p>
           </div>
           {/* ── Section 1: Character ───────────────────────────────────── */}
@@ -222,7 +225,7 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
                     className="input-base"
                   >
                     {['Realistic', 'Cinematic', 'Anime / Manga', 'Cartoon', 'Oil Painting',
-                      'Watercolor', 'Flat Design', 'Cyberpunk'].map((s) => (
+                      'Watercolor', 'Flat Design', 'Cyberpunk', 'Stickman Primitive'].map((s) => (
                       <option key={s}>{s}</option>
                     ))}
                   </select>

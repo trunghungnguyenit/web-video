@@ -1,3 +1,5 @@
+// ─── Hàng đợi sinh cảnh: TTS → Veo tuần tự, cập nhật UI từng bước ───────────
+
 import type { VideoScene } from '@/lib/scenes';
 import { recalculateSceneTimings } from '@/lib/scenes';
 import { attachAudioToSingleScene } from '@/lib/scene-tts';
@@ -20,6 +22,7 @@ export interface SceneQueueCallbacks {
   onQueueUpdate?: (items: SceneQueueItem[]) => void;
 }
 
+/** Tạo danh sách queue item ban đầu từ scenes (step = pending) */
 function buildQueueItems(scenes: VideoScene[]): SceneQueueItem[] {
   return scenes.map((s) => ({
     sceneId: s.id,
@@ -85,6 +88,7 @@ export async function runSceneGenerationQueue(
   return scenes;
 }
 
+/** Tiến độ hàng đợi: số cảnh done/error và % hoàn thành */
 export function queueProgress(items: SceneQueueItem[]): { done: number; total: number; percent: number } {
   const total = items.length;
   const done = items.filter((i) => i.step === 'done' || i.step === 'error').length;
@@ -92,6 +96,7 @@ export function queueProgress(items: SceneQueueItem[]): { done: number; total: n
   return { done, total, percent };
 }
 
+/** true nếu còn cảnh đang chạy TTS hoặc Veo */
 export function isQueueRunning(items: SceneQueueItem[]): boolean {
   return items.some((i) => i.step === 'tts' || i.step === 'video');
 }

@@ -1,6 +1,11 @@
-// ─── Dữ liệu kịch bản mẫu (demo đầy đủ 4 mục) ───────────────────────────────
+// ─── Dữ liệu kịch bản mẫu (preset) — nhân vật, input, demo 4 mục ────────────
 
 import { PRESET_DEMO_SCENES, PRESET_DEMO_TIMELINES } from '@/lib/preset-demos';
+import {
+  STICKMAN_DEMO_SCENES,
+  STICKMAN_MASTER_BRIEF,
+  stickmanImageScenes,
+} from '@/lib/preset-stickman-war';
 
 export interface PresetCharacter {
   name: string;
@@ -25,6 +30,17 @@ export interface PresetInput {
   voiceSpeed?: number;
   /** Demo: id phong cách cảnh (mục 2) */
   sceneStyleId?: string;
+  /** Tab đầu vào khi áp dụng preset — mặc định text */
+  inputType?: 'text' | 'link' | 'image' | 'file';
+  /** Prompt từng cảnh khi inputType = image */
+  imageScenes?: PresetImageScene[];
+}
+
+/** Cảnh preset kiểu upload ảnh — prompt video + gợi ý voice */
+export interface PresetImageScene {
+  title: string;
+  videoPrompt: string;
+  voice: string;
 }
 
 /** Cảnh demo sẵn có — mục 3 & 4 */
@@ -120,6 +136,17 @@ const CHAR_LINH_TA: PresetCharacter = {
   style: 'Flat Design',
 };
 
+const CHAR_STICKMAN_COMMANDER: PresetCharacter = {
+  name: 'Người Chỉ Huy',
+  role: 'Lãnh đạo bộ lạc',
+  traits: 'Dũng cảm · Thông minh · Có chiến thuật · Không bỏ rơi đồng đội',
+  outfit: 'Giáp da cổ đại, mũ chiến binh, giáo dài, khiên lớn',
+  description:
+    'Stickman người que 2D tối giản — chỉ huy bộ lạc sa mạc. Giữ đồng nhất ngoại hình mọi cảnh: kích thước cơ thể, vũ khí, trang phục, màu sắc, phong cách người que.',
+  style: 'Stickman Primitive',
+};
+
+/** Danh sách kịch bản mẫu đầy đủ — dùng cho preset picker và demo */
 export const PRESET_SCRIPTS: PresetScript[] = [
   {
     id: 1,
@@ -226,5 +253,29 @@ export const PRESET_SCRIPTS: PresetScript[] = [
     },
     demoScenes: PRESET_DEMO_SCENES[4],
     timeline: PRESET_DEMO_TIMELINES[4],
+  },
+  {
+    id: 5,
+    title: 'Stickman Chiến Tranh',
+    desc: 'Có ảnh · 10 cảnh · người que 2D',
+    badge: '⚔️ Stickman / Ảnh',
+    character: CHAR_STICKMAN_COMMANDER,
+    characters: [CHAR_STICKMAN_COMMANDER],
+    input: {
+      content: STICKMAN_MASTER_BRIEF,
+      language: 'vi',
+      sceneCount: '10',
+      videoType: 'storytelling',
+      voice: 'male-pro',
+      aspectRatio: '16:9',
+      sceneDuration: '6',
+      videoQuality: '720p',
+      voiceSpeed: 1,
+      sceneStyleId: '2d-explainer',
+      inputType: 'image',
+      imageScenes: stickmanImageScenes(),
+    },
+    demoScenes: STICKMAN_DEMO_SCENES,
+    timeline: PRESET_DEMO_TIMELINES[5],
   },
 ];

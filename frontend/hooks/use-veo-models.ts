@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { API_KEY_IDS, API_KEYS_CHANGED_EVENT, getApiKey } from '@/lib/api-keys-store';
+import { API_KEYS_CHANGED_EVENT } from '@/lib/api-keys-store';
 import {
+  getVeoApiKey,
   suggestVeoModelForQuality,
-  VEO_MODEL_FALLBACKS,
   type VeoModelOption,
 } from '@/lib/veo-models';
 import { veoService } from '@/services/veo.service';
@@ -16,7 +16,7 @@ export function useVeoModels() {
   const [hasKey, setHasKey] = useState(false);
 
   const fetchModels = useCallback(async () => {
-    const apiKey = getApiKey(API_KEY_IDS.veo) || getApiKey(API_KEY_IDS.gemini);
+    const apiKey = getVeoApiKey();
     if (!apiKey) {
       setHasKey(false);
       setModels([]);
@@ -35,7 +35,7 @@ export function useVeoModels() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Không tải được model Veo.';
       setError(message);
-      setModels(VEO_MODEL_FALLBACKS);
+      setModels([]);
     } finally {
       setLoading(false);
     }

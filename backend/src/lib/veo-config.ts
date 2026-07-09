@@ -6,11 +6,12 @@ export const VEO_QUALITY_LABELS: Record<string, string> = {
   '720p-fast': '720p – Nhanh (Veo Fast)',
 };
 
-export function resolveVeoModel(quality: string, veoModel?: string): string {
+export function resolveVeoModel(veoModel?: string): string {
   const picked = veoModel?.trim();
-  if (picked) return picked;
-  if (quality === '720p-fast') return 'veo-3.0-fast-generate-001';
-  return 'veo-3.0-generate-001';
+  if (!picked) {
+    throw new Error('Chưa chọn model Veo — tải danh sách model từ API và chọn trong cài đặt.');
+  }
+  return picked;
 }
 
 export function resolveVeoResolution(quality: string): '720p' | '1080p' {

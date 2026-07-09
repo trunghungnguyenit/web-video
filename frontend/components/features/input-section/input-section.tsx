@@ -11,6 +11,7 @@ import type { SceneGenerationResult } from '@/lib/scenes';
 import type { CharacterMasterHandle } from '@/components/features/character-master';
 import type { PresetInput } from '@/lib/preset-scripts';
 import { getApiKey, API_KEY_IDS } from '@/lib/api-keys-store';
+import { getVeoApiKey } from '@/lib/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
 import { logAnalyzePipeline } from '@/lib/pipeline-debug-log';
 import { useProjectSettings } from '@/contexts/project-settings-context';
@@ -78,6 +79,8 @@ interface FormErrors {
   submit?: string;
   /** Lỗi prompt theo id ảnh */
   imagePrompts?: Record<string, string>;
+  /** Lỗi prompt tổng tab ảnh */
+  imageMasterBrief?: string;
 }
 
 interface FormState {
@@ -151,36 +154,70 @@ const MIN_IMAGE_PROMPT_CHARS = 10;
 
 interface UploadedImageItem {
   id: string;
-  file: File;
-  previewUrl: string;
+  file: File | null;
+  previewUrl: string | null;
   prompt: string;
+  /** Tiêu đề cảnh — preset stickman */
+  label?: string;
+  /** Gợi ý lời kể TTS */
+  voiceHint?: string;
 }
 
 function createImageId(): string {
   return `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function revokeImagePreview(url: string) {
-  if (url.startsWith('blob:')) URL.revokeObjectURL(url);
+function revokeImagePreview(url: string | null) {
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
 }
 
-function validateImagePrompt(raw: string): string | undefined {
+function validateImagePrompt(raw: string, optional = false): string | undefined {
   const s = raw.trim();
-  if (!s) return 'Nhập prompt mô tả cảnh muốn tạo từ ảnh này.';
+  if (!s) return optional ? undefined : 'Nhập prompt mô tả cảnh muốn tạo từ ảnh này.';
   if (s.length < MIN_IMAGE_PROMPT_CHARS) {
     return `Prompt quá ngắn — cần ít nhất ${MIN_IMAGE_PROMPT_CHARS} ký tự (hiện tại: ${s.length}).`;
   }
   return undefined;
 }
 
-function buildImagePipelineContent(images: UploadedImageItem[]): string {
-  const lines = [
-    `Tạo video từ ${images.length} hình ảnh. Mỗi ảnh tương ứng một cảnh — dùng prompt bên dưới làm hướng dẫn visual cho từng cảnh.`,
-    '',
-  ];
+/** Prompt tổng — bắt buộc đủ dài nếu người dùng nhập; rỗng thì hợp lệ (dùng prompt từng ảnh) */
+function validateImageMasterBrief(raw: string): string | undefined {
+  const s = raw.trim();
+  if (!s) return undefined;
+  if (s.length < MIN_IMAGE_PROMPT_CHARS) {
+    return `Prompt tổng quá ngắn — cần ít nhất ${MIN_IMAGE_PROMPT_CHARS} ký tự (hiện tại: ${s.length}).`;
+  }
+  return undefined;
+}
+
+function hasValidImageMasterBrief(raw: string): boolean {
+  return raw.trim().length >= MIN_IMAGE_PROMPT_CHARS;
+}
+
+function buildImagePipelineContent(images: UploadedImageItem[], masterBrief?: string): string {
+  const header = masterBrief?.trim()
+    || `Tạo video từ ${images.length} hình ảnh. Mỗi ảnh tương ứng một cảnh — dùng VIDEO PROMPT làm hướng dẫn visual.`;
+  const lines = [header, ''];
+
   images.forEach((img, i) => {
-    lines.push(`## Ảnh ${i + 1} (${img.file.name})`);
-    lines.push(img.prompt.trim());
+    const heading = img.label || `CẢNH ${i + 1}`;
+    const fileNote = img.file ? ` (${img.file.name})` : '';
+    lines.push(`## ${heading}${fileNote}`);
+    lines.push('');
+    lines.push('VIDEO PROMPT:');
+    const scenePrompt = img.prompt.trim();
+    if (scenePrompt) {
+      lines.push(scenePrompt);
+    } else if (masterBrief?.trim()) {
+      lines.push(
+        'Áp dụng PROMPT TỔNG ở đầu kịch bản cho cảnh này — phân tích ảnh đính kèm và tạo mô tả visual phù hợp, đồng nhất phong cách với các cảnh khác.',
+      );
+    }
+    if (img.voiceHint?.trim()) {
+      lines.push('');
+      lines.push('VOICE (TTS):');
+      lines.push(img.voiceHint.trim());
+    }
     lines.push('');
   });
   return lines.join('\n').trim();
@@ -232,6 +269,8 @@ export function InputSection({
   const [uploadedImages, setUploadedImages] = useState<UploadedImageItem[]>([]);
   const uploadedImagesRef = useRef<UploadedImageItem[]>([]);
   uploadedImagesRef.current = uploadedImages;
+  const [imageMasterBrief, setImageMasterBrief] = useState(initialContent);
+  const [pendingImageSlotId, setPendingImageSlotId] = useState<string | null>(null);
   const [justApplied, setJustApplied]   = useState(false);
   const [savedScript, setSavedScript]   = useState(false);
 
@@ -249,17 +288,39 @@ export function InputSection({
   useEffect(() => {
     if (!presetData) return;
     applyFromPreset(presetData);
-    setForm((f) => ({
-      ...f,
-      activeTab: 'text',
-      content: presetData.content,
-    }));
     setErrors({});
     setUploadedFile(null);
     setUploadedImages((prev) => {
       prev.forEach((img) => revokeImagePreview(img.previewUrl));
       return [];
     });
+
+    if (presetData.inputType === 'image' && presetData.imageScenes?.length) {
+      setImageMasterBrief(presetData.content);
+      setForm((f) => ({
+        ...f,
+        activeTab: 'image',
+        content: presetData.content,
+      }));
+      setUploadedImages(
+        presetData.imageScenes.map((scene) => ({
+          id: createImageId(),
+          file: null,
+          previewUrl: null,
+          prompt: scene.videoPrompt,
+          label: scene.title,
+          voiceHint: scene.voice,
+        })),
+      );
+    } else {
+      setImageMasterBrief('');
+      setForm((f) => ({
+        ...f,
+        activeTab: 'text',
+        content: presetData.content,
+      }));
+    }
+
     setJustApplied(true);
     setTimeout(() => setJustApplied(false), 2500);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -289,9 +350,10 @@ export function InputSection({
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => onContentChange?.(form.content), 400);
+    const content = form.activeTab === 'image' ? imageMasterBrief : form.content;
+    const timer = setTimeout(() => onContentChange?.(content), 400);
     return () => clearTimeout(timer);
-  }, [form.content, onContentChange]);
+  }, [form.content, imageMasterBrief, form.activeTab, onContentChange]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const charCount   = form.content.length;
@@ -308,21 +370,37 @@ export function InputSection({
       if (msg) e.linkUrl = msg;
     }
     if (form.activeTab === 'image') {
+      const masterMsg = validateImageMasterBrief(imageMasterBrief);
+      if (masterMsg) e.imageMasterBrief = masterMsg;
+
       if (uploadedImages.length === 0) {
         e.upload = 'Vui lòng tải lên ít nhất một hình ảnh.';
       } else {
+        const useMasterOnly = hasValidImageMasterBrief(imageMasterBrief);
         const promptErrors: Record<string, string> = {};
         for (const img of uploadedImages) {
+          if (!img.file) {
+            e.upload = `${img.label ?? 'Một cảnh'} chưa có ảnh — hãy tải hình minh họa cho cảnh này.`;
+            break;
+          }
           const fileMsg = validateImageFile(img.file);
           if (fileMsg) {
             e.upload = fileMsg;
             break;
           }
-          const promptMsg = validateImagePrompt(img.prompt);
+          const promptMsg = validateImagePrompt(img.prompt, useMasterOnly);
           if (promptMsg) promptErrors[img.id] = promptMsg;
         }
-        if (Object.keys(promptErrors).length > 0) {
+        if (!e.upload && Object.keys(promptErrors).length > 0) {
           e.imagePrompts = promptErrors;
+        }
+        if (
+          !e.upload
+          && !useMasterOnly
+          && uploadedImages.every((img) => !img.prompt.trim())
+          && !imageMasterBrief.trim()
+        ) {
+          e.imageMasterBrief = 'Nhập Prompt tổng hoặc prompt cho từng ảnh.';
         }
       }
     }
@@ -350,6 +428,22 @@ export function InputSection({
       return;
     }
 
+    const veoKey = getVeoApiKey();
+    if (!veoKey) {
+      setErrors((p) => ({
+        ...p,
+        submit: 'Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo) để tạo video Veo 3.',
+      }));
+      return;
+    }
+    if (!settings.veoModel?.trim()) {
+      setErrors((p) => ({
+        ...p,
+        submit: 'Chưa chọn model Veo — đợi danh sách model tải xong và chọn trong thanh cài đặt.',
+      }));
+      return;
+    }
+
     setErrors((p) => ({ ...p, submit: undefined }));
     const submitProjectId = projectId ?? 'default';
 
@@ -359,7 +453,7 @@ export function InputSection({
         : form.activeTab === 'link'
           ? `Nội dung phân tích từ video: ${form.linkUrl.trim()}`
           : form.activeTab === 'image' && uploadedImages.length > 0
-            ? buildImagePipelineContent(uploadedImages)
+            ? buildImagePipelineContent(uploadedImages, imageMasterBrief)
             : uploadedFile
               ? `Nội dung trích xuất từ file "${uploadedFile.name}"`
               : form.content;
@@ -371,7 +465,7 @@ export function InputSection({
     const pipeline = buildAnalyzePipeline({
       // ── API Keys (đọc từ localStorage, user lưu ở mục API Keys) ──
       geminiApiKey: geminiKey,              // Gemini — dùng ngay để gọi /api/gemini/analyze
-      veoApiKey: getApiKey('veo') || getApiKey('gemini'), // Veo 3 — dùng Gemini API Key nếu chưa có key riêng
+      veoApiKey: veoKey,
       ttsApiKey: getApiKey(API_KEY_IDS.elevenlabs), // ElevenLabs — voiceover → audio MP3
 
       // ── Nội dung đầu vào (mục 2 — tab đang chọn) ──
@@ -387,7 +481,7 @@ export function InputSection({
       aspectRatio: settings.aspectRatio,
       sceneDuration: settings.sceneDuration,
       videoQuality: settings.videoQuality,
-      veoModel: hasVeoKey && settings.veoModel ? settings.veoModel : undefined,
+      veoModel: settings.veoModel,
       sceneStyleLabel: styleLabel,
       sceneStyleId: sceneStyle,
 
@@ -400,8 +494,8 @@ export function InputSection({
       form.activeTab === 'image'
         ? {
             images: uploadedImages.map((img) => ({
-              fileName: img.file.name,
-              sizeMB: (img.file.size / 1024 / 1024).toFixed(2),
+              fileName: img.file?.name ?? '(chưa có file)',
+              sizeMB: img.file ? (img.file.size / 1024 / 1024).toFixed(2) : '—',
               prompt: img.prompt.trim(),
             })),
           }
@@ -452,10 +546,40 @@ export function InputSection({
     setForm((f) => ({ ...f, activeTab: tab }));
     setErrors({});
     setUploadedFile(null);
-    setUploadedImages((prev) => {
-      prev.forEach((img) => revokeImagePreview(img.previewUrl));
-      return [];
-    });
+    if (tab !== 'image') {
+      setImageMasterBrief('');
+      setUploadedImages((prev) => {
+        prev.forEach((img) => revokeImagePreview(img.previewUrl));
+        return [];
+      });
+    } else {
+      setImageMasterBrief(initialContent);
+    }
+  };
+
+  const attachImageToSlot = (slotId: string, file: File) => {
+    const msg = validateImageFile(file);
+    if (msg) {
+      setErrors((p) => ({ ...p, upload: msg }));
+      return;
+    }
+    setUploadedImages((prev) =>
+      prev.map((img) => {
+        if (img.id !== slotId) return img;
+        revokeImagePreview(img.previewUrl);
+        return {
+          ...img,
+          file,
+          previewUrl: URL.createObjectURL(file),
+        };
+      }),
+    );
+    setErrors((p) => ({ ...p, upload: undefined }));
+  };
+
+  const openSlotUpload = (slotId: string) => {
+    setPendingImageSlotId(slotId);
+    fileInputRef.current?.click();
   };
 
   const addImages = (files: FileList | File[]) => {
@@ -463,15 +587,31 @@ export function InputSection({
     if (list.length === 0) return;
 
     setUploadedImages((prev) => {
-      const remaining = MAX_IMAGES - prev.length;
-      if (remaining <= 0) {
-        setErrors((p) => ({ ...p, upload: `Tối đa ${MAX_IMAGES} hình ảnh.` }));
-        return prev;
+      const next = [...prev];
+      let fileIndex = 0;
+      let firstError: string | undefined;
+
+      for (let i = 0; i < next.length && fileIndex < list.length; i++) {
+        if (next[i].file) continue;
+        const file = list[fileIndex];
+        const msg = validateImageFile(file);
+        if (msg) {
+          firstError = msg;
+          fileIndex++;
+          continue;
+        }
+        revokeImagePreview(next[i].previewUrl);
+        next[i] = {
+          ...next[i],
+          file,
+          previewUrl: URL.createObjectURL(file),
+        };
+        fileIndex++;
       }
 
-      const toAdd = list.slice(0, remaining);
-      const nextItems: UploadedImageItem[] = [];
-      let firstError: string | undefined;
+      const remaining = MAX_IMAGES - next.length;
+      const toAdd = list.slice(fileIndex, fileIndex + Math.max(0, remaining));
+      const newItems: UploadedImageItem[] = [];
 
       for (const file of toAdd) {
         const msg = validateImageFile(file);
@@ -479,14 +619,7 @@ export function InputSection({
           firstError = msg;
           continue;
         }
-        const duplicate = prev.some(
-          (img) => img.file.name === file.name && img.file.size === file.size,
-        ) || nextItems.some(
-          (img) => img.file.name === file.name && img.file.size === file.size,
-        );
-        if (duplicate) continue;
-
-        nextItems.push({
+        newItems.push({
           id: createImageId(),
           file,
           previewUrl: URL.createObjectURL(file),
@@ -494,21 +627,21 @@ export function InputSection({
         });
       }
 
-      if (nextItems.length === 0) {
-        if (firstError) setErrors((p) => ({ ...p, upload: firstError }));
+      if (fileIndex === 0 && newItems.length === 0 && firstError) {
+        setErrors((p) => ({ ...p, upload: firstError }));
         return prev;
       }
 
-      if (list.length > remaining) {
+      if (list.length > fileIndex + toAdd.length) {
         setErrors((p) => ({
           ...p,
-          upload: `Chỉ thêm được ${remaining} ảnh nữa (tối đa ${MAX_IMAGES}).`,
+          upload: `Chỉ thêm được tối đa ${MAX_IMAGES} ảnh.`,
         }));
       } else {
         setErrors((p) => ({ ...p, upload: undefined }));
       }
 
-      return [...prev, ...nextItems];
+      return [...next, ...newItems];
     });
   };
 
@@ -527,6 +660,13 @@ export function InputSection({
         imagePrompts: nextPrompts && Object.keys(nextPrompts).length > 0 ? nextPrompts : undefined,
       };
     });
+  };
+
+  const updateImageMasterBrief = (value: string) => {
+    setImageMasterBrief(value);
+    if (errors.imageMasterBrief) {
+      setErrors((p) => ({ ...p, imageMasterBrief: undefined }));
+    }
   };
 
   const updateImagePrompt = (id: string, prompt: string) => {
@@ -568,7 +708,13 @@ export function InputSection({
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (form.activeTab === 'image') {
-      if (e.target.files?.length) addImages(e.target.files);
+      const file = e.target.files?.[0];
+      if (pendingImageSlotId && file) {
+        attachImageToSlot(pendingImageSlotId, file);
+        setPendingImageSlotId(null);
+      } else if (e.target.files?.length) {
+        addImages(e.target.files);
+      }
       e.target.value = '';
       return;
     }
@@ -585,6 +731,7 @@ export function InputSection({
   const currentStyle = SCENE_STYLES.find((s) => s.id === sceneStyle);
   const currentSpeed = SPEED_OPTIONS.find((o) => o.value === voiceSpeed);
   const speedPercent = ((voiceSpeed - 0.75) / (2 - 0.75)) * 100;
+  const imageMasterReady = hasValidImageMasterBrief(imageMasterBrief);
 
   return (
     <section
@@ -731,6 +878,40 @@ export function InputSection({
 
         {form.activeTab === 'image' && (
           <div className="space-y-3">
+            <div className="rounded-xl border border-border bg-card/40 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="image-master-brief" className="text-xs font-semibold text-foreground">
+                  Prompt tổng
+                </label>
+                <span className="text-[10px] text-muted-foreground">
+                  {imageMasterReady ? 'Đã đủ — có thể bỏ qua prompt từng ảnh' : 'Tuỳ chọn'}
+                </span>
+              </div>
+              <textarea
+                id="image-master-brief"
+                value={imageMasterBrief}
+                onChange={(e) => updateImageMasterBrief(e.target.value)}
+                placeholder="Mô tả chung cho cả video: phong cách, bối cảnh, nhân vật, tone màu, lời kể... Nếu điền đủ, bạn không cần nhập prompt riêng cho từng ảnh."
+                rows={4}
+                className={cn(
+                  'w-full resize-y min-h-[88px] px-3 py-2 text-xs rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
+                  errors.imageMasterBrief
+                    ? 'border-destructive/60 focus:ring-destructive/30'
+                    : 'border-border focus:ring-primary/30',
+                )}
+              />
+              {errors.imageMasterBrief ? (
+                <p className="flex items-start gap-1 text-[11px] text-destructive leading-relaxed">
+                  <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                  <span>{errors.imageMasterBrief}</span>
+                </p>
+              ) : (
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Dùng khi nhiều ảnh cùng một chủ đề. Prompt riêng từng ảnh vẫn có thể thêm để tinh chỉnh từng cảnh.
+                </p>
+              )}
+            </div>
+
             <input
               ref={fileInputRef}
               type="file"
@@ -742,34 +923,52 @@ export function InputSection({
 
             {uploadedImages.length > 0 && (
               <div className="space-y-3">
+                {imageMasterBrief && uploadedImages.some((img) => img.label) && (
+                  <p className="text-[11px] text-muted-foreground leading-relaxed px-1">
+                    Kịch bản mẫu — tải <strong className="text-foreground">1 ảnh stickman</strong> cho mỗi cảnh bên dưới. VIDEO PROMPT &amp; VOICE đã điền sẵn.
+                  </p>
+                )}
                 {uploadedImages.map((img, index) => (
                   <div
                     key={img.id}
                     className="flex gap-3 rounded-xl border border-border bg-card/50 p-3"
                   >
                     <div className="relative shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-lg overflow-hidden border border-border bg-muted">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={img.previewUrl}
-                        alt={img.file.name}
-                        className="w-full h-full object-cover"
-                      />
+                      {img.previewUrl && img.file ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={img.previewUrl}
+                          alt={img.file.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => openSlotUpload(img.id)}
+                          className="w-full h-full flex flex-col items-center justify-center gap-1.5 text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
+                        >
+                          <Image className="w-7 h-7" />
+                          <span className="text-[10px] font-medium px-1 text-center">Tải ảnh</span>
+                        </button>
+                      )}
                     </div>
 
                     <div className="flex-1 min-w-0 flex flex-col gap-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold text-foreground">
-                            Ảnh {index + 1}
+                          <p className="text-xs font-semibold text-foreground leading-snug">
+                            {img.label ?? `Ảnh ${index + 1}`}
                           </p>
                           <p className="text-[10px] text-muted-foreground truncate">
-                            {img.file.name} · {(img.file.size / 1024 / 1024).toFixed(2)} MB
+                            {img.file
+                              ? `${img.file.name} · ${(img.file.size / 1024 / 1024).toFixed(2)} MB`
+                              : 'Chưa có ảnh — bấm ô trái để tải lên'}
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => removeImage(img.id)}
-                          title="Xóa ảnh"
+                          title="Xóa cảnh"
                           className="shrink-0 w-7 h-7 rounded-lg border border-border bg-muted/60 text-muted-foreground hover:text-destructive hover:border-destructive/50 hover:bg-destructive/10 flex items-center justify-center transition-colors"
                         >
                           <X className="w-4 h-4" />
@@ -779,7 +978,11 @@ export function InputSection({
                       <textarea
                         value={img.prompt}
                         onChange={(e) => updateImagePrompt(img.id, e.target.value)}
-                        placeholder="Prompt cho ảnh này — mô tả cảnh, chuyển động, góc quay..."
+                        placeholder={
+                          imageMasterReady
+                            ? 'VIDEO PROMPT riêng (tuỳ chọn) — bỏ trống để dùng Prompt tổng'
+                            : 'VIDEO PROMPT — mô tả cảnh, chuyển động, góc quay...'
+                        }
                         rows={3}
                         className={cn(
                           'w-full resize-y min-h-[72px] px-3 py-2 text-xs rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
@@ -788,6 +991,13 @@ export function InputSection({
                             : 'border-border focus:ring-primary/30',
                         )}
                       />
+
+                      {img.voiceHint && (
+                        <p className="text-[10px] text-muted-foreground leading-relaxed border-l-2 border-primary/30 pl-2">
+                          <span className="font-semibold text-primary/90">VOICE (TTS): </span>
+                          {img.voiceHint}
+                        </p>
+                      )}
 
                       {errors.imagePrompts?.[img.id] && (
                         <p className="flex items-start gap-1 text-[11px] text-destructive leading-relaxed">

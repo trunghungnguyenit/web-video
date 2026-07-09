@@ -57,11 +57,13 @@ const VIDEO_TYPE_PROMPT_HINT: Record<string, string> = {
   review: 'Product review showcase',
 };
 
+/** Parse sceneCount form → số nguyên dương (mặc định 5) */
 function parseSceneCount(raw: string | number): number {
   const n = typeof raw === 'number' ? raw : parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 5;
 }
 
+/** Tách nội dung thành đoạn — ưu tiên numbered list, bullet, đoạn văn, câu */
 function extractSegments(content: string): string[] {
   const text = content.trim();
   if (!text) return [];
@@ -85,6 +87,7 @@ function extractSegments(content: string): string[] {
   return sentences?.length ? sentences : [text];
 }
 
+/** Gom hoặc chia đoạn để khớp số cảnh yêu cầu */
 function bucketSegments(segments: string[], count: number): string[] {
   if (count <= 0) return [];
   if (segments.length === 0) {
@@ -129,6 +132,7 @@ const ASPECT_RATIO_PROMPT_HINT: Record<string, string> = {
   '1:1': '1:1 square',
 };
 
+/** Sinh video prompt tiếng Anh từ chunk nội dung + loại video + style */
 function buildVideoPrompt(
   chunk: string,
   index: number,
@@ -144,6 +148,7 @@ function buildVideoPrompt(
   return `${hint} — Cảnh ${index}/${total}${style}${ratio}: ${visual.slice(0, 280)}`;
 }
 
+/** Rút gọn chunk thành lời thoại TTS (tối đa 400 ký tự) */
 function buildVoiceText(chunk: string): string {
   return chunk
     .replace(/^[\d\.\)\-\*•]+\s*/gm, '')
@@ -152,6 +157,7 @@ function buildVoiceText(chunk: string): string {
     .slice(0, 400);
 }
 
+/** Wrapper gọi resolveSceneDurationSeconds cho pipeline local */
 function resolveSceneDuration(
   raw: string | undefined,
   voice: string,
@@ -160,12 +166,14 @@ function resolveSceneDuration(
   return resolveSceneDurationSeconds(raw, voice, videoQuality);
 }
 
+/** Format giây → `MM:SS` cho hiển thị timeline */
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+/** Chuỗi hiển thị khoảng thời gian cảnh: `00:00 - 00:06` */
 export function formatSceneTimeRange(scene: VideoScene): string {
   return `${formatTime(scene.timeStart)} - ${formatTime(scene.timeEnd)}`;
 }
@@ -188,6 +196,7 @@ export function findSceneAtPlayhead(scenes: VideoScene[], playhead: number): Vid
   return best;
 }
 
+/** Thời lượng thực tế cảnh — max(durationSeconds, audio + buffer) nếu có TTS */
 export function sceneEffectiveDuration(scene: VideoScene): number {
   if (scene.audioDurationSeconds != null && scene.audioDurationSeconds > 0) {
     const fromAudio = Math.ceil((scene.audioDurationSeconds + 0.5) * 10) / 10;
@@ -196,6 +205,7 @@ export function sceneEffectiveDuration(scene: VideoScene): number {
   return scene.durationSeconds;
 }
 
+/** Chữ ký timing các cảnh — dùng detect thay đổi để re-sync preview */
 export function scenesTimingSignature(scenes: VideoScene[]): string {
   return scenes
     .map((s) =>
@@ -204,6 +214,7 @@ export function scenesTimingSignature(scenes: VideoScene[]): string {
     .join('|');
 }
 
+/** Tính lại timeStart/timeEnd/index sau khi đổi duration hoặc thứ tự cảnh */
 export function recalculateSceneTimings(scenes: VideoScene[]): VideoScene[] {
   let cursor = 0;
   return scenes.map((scene, i) => {

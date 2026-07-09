@@ -1,3 +1,5 @@
+// ─── Câu mẫu nghe thử giọng TTS theo ngôn ngữ ───────────────────────────────
+
 const VOICE_PREVIEW_SAMPLES: Record<string, string> = {
   vi: 'Xin chào! Đây là giọng đọc mẫu. Bạn có thể nghe thử trước khi chọn.',
   en: 'Hello! This is a sample voice. You can preview before selecting.',
@@ -5,10 +7,12 @@ const VOICE_PREVIEW_SAMPLES: Record<string, string> = {
   ja: 'こんにちは。これはサンプル音声です。選択前に試聴できます。',
 };
 
+/** Câu mẫu nghe thử TTS theo mã ngôn ngữ (fallback en) */
 export function getVoicePreviewText(language: string): string {
   return VOICE_PREVIEW_SAMPLES[language] ?? VOICE_PREVIEW_SAMPLES.en;
 }
 
+/** Cache key cho blob preview giọng — voice:language:speed */
 export function voicePreviewCacheKey(voice: string, language: string, voiceSpeed: number): string {
   return `${voice}:${language}:${voiceSpeed}`;
 }

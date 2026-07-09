@@ -1,5 +1,8 @@
+// ─── Log debug pipeline Gemini — payload gửi & response (DevTools Console) ───
+
 import type { AnalyzePipelineRequest } from '@/lib/pipeline-payload';
 
+/** Che API key khi log — giữ 6 ký tự đầu + 4 ký tự cuối */
 function redactKey(key?: string): string {
   const k = key?.trim();
   if (!k) return '(empty)';

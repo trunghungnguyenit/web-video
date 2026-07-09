@@ -1,3 +1,5 @@
+// ─── Bulk project: kiểu, tạo/lọc bulk, tiến độ % ────────────────────────────
+
 import type { PresetInput, PresetTimelineDemo } from '@/lib/preset-scripts';
 import type { VideoScene } from '@/lib/scenes';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
@@ -40,10 +42,20 @@ export interface VideoBulkProject {
   timelineFocusSceneId: string | null;
 }
 
+/** Sinh id bulk duy nhất: `bulk-{timestamp}-{random}` */
 export function generateBulkProjectId(): string {
   return `bulk-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/** Tiêu đề mặc định bulk đầu tiên — cố định để tránh hydration mismatch SSR/client */
+export const DEFAULT_BULK_TITLE = 'Bulk video mới';
+
+/** Id cố định cho bulk khởi tạo lần đầu (SSR + hydrate phải giống nhau) */
+export const INITIAL_BULK_PROJECT_ID = 'bulk-initial';
+
+const INITIAL_BULK_TIMESTAMP = '2020-01-01T00:00:00.000Z';
+
+/** Tiêu đề khi tạo bulk mới: `Bulk_video_HH:MM d-m-y` (chỉ dùng client-side) */
 export function formatBulkTitle(date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const h = pad(date.getHours());
@@ -54,12 +66,25 @@ export function formatBulkTitle(date = new Date()): string {
   return `Bulk_video_${h}:${m} ${d}-${mo}-${y}`;
 }
 
+/** Bulk project mặc định khi mở app — title/id/timestamp cố định, an toàn SSR */
+export function createInitialBulkProject(): VideoBulkProject {
+  const project = createBulkProject({ title: DEFAULT_BULK_TITLE, settings: DEFAULT_VIDEO_SETTINGS });
+  return {
+    ...project,
+    id: INITIAL_BULK_PROJECT_ID,
+    createdAt: INITIAL_BULK_TIMESTAMP,
+    updatedAt: INITIAL_BULK_TIMESTAMP,
+  };
+}
+
+/** Format ngày trên card bulk list: `dd/mm/yy - HH:mm` */
 export function formatBulkCardDate(iso: string): string {
   const d = new Date(iso);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${String(d.getFullYear()).slice(-2)} - ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Nhãn hiển thị model Veo trên card bulk (từ veoInput hoặc settings) */
 export function resolveVeoModelLabel(veoInput: VeoInput | null, settings: VideoSettings): string {
   const model = veoInput?.veoModel?.trim() || settings.veoModel?.trim();
   if (model) {
@@ -70,17 +95,19 @@ export function resolveVeoModelLabel(veoInput: VeoInput | null, settings: VideoS
   return `Veo 3 · ${q}`;
 }
 
+/** Đếm cảnh đã xử lý xong (success hoặc error) */
 export function countScenesDone(scenes: VideoScene[]): number {
   return scenes.filter((s) => s.status === 'success' || s.status === 'error').length;
 }
 
+/** Tạo bulk project mới với settings + nhân vật rỗng, status draft */
 export function createBulkProject(
   options: CreateBulkOptions | VideoSettings = DEFAULT_VIDEO_SETTINGS,
   legacyTitle?: string,
 ): VideoBulkProject {
   const title = typeof options === 'object' && 'title' in options
     ? options.title.trim()
-    : legacyTitle ?? formatBulkTitle();
+    : legacyTitle ?? DEFAULT_BULK_TITLE;
   const settings = typeof options === 'object' && 'settings' in options
     ? { ...options.settings }
     : { ...(options as VideoSettings) };
@@ -88,7 +115,7 @@ export function createBulkProject(
   const now = new Date().toISOString();
   return {
     id: generateBulkProjectId(),
-    title: title || formatBulkTitle(),
+    title: title || DEFAULT_BULK_TITLE,
     createdAt: now,
     updatedAt: now,
     status: 'draft',
@@ -109,6 +136,7 @@ export function createBulkProject(
   };
 }
 
+/** Lọc bulk theo từ khóa, trạng thái và sắp xếp mới/cũ */
 export function filterBulkProjects(
   projects: VideoBulkProject[],
   query: string,
@@ -139,6 +167,7 @@ export function filterBulkProjects(
   return list;
 }
 
+/** Tiến độ % trên progress bar — dựa scenesDone/scenesTotal hoặc status */
 export function bulkProgressPercent(project: VideoBulkProject): number {
   if (project.scenesTotal <= 0) {
     if (project.status === 'completed') return 100;
