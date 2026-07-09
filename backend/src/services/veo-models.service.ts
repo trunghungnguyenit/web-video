@@ -67,9 +67,8 @@ export async function listVeoModels(apiKey: string): Promise<VeoModelInfo[]> {
       };
     })
     .sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi'));
-    console.log("models", models);
-  if (models.length === 0) {
-    throw new Error('Key hợp lệ nhưng không có model Veo — kiểm tra quyền Veo 3 trên tài khoản Google AI.');
+
+  if (models.length === 0) {    throw new Error('Key hợp lệ nhưng không có model Veo — kiểm tra quyền Veo 3 trên tài khoản Google AI.');
   }
 
   return models;

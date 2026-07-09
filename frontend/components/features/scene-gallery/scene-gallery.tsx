@@ -236,7 +236,7 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
     ids: string[],
     overrides?: Record<string, Pick<VideoScene, 'prompt' | 'voice'>>,
   ) => {
-    if (ids.length === 0) return;
+    if (ids.length === 0 || isRegenerating) return;
     if (!ttsInput?.apiKey?.trim()) {
       showToast('Thiếu ElevenLabs API Key — vào mục API Keys.');
       return;
@@ -253,21 +253,24 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
       prev.map((s) => (ids.includes(s.id) ? { ...s, status: 'generating' as const } : s)),
     );
 
-    const patches = await Promise.all(
-      ids.map(async (id) => {
-        const scene = scenesRef.current.find((s) => s.id === id);
-        if (!scene) return null;
-        const patch = overrides?.[id];
-        const working: VideoScene = patch ? { ...scene, ...patch } : scene;
-        try {
-          const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput);
-          return { id, scene: rebuilt };
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Tạo lại cảnh thất bại';
-          return { id, scene: { ...working, status: 'error' as const }, error: message };
-        }
-      }),
-    );
+    const patches: Array<{ id: string; scene: VideoScene; error?: string } | null> = [];
+
+    for (const id of ids) {
+      const scene = scenesRef.current.find((s) => s.id === id);
+      if (!scene) {
+        patches.push(null);
+        continue;
+      }
+      const patch = overrides?.[id];
+      const working: VideoScene = patch ? { ...scene, ...patch } : scene;
+      try {
+        const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput);
+        patches.push({ id, scene: rebuilt });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Tạo lại cảnh thất bại';
+        patches.push({ id, scene: { ...working, status: 'error' as const }, error: message });
+      }
+    }
 
     let firstError: string | undefined;
     onScenesChange((prev) =>
@@ -289,7 +292,7 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
     } else {
       showToast(`Đã tạo lại TTS + video cho ${ids.length} cảnh`);
     }
-  }, [onScenesChange, ttsInput, veoInput, onSceneFocus]);
+  }, [onScenesChange, ttsInput, veoInput, onSceneFocus, isRegenerating]);
 
   const handleSaveEdit = async (id: string, data: Pick<VideoScene, 'prompt' | 'voice'>) => {
     setEditTarget(null);

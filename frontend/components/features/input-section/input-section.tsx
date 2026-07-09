@@ -280,6 +280,13 @@ export function InputSection({
 
   const bulkStatus = projects.find((p) => p.id === projectId)?.status;
   const isBulkBusy = bulkStatus === 'analyzing' || bulkStatus === 'generating';
+  const submitLockRef = useRef(false);
+
+  useEffect(() => {
+    if (!isBulkBusy) {
+      submitLockRef.current = false;
+    }
+  }, [isBulkBusy]);
 
   const [showVoiceSpeed, setShowVoiceSpeed] = useState(false);
   const [showSceneStyle, setShowSceneStyle] = useState(false);
@@ -413,14 +420,19 @@ export function InputSection({
   };
 
   const handleSubmit = async () => {
+    if (submitLockRef.current || isBulkBusy) return;
+
     const e = validate();
     if (Object.keys(e).length > 0) {
       if (e.content) textareaRef.current?.focus();
       return;
     }
 
+    submitLockRef.current = true;
+
     const geminiKey = getApiKey('gemini');
     if (!geminiKey.trim()) {
+      submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
         submit: 'Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.',
@@ -430,6 +442,7 @@ export function InputSection({
 
     const veoKey = getVeoApiKey();
     if (!veoKey) {
+      submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
         submit: 'Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo) để tạo video Veo 3.',
@@ -437,6 +450,7 @@ export function InputSection({
       return;
     }
     if (!settings.veoModel?.trim()) {
+      submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
         submit: 'Chưa chọn model Veo — đợi danh sách model tải xong và chọn trong thanh cài đặt.',

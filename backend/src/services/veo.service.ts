@@ -5,15 +5,17 @@ import {
   resolveVeoModel,
   resolveVeoResolution,
 } from '../lib/veo-config';
+import { isFatalVeoMessage, isTransientHttpStatus, VeoApiError, withVeoRetry } from '../lib/veo-errors';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-const POLL_MS = 10_000;
-const MAX_POLLS = 60;
+export const VEO_POLL_INTERVAL_MS = 10_000;
+export const VEO_MAX_POLL_MS = 10 * 60 * 1000;
+export const VEO_MAX_POLLS = Math.floor(VEO_MAX_POLL_MS / VEO_POLL_INTERVAL_MS);
 
 interface LongRunningResponse {
   name?: string;
   done?: boolean;
-  error?: { message?: string };
+  error?: { message?: string; code?: number };
   response?: {
     generateVideoResponse?: {
       generatedSamples?: Array<{ video?: { uri?: string } }>;
@@ -29,6 +31,12 @@ export interface GenerateSceneVideoParams {
   durationSeconds: number;
 }
 
+export interface PollOperationResult {
+  done: boolean;
+  videoUri?: string;
+  error?: string;
+}
+
 function extractVideoUri(data: LongRunningResponse): string | undefined {
   return (
     data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
@@ -36,56 +44,61 @@ function extractVideoUri(data: LongRunningResponse): string | undefined {
   );
 }
 
-async function pollOperation(apiKey: string, operationName: string): Promise<string> {
-  const opPath = operationName.startsWith('operations/')
+function parseGoogleError(data: LongRunningResponse, status: number): VeoApiError {
+  const message = data.error?.message ?? `Veo API lỗi (${status})`;
+  return new VeoApiError(message, { status, fatal: isFatalVeoMessage(message) || status === 401 || status === 403 });
+}
+
+function normalizeOpPath(operationName: string): string {
+  return operationName.startsWith('operations/')
     ? operationName
     : operationName.replace(/^\/+/, '');
+}
 
-  for (let i = 0; i < MAX_POLLS; i++) {
-    await new Promise((r) => setTimeout(r, POLL_MS));
+/** GET operations — chỉ poll status, không gọi predictLongRunning */
+export async function pollVideoOperation(
+  apiKey: string,
+  operationName: string,
+): Promise<PollOperationResult> {
+  const key = apiKey.trim();
+  if (!key) throw new VeoApiError('Thiếu Veo API Key.', { fatal: true });
 
+  const opPath = normalizeOpPath(operationName);
+
+  return withVeoRetry('Veo poll', async () => {
     const res = await fetch(`${BASE_URL}/${opPath}`, {
-      headers: { 'X-goog-api-key': apiKey },
+      headers: { 'X-goog-api-key': key },
     });
 
     const data = (await res.json()) as LongRunningResponse;
+
     if (!res.ok) {
-      throw new Error(data.error?.message ?? `Veo poll lỗi (${res.status})`);
+      throw parseGoogleError(data, res.status);
     }
 
     if (data.error?.message) {
-      throw new Error(data.error.message);
+      throw new VeoApiError(data.error.message, { fatal: isFatalVeoMessage(data.error.message) });
     }
 
     if (data.done) {
       const uri = extractVideoUri(data);
-      if (!uri) throw new Error('Veo không trả về video URI.');
-      return uri;
+      if (!uri) {
+        throw new VeoApiError('Veo không trả về video URI.');
+      }
+      return { done: true, videoUri: uri };
     }
-  }
 
-  throw new Error('Veo quá thời gian chờ — thử lại sau.');
-}
-
-async function downloadVideo(apiKey: string, uri: string): Promise<Buffer> {
-  const res = await fetch(uri, {
-    headers: { 'X-goog-api-key': apiKey },
-    redirect: 'follow',
+    return { done: false };
   });
-
-  if (!res.ok) {
-    throw new Error(`Không tải được video Veo (${res.status}).`);
-  }
-
-  return Buffer.from(await res.arrayBuffer());
 }
 
-export async function generateSceneVideo(params: GenerateSceneVideoParams): Promise<Buffer> {
+/** POST predictLongRunning — đúng 1 lần generateVideos cho mỗi cảnh */
+export async function startVideoGeneration(params: GenerateSceneVideoParams): Promise<string> {
   const apiKey = params.apiKey.trim();
-  if (!apiKey) throw new Error('Thiếu Veo / Gemini API Key.');
+  if (!apiKey) throw new VeoApiError('Thiếu Veo API Key.', { fatal: true });
 
   const prompt = params.prompt.trim();
-  if (!prompt) throw new Error('Prompt video không được để trống.');
+  if (!prompt) throw new VeoApiError('Prompt video không được để trống.');
 
   const quality = params.veoInput.videoQuality ?? '720p';
   const model = resolveVeoModel(params.veoInput.veoModel);
@@ -93,30 +106,85 @@ export async function generateSceneVideo(params: GenerateSceneVideoParams): Prom
   const aspectRatio = resolveVeoAspectRatio(params.veoInput.aspectRatio);
   const durationSeconds = resolveVeoDurationSeconds(params.durationSeconds, quality);
 
-  const startRes = await fetch(`${BASE_URL}/models/${model}:predictLongRunning`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-goog-api-key': apiKey,
-    },
-    body: JSON.stringify({
-      instances: [{ prompt }],
-      parameters: {
-        aspectRatio,
-        resolution,
-        durationSeconds,
+  return withVeoRetry('Veo start', async () => {
+    const startRes = await fetch(`${BASE_URL}/models/${model}:predictLongRunning`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-goog-api-key': apiKey,
       },
-    }),
-  });
+      body: JSON.stringify({
+        instances: [{ prompt }],
+        parameters: {
+          aspectRatio,
+          resolution,
+          durationSeconds,
+        },
+      }),
+    });
 
-  const startData = (await startRes.json()) as LongRunningResponse & { name?: string };
-  if (!startRes.ok) {
-    throw new Error(startData.error?.message ?? `Veo API lỗi (${startRes.status})`);
+    const startData = (await startRes.json()) as LongRunningResponse & { name?: string };
+
+    if (!startRes.ok) {
+      throw parseGoogleError(startData, startRes.status);
+    }
+
+    const operationName = startData.name;
+    if (!operationName) {
+      throw new VeoApiError('Veo không trả về operation name.');
+    }
+
+    return operationName;
+  });
+}
+
+export async function downloadVideo(apiKey: string, uri: string): Promise<Buffer> {
+  const key = apiKey.trim();
+  if (!key) throw new VeoApiError('Thiếu Veo API Key.', { fatal: true });
+
+  return withVeoRetry('Veo download', async () => {
+    const res = await fetch(uri, {
+      headers: { 'X-goog-api-key': key },
+      redirect: 'follow',
+    });
+
+    if (!res.ok) {
+      const message = `Không tải được video Veo (${res.status}).`;
+      throw new VeoApiError(message, {
+        status: res.status,
+        fatal: !isTransientHttpStatus(res.status),
+      });
+    }
+
+    return Buffer.from(await res.arrayBuffer());
+  });
+}
+
+/** Poll mỗi 10s, tối đa 10 phút — chỉ operations.get, dừng ngay khi DONE */
+export async function waitForVideoOperation(
+  apiKey: string,
+  operationName: string,
+): Promise<string> {
+  for (let i = 0; i < VEO_MAX_POLLS; i++) {
+    await new Promise((r) => setTimeout(r, VEO_POLL_INTERVAL_MS));
+
+    const status = await pollVideoOperation(apiKey, operationName);
+    if (status.done && status.videoUri) {
+      return status.videoUri;
+    }
   }
 
-  const operationName = startData.name;
-  if (!operationName) throw new Error('Veo không trả về operation name.');
+  throw new VeoApiError('Veo quá thời gian chờ — thử lại sau.');
+}
 
-  const videoUri = await pollOperation(apiKey, operationName);
-  return downloadVideo(apiKey, videoUri);
+/** Luồng đầy đủ server-side (start → poll → download) — dùng khi resume hoặc tạo mới */
+export async function generateSceneVideo(
+  params: GenerateSceneVideoParams & { operationName?: string },
+): Promise<Buffer> {
+  const operationName = params.operationName?.trim()
+    ? params.operationName
+    : await startVideoGeneration(params);
+
+  const videoUri = await waitForVideoOperation(params.apiKey, operationName);
+  return downloadVideo(params.apiKey, videoUri);
 }

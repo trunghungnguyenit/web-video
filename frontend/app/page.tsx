@@ -18,6 +18,7 @@ import type { SavedScript } from '@/lib/saved-scripts';
 import { generateScriptId, deriveTitle } from '@/lib/saved-scripts';
 import type { SavedCharacter } from '@/lib/saved-characters';
 import { BulkProjectsProvider, useBulkProjects } from '@/contexts/bulk-projects-context';
+import { VeoModelsProvider } from '@/contexts/veo-models-context';
 import { ProjectSettingsProvider, type VideoSettings } from '@/contexts/project-settings-context';
 
 const viewTitles: Record<AppView, string> = {
@@ -327,6 +328,7 @@ export default function Page() {
 
   return (
     <BulkProjectsProvider>
+      <VeoModelsProvider>
       <div className="flex h-screen bg-background overflow-hidden">
         <div className="hidden md:flex flex-shrink-0">
           <Sidebar
@@ -418,6 +420,7 @@ export default function Page() {
           }}
         />
       </div>
+      </VeoModelsProvider>
     </BulkProjectsProvider>
   );
 }
