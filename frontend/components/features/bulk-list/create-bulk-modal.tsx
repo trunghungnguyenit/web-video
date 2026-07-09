@@ -14,7 +14,8 @@ import {
   type VideoSettings,
 } from '@/contexts/project-settings-context';
 import { getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
-import { useDefaultVeoModel, useVeoModels } from '@/hooks/use-veo-models';
+import { useDefaultVeoModel } from '@/hooks/use-veo-models';
+import { useVeoModels } from '@/contexts/veo-models-context';
 import { formatBulkTitle } from '@/lib/bulk-project';
 import type { CreateBulkOptions } from '@/lib/bulk-project';
 

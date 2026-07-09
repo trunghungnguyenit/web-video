@@ -4,6 +4,7 @@ import type { VideoScene } from '@/lib/scenes';
 import { recalculateSceneTimings } from '@/lib/scenes';
 import { attachAudioToSingleScene } from '@/lib/scene-tts';
 import { createSceneVideo } from '@/lib/scene-video';
+import { isFatalVeoError, sceneNeedsVeoResume } from '@/lib/veo-generation';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 
 export type SceneQueueStep = 'pending' | 'tts' | 'video' | 'done' | 'error';
@@ -20,9 +21,12 @@ export interface SceneQueueItem {
 export interface SceneQueueCallbacks {
   onScenesUpdate: (scenes: VideoScene[]) => void;
   onQueueUpdate?: (items: SceneQueueItem[]) => void;
+  /** Dừng toàn queue khi Billing/Quota */
+  onFatalError?: (message: string) => void;
+  /** Kiểm tra epoch — return false để hủy queue */
+  shouldContinue?: () => boolean;
 }
 
-/** Tạo danh sách queue item ban đầu từ scenes (step = pending) */
 function buildQueueItems(scenes: VideoScene[]): SceneQueueItem[] {
   return scenes.map((s) => ({
     sceneId: s.id,
@@ -33,7 +37,11 @@ function buildQueueItems(scenes: VideoScene[]): SceneQueueItem[] {
   }));
 }
 
-/** Xử lý tuần tự từng cảnh: TTS → Veo/placeholder — cập nhật UI sau mỗi bước */
+function patchSceneAt(scenes: VideoScene[], index: number, patch: VideoScene): VideoScene[] {
+  return recalculateSceneTimings(scenes.map((s, j) => (j === index ? patch : s)));
+}
+
+/** Xử lý tuần tự từng cảnh — không gọi Veo song song, không generate trùng */
 export async function runSceneGenerationQueue(
   initialScenes: VideoScene[],
   ttsInput: TtsInput,
@@ -41,46 +49,92 @@ export async function runSceneGenerationQueue(
   callbacks: SceneQueueCallbacks,
 ): Promise<VideoScene[]> {
   const queueItems = buildQueueItems(initialScenes);
-  let scenes: VideoScene[] = initialScenes.map((s) => ({ ...s, status: 'generating' as const }));
+  let scenes: VideoScene[] = initialScenes.map((s) => {
+    if (s.status === 'success' && s.videoUrl) return s;
+    if (sceneNeedsVeoResume(s)) return s;
+    return { ...s, status: 'generating' as const };
+  });
 
   callbacks.onScenesUpdate(scenes);
 
   for (let i = 0; i < scenes.length; i++) {
-    const scene = scenes[i];
-    queueItems[i] = { ...queueItems[i], step: 'tts', errorMessage: undefined };
-    callbacks.onQueueUpdate?.([...queueItems]);
+    if (callbacks.shouldContinue && !callbacks.shouldContinue()) break;
 
-    let withAudio: VideoScene;
-    try {
-      withAudio = await attachAudioToSingleScene(scene, ttsInput);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'TTS thất bại';
-      withAudio = { ...scene, status: 'error' as const };
-      queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
-      scenes = recalculateSceneTimings(scenes.map((s, j) => (j === i ? withAudio : s)));
+    const scene = scenes[i];
+
+    if (scene.status === 'success' && scene.videoUrl) {
+      queueItems[i] = { ...queueItems[i], step: 'done' };
       callbacks.onQueueUpdate?.([...queueItems]);
-      callbacks.onScenesUpdate([...scenes]);
       continue;
     }
 
-    scenes = recalculateSceneTimings(scenes.map((s, j) => (j === i ? withAudio : s)));
-    callbacks.onScenesUpdate([...scenes]);
+    let working = scene;
+
+    const skipTts = Boolean(working.audioUrl);
+
+    if (!skipTts) {
+      queueItems[i] = { ...queueItems[i], step: 'tts', errorMessage: undefined };
+      callbacks.onQueueUpdate?.([...queueItems]);
+
+      try {
+        working = await attachAudioToSingleScene(working, ttsInput);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'TTS thất bại';
+        working = { ...working, status: 'error' as const };
+        queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
+        scenes = patchSceneAt(scenes, i, working);
+        callbacks.onQueueUpdate?.([...queueItems]);
+        callbacks.onScenesUpdate([...scenes]);
+        continue;
+      }
+
+      scenes = patchSceneAt(scenes, i, { ...working, status: 'generating' as const });
+      callbacks.onScenesUpdate([...scenes]);
+    }
 
     queueItems[i] = { ...queueItems[i], step: 'video' };
     callbacks.onQueueUpdate?.([...queueItems]);
 
     let finished: VideoScene;
     try {
-      const videoUrl = await createSceneVideo(withAudio, veoInput);
-      finished = { ...withAudio, videoUrl, status: 'success' as const };
+      const videoUrl = await createSceneVideo(working, veoInput, {
+        onOperationStarted: (operationName) => {
+          const patched: VideoScene = {
+            ...working,
+            veoOperationName: operationName,
+            status: 'generating',
+          };
+          working = patched;
+          scenes = patchSceneAt(scenes, i, patched);
+          callbacks.onScenesUpdate([...scenes]);
+        },
+      });
+
+      finished = {
+        ...working,
+        videoUrl,
+        veoOperationName: undefined,
+        status: 'success' as const,
+      };
       queueItems[i] = { ...queueItems[i], step: 'done' };
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Tạo video thất bại';
-      finished = { ...withAudio, videoUrl: undefined, status: 'error' as const };
+
+      if (isFatalVeoError(message, Boolean((err as Error & { fatal?: boolean }).fatal))) {
+        callbacks.onFatalError?.(message);
+        finished = { ...working, status: 'error' as const };
+        queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
+        scenes = patchSceneAt(scenes, i, finished);
+        callbacks.onQueueUpdate?.([...queueItems]);
+        callbacks.onScenesUpdate([...scenes]);
+        break;
+      }
+
+      finished = { ...working, status: 'error' as const };
       queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
     }
 
-    scenes = recalculateSceneTimings(scenes.map((s, j) => (j === i ? finished : s)));
+    scenes = patchSceneAt(scenes, i, finished);
     callbacks.onQueueUpdate?.([...queueItems]);
     callbacks.onScenesUpdate([...scenes]);
   }
@@ -88,7 +142,6 @@ export async function runSceneGenerationQueue(
   return scenes;
 }
 
-/** Tiến độ hàng đợi: số cảnh done/error và % hoàn thành */
 export function queueProgress(items: SceneQueueItem[]): { done: number; total: number; percent: number } {
   const total = items.length;
   const done = items.filter((i) => i.step === 'done' || i.step === 'error').length;
@@ -96,7 +149,11 @@ export function queueProgress(items: SceneQueueItem[]): { done: number; total: n
   return { done, total, percent };
 }
 
-/** true nếu còn cảnh đang chạy TTS hoặc Veo */
 export function isQueueRunning(items: SceneQueueItem[]): boolean {
   return items.some((i) => i.step === 'tts' || i.step === 'video');
+}
+
+/** Cảnh cần resume poll sau refresh */
+export function scenesNeedingVeoResume(scenes: VideoScene[]): VideoScene[] {
+  return scenes.filter(sceneNeedsVeoResume);
 }

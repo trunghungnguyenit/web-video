@@ -2,31 +2,27 @@
 
 import type { VideoScene } from '@/lib/scenes';
 import type { VeoInput } from '@/lib/pipeline-payload';
-import { veoService } from '@/services/veo.service';
+import { generateSceneVideoAsset, type SceneVideoCallbacks } from '@/lib/veo-generation';
 import { createScenePlaceholderVideo, revokeSceneVideoUrl } from '@/lib/scene-video-placeholder';
 
-/** Tạo clip video cảnh — Veo API nếu có key, không thì placeholder WebM */
+/** Tạo clip video cảnh — Veo: start 1 lần → poll → download */
 export async function createSceneVideo(
   scene: VideoScene,
   veoInput: VeoInput,
+  callbacks?: SceneVideoCallbacks,
 ): Promise<string> {
   const apiKey = veoInput.apiKey?.trim();
   const quality = veoInput.videoQuality ?? '720p';
 
   if (apiKey) {
-    const blob = await veoService.generate({
-      apiKey,
-      prompt: scene.prompt,
-      veoInput,
-      durationSeconds: scene.durationSeconds,
-    });
-    return URL.createObjectURL(blob);
+    const { videoUrl } = await generateSceneVideoAsset(scene, veoInput, callbacks);
+    return videoUrl;
   }
 
   return createScenePlaceholderVideo(scene, quality);
 }
 
-/** Gắn video cho các cảnh — Veo 3 nếu có API key, không thì placeholder */
+/** Gắn video cho các cảnh — tuần tự, không song song */
 export async function attachVideosToScenes(
   scenes: VideoScene[],
   veoInput: VeoInput,
@@ -41,10 +37,10 @@ export async function attachVideosToScenes(
 
     revokeSceneVideoUrl(scene.videoUrl);
     try {
-      const videoUrl = await createSceneVideo(scene, veoInput);
-      results.push({ ...scene, videoUrl, status: 'success' as const });
+      const videoUrl = await createSceneVideo(scene, veoInput, { forceNew: true });
+      results.push({ ...scene, videoUrl, veoOperationName: undefined, status: 'success' as const });
     } catch {
-      results.push({ ...scene, videoUrl: undefined, status: 'error' as const });
+      results.push({ ...scene, videoUrl: undefined, veoOperationName: undefined, status: 'error' as const });
     }
   }
 

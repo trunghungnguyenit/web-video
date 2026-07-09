@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -17,7 +18,7 @@ import { scenesFromGeminiScript } from '@/lib/scenes';
 import type { VideoSettings } from '@/contexts/project-settings-context';
 import { DEFAULT_VIDEO_SETTINGS } from '@/contexts/project-settings-context';
 import type { AnalyzePipelineRequest } from '@/lib/pipeline-payload';
-import { runSceneGenerationQueue } from '@/lib/scene-generation-queue';
+import { runSceneGenerationQueue, scenesNeedingVeoResume } from '@/lib/scene-generation-queue';
 import { normalizeSceneDurationSetting } from '@/lib/saved-scripts';
 import { geminiService } from '@/services/gemini.service';
 import {
@@ -29,6 +30,7 @@ import {
   type CreateBulkOptions,
   type VideoBulkProject,
 } from '@/lib/bulk-project';
+import { loadBulkPersist, saveBulkPersist } from '@/lib/bulk-projects-persist';
 
 interface BulkAnalyzeInput {
   pipeline: AnalyzePipelineRequest;
@@ -72,10 +74,34 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
   const initial = useMemo(() => [createInitialBulkProject()], []);
   const [projects, setProjects] = useState<VideoBulkProject[]>(initial);
   const [activeProjectId, setActiveProjectId] = useState(initial[0].id);
+  const [persistReady, setPersistReady] = useState(false);
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
   /** Mỗi bulk có epoch riêng — tránh queue cũ ghi đè khi chạy lại */
   const generationEpochRef = useRef<Map<string, number>>(new Map());
+  /** Chống double-click / gọi startBulkAnalyze trùng */
+  const analyzeInFlightRef = useRef<Set<string>>(new Set());
+  /** Bulk đã resume poll sau refresh */
+  const resumedProjectsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const stored = loadBulkPersist();
+    if (stored) {
+      setProjects(stored.projects);
+      setActiveProjectId(stored.activeProjectId);
+    }
+    setPersistReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!persistReady) return;
+    const timer = window.setTimeout(() => {
+      saveBulkPersist(projectsRef.current, activeProjectIdRef.current);
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [projects, activeProjectId, persistReady]);
 
   const activeProject = useMemo(
     () => projects.find((p) => p.id === activeProjectId) ?? projects[0],
@@ -192,31 +218,48 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
     projectId: string,
     result: SceneGenerationResult,
     epoch: number,
+    options?: { resumeOnly?: boolean },
   ) => {
-    const pendingScenes = result.scenes.map((s) => ({ ...s, status: 'generating' as const }));
+    const existing = projectsRef.current.find((p) => p.id === projectId);
+    const pendingScenes = options?.resumeOnly && existing
+      ? existing.scenes
+      : result.scenes.map((s) => ({ ...s, status: 'generating' as const }));
 
-    updateProject(projectId, {
-      status: 'generating',
-      inputContent: result.sourceContent,
-      ttsInput: result.ttsInput,
-      veoInput: result.veoInput,
-      scenes: pendingScenes,
-      scenesDone: 0,
-      scenesTotal: pendingScenes.length,
-      veoModelLabel: resolveVeoModelLabel(result.veoInput, {
-        ...DEFAULT_VIDEO_SETTINGS,
+    if (!options?.resumeOnly) {
+      updateProject(projectId, {
+        status: 'generating',
+        inputContent: result.sourceContent,
+        ttsInput: result.ttsInput,
+        veoInput: result.veoInput,
+        scenes: pendingScenes,
+        scenesDone: countScenesDone(pendingScenes),
+        scenesTotal: pendingScenes.length,
+        veoModelLabel: resolveVeoModelLabel(result.veoInput, {
+          ...DEFAULT_VIDEO_SETTINGS,
+          aspectRatio: result.veoInput.aspectRatio,
+          videoQuality: result.veoInput.videoQuality ?? '720p',
+          veoModel: result.veoInput.veoModel ?? '',
+        }),
         aspectRatio: result.veoInput.aspectRatio,
-        videoQuality: result.veoInput.videoQuality ?? '720p',
-        veoModel: result.veoInput.veoModel ?? '',
-      }),
-      aspectRatio: result.veoInput.aspectRatio,
-    });
+      });
+    } else {
+      updateProject(projectId, { status: 'generating' });
+    }
+
+    const ttsInput = result.ttsInput ?? existing?.ttsInput;
+    const veoInput = result.veoInput ?? existing?.veoInput;
+    if (!ttsInput || !veoInput) return;
 
     void runSceneGenerationQueue(
       pendingScenes,
-      result.ttsInput,
-      result.veoInput,
+      ttsInput,
+      veoInput,
       {
+        shouldContinue: () => generationEpochRef.current.get(projectId) === epoch,
+        onFatalError: (message) => {
+          if (generationEpochRef.current.get(projectId) !== epoch) return;
+          updateProject(projectId, { status: 'error' });
+        },
         onScenesUpdate: (scenes) => {
           if (generationEpochRef.current.get(projectId) !== epoch) return;
           updateProject(projectId, {
@@ -243,10 +286,24 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
           };
         }),
       );
+    }).finally(() => {
+      analyzeInFlightRef.current.delete(projectId);
     });
   }, [updateProject]);
 
   const startBulkAnalyze = useCallback((projectId: string, input: BulkAnalyzeInput) => {
+    const project = projectsRef.current.find((p) => p.id === projectId);
+    if (!project) return;
+
+    if (project.status === 'analyzing' || project.status === 'generating') {
+      return;
+    }
+    if (analyzeInFlightRef.current.has(projectId)) {
+      return;
+    }
+
+    analyzeInFlightRef.current.add(projectId);
+
     const epoch = (generationEpochRef.current.get(projectId) ?? 0) + 1;
     generationEpochRef.current.set(projectId, epoch);
 
@@ -280,9 +337,40 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
       } catch {
         if (generationEpochRef.current.get(projectId) !== epoch) return;
         updateProject(projectId, { status: 'error' });
+        analyzeInFlightRef.current.delete(projectId);
       }
     })();
   }, [updateProject, runSceneGeneration]);
+
+  // Resume poll Veo sau refresh — không gọi predictLongRunning lại
+  useEffect(() => {
+    if (!persistReady) return;
+
+    for (const project of projects) {
+      if (resumedProjectsRef.current.has(project.id)) continue;
+      if (analyzeInFlightRef.current.has(project.id)) continue;
+      if (!project.ttsInput || !project.veoInput) continue;
+      if (scenesNeedingVeoResume(project.scenes).length === 0) continue;
+
+      resumedProjectsRef.current.add(project.id);
+
+      const epoch = (generationEpochRef.current.get(project.id) ?? 0) + 1;
+      generationEpochRef.current.set(project.id, epoch);
+      analyzeInFlightRef.current.add(project.id);
+
+      runSceneGeneration(project.id, {
+        scenes: project.scenes,
+        sourceContent: project.inputContent,
+        sceneCount: project.settings.sceneCount,
+        videoType: project.settings.videoType,
+        language: project.settings.language,
+        aspectRatio: project.veoInput.aspectRatio,
+        sceneDuration: project.veoInput.sceneDuration,
+        veoInput: project.veoInput,
+        ttsInput: project.ttsInput,
+      }, epoch, { resumeOnly: true });
+    }
+  }, [projects, runSceneGeneration, persistReady]);
 
   const value = useMemo(
     () => ({

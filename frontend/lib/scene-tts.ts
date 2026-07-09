@@ -92,10 +92,14 @@ export async function regenerateSceneAssets(
   }
 
   try {
-    const videoUrl = await createSceneVideo(next, veoInput);
-    return { ...next, videoUrl, status: 'success' };
+    const videoUrl = await createSceneVideo(
+      { ...next, veoOperationName: undefined },
+      veoInput,
+      { forceNew: true },
+    );
+    return { ...next, videoUrl, veoOperationName: undefined, status: 'success' };
   } catch {
-    return { ...next, videoUrl: undefined, status: 'error' };
+    return { ...next, videoUrl: undefined, veoOperationName: undefined, status: 'error' };
   }
 }
 

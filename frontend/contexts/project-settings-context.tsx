@@ -17,7 +17,8 @@ import {
   getSceneDurationOptions,
   normalizeSceneDurationSetting,
 } from '@/lib/saved-scripts';
-import { useDefaultVeoModel, useVeoModels } from '@/hooks/use-veo-models';
+import { useDefaultVeoModel } from '@/hooks/use-veo-models';
+import { useVeoModels } from '@/contexts/veo-models-context';
 
 export interface VideoSettings {
   language: string;

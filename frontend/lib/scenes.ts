@@ -23,6 +23,8 @@ export interface VideoScene {
   audioUrl?: string;
   /** Độ dài thực của MP3 (giây) — dùng sync timeline */
   audioDurationSeconds?: number;
+  /** Google long-running operation — lưu để resume poll sau refresh, không gọi generate lại */
+  veoOperationName?: string;
 }
 
 export interface SceneGenerationInput {

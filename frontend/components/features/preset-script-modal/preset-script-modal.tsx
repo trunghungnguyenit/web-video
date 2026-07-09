@@ -6,7 +6,8 @@ import { cn } from '@/lib/utils';
 import type { PresetScript } from '@/lib/preset-scripts';
 import { ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
-import { useDefaultVeoModel, useVeoModels } from '@/hooks/use-veo-models';
+import { useDefaultVeoModel } from '@/hooks/use-veo-models';
+import { useVeoModels } from '@/contexts/veo-models-context';
 interface PresetScriptModalProps {
   preset: PresetScript | null;
   onClose: () => void;
