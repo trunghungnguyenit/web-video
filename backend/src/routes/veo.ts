@@ -2,22 +2,12 @@ import { Hono } from 'hono';
 import { fail, ok } from '../utils/api-response';
 import {
   downloadVideo,
-  generateSceneVideo,
   pollVideoOperation,
   startVideoGeneration,
 } from '../services/veo.service';
 import { listVeoModels } from '../services/veo-models.service';
 import { VeoApiError } from '../lib/veo-errors';
 import type { VeoInput } from '../types/pipeline';
-
-interface GenerateBody {
-  apiKey: string;
-  prompt: string;
-  veoInput: VeoInput;
-  durationSeconds: number;
-  /** Resume — chỉ poll + download, không gọi predictLongRunning lại */
-  operationName?: string;
-}
 
 interface StartBody {
   apiKey: string;
@@ -152,38 +142,14 @@ veoRoute.post('/generate/download', async (c) => {
 
 /**
  * POST /api/veo/generate
- * Luồng đầy đủ (start → poll → download) — hỗ trợ resume qua operationName
+ * @deprecated Dùng /generate/start + /operations/poll + /generate/download
  */
 veoRoute.post('/generate', async (c) => {
-  try {
-    const body = await c.req.json<GenerateBody>();
-
-    if (!body.apiKey?.trim()) {
-      return fail(c, 'Thiếu Veo API Key.', 400);
-    }
-    if (!body.operationName && !body.prompt?.trim()) {
-      return fail(c, 'Prompt video không được để trống.', 400);
-    }
-    if (!body.veoInput) {
-      return fail(c, 'Thiếu veoInput.', 400);
-    }
-
-    const video = await generateSceneVideo({
-      apiKey: body.apiKey,
-      prompt: body.prompt ?? '',
-      veoInput: body.veoInput,
-      durationSeconds: body.durationSeconds ?? 6,
-      operationName: body.operationName,
-    });
-
-    return new Response(new Uint8Array(video), {
-      status: 200,
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Cache-Control': 'no-store',
-      },
-    });
-  } catch (err) {
-    return veoErrorResponse(c, err);
-  }
+  return c.json(
+    {
+      success: false,
+      error: 'Endpoint đã ngừng — dùng /api/veo/generate/start, /operations/poll, /generate/download.',
+    },
+    410,
+  );
 });

@@ -264,7 +264,17 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
       const patch = overrides?.[id];
       const working: VideoScene = patch ? { ...scene, ...patch } : scene;
       try {
-        const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput);
+        const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput, {
+          onOperationStarted: (operationName) => {
+            onScenesChange((prev) =>
+              prev.map((s) =>
+                s.id === id
+                  ? { ...s, veoOperationName: operationName, status: 'generating' as const }
+                  : s,
+              ),
+            );
+          },
+        });
         patches.push({ id, scene: rebuilt });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Tạo lại cảnh thất bại';
