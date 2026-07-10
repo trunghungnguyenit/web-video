@@ -22,8 +22,10 @@ function stripBlobUrls(scenes: VideoScene[]): VideoScene[] {
 function normalizeOnLoad(project: VideoBulkProject): VideoBulkProject {
   const scenes = project.scenes.map((s) => {
     let status = s.status;
-    if (status === 'generating') {
-      status = s.veoOperationName ? 'generating' : s.videoUrl ? 'success' : 'error';
+    if (s.veoOperationName?.trim() && !s.videoUrl) {
+      status = 'generating';
+    } else if (status === 'generating') {
+      status = s.videoUrl ? 'success' : 'error';
     }
     return { ...s, status };
   });

@@ -18,8 +18,10 @@ const FATAL_PATTERNS = [
   /api.?key/i,
   /invalid.?key/i,
   /exceeded/i,
+  /limit/i,
   /payment/i,
   /suspended/i,
+  /disabled/i,
 ];
 
 export function isFatalVeoError(message: string, fatalFlag?: boolean): boolean {
@@ -38,11 +40,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Poll operations.get mỗi 10s — dừng ngay khi DONE, timeout 10 phút */
+/** Poll operations.get — poll ngay lần đầu, sau đó mỗi 10s, timeout 10 phút */
 async function pollUntilDone(apiKey: string, operationName: string): Promise<string> {
   return withOperationPollLock(operationName, async () => {
     for (let i = 0; i < VEO_MAX_POLLS; i++) {
-      await sleep(VEO_POLL_INTERVAL_MS);
+      if (i > 0) await sleep(VEO_POLL_INTERVAL_MS);
 
       const status = await veoService.pollOperation({ apiKey, operationName });
 
@@ -111,11 +113,11 @@ export async function generateSceneVideoAsset(
   });
 }
 
-/** Cảnh đang chờ poll (refresh trang) — có operation nhưng chưa có video */
+/** Cảnh đang chờ poll (refresh / lỗi tạm) — có operation nhưng chưa có video */
 export function sceneNeedsVeoResume(scene: VideoScene): boolean {
   return Boolean(
     scene.veoOperationName?.trim()
     && !scene.videoUrl
-    && scene.status === 'generating',
+    && (scene.status === 'generating' || scene.status === 'error'),
   );
 }

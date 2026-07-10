@@ -130,26 +130,6 @@ class VeoService {
 
     return res.blob();
   }
-
-  /** POST /api/veo/generate — luồng đầy đủ (legacy / resume) */
-  async generate(payload: GenerateSceneVideoPayload): Promise<Blob> {
-    let res: Response;
-    try {
-      res = await fetch(`${API_BASE}/api/veo/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch {
-      throw new Error(`Không kết nối được backend (${API_BASE}). Hãy chạy npm run dev:be.`);
-    }
-
-    if (!res.ok) {
-      await this.parseError(res);
-    }
-
-    return res.blob();
-  }
 }
 
 export const veoService = new VeoService();

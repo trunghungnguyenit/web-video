@@ -516,13 +516,18 @@ export function InputSection({
         : undefined,
     );
 
-    startBulkAnalyze(submitProjectId, {
+    const started = startBulkAnalyze(submitProjectId, {
       pipeline,
       sourceContent: contentForScenes,
       sceneCount: settings.sceneCount,
       videoType: settings.videoType,
       language: settings.language,
     });
+
+    if (!started) {
+      submitLockRef.current = false;
+      return;
+    }
 
     setForm((f) => ({ ...f, submitted: true }));
     setTimeout(() => setForm((f) => ({ ...f, submitted: false })), 3000);

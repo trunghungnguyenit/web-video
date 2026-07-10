@@ -6,6 +6,7 @@ import type { TtsInput } from '@/lib/pipeline-payload';
 import { ttsService } from '@/services/tts.service';
 import { revokeSceneVideoUrl } from '@/lib/scene-video-placeholder';
 import { createSceneVideo } from '@/lib/scene-video';
+import type { SceneVideoCallbacks } from '@/lib/veo-generation';
 import type { VeoInput } from '@/lib/pipeline-payload';
 
 /** Thu hồi blob URL audio TTS (tránh rò bộ nhớ) */
@@ -81,6 +82,7 @@ export async function regenerateSceneAssets(
   scene: VideoScene,
   ttsInput: TtsInput,
   veoInput: VeoInput,
+  callbacks?: SceneVideoCallbacks,
 ): Promise<VideoScene> {
   revokeSceneVideoUrl(scene.videoUrl);
 
@@ -91,15 +93,27 @@ export async function regenerateSceneAssets(
     next = { ...scene, audioUrl: undefined };
   }
 
+  let startedOperation: string | undefined;
   try {
     const videoUrl = await createSceneVideo(
       { ...next, veoOperationName: undefined },
       veoInput,
-      { forceNew: true },
+      {
+        forceNew: true,
+        onOperationStarted: (operationName) => {
+          startedOperation = operationName;
+          callbacks?.onOperationStarted?.(operationName);
+        },
+      },
     );
     return { ...next, videoUrl, veoOperationName: undefined, status: 'success' };
   } catch {
-    return { ...next, videoUrl: undefined, veoOperationName: undefined, status: 'error' };
+    return {
+      ...next,
+      videoUrl: undefined,
+      veoOperationName: startedOperation,
+      status: 'error',
+    };
   }
 }
 

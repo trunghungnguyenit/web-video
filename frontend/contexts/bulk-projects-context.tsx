@@ -53,7 +53,7 @@ interface BulkProjectsContextValue {
   setActiveTimelineFocus: (sceneId: string | null) => void;
   applyPresetToActive: (input: PresetInput, timeline: PresetTimelineDemo | null) => void;
   syncSettingsForProject: (projectId: string, settings: VideoSettings) => void;
-  startBulkAnalyze: (projectId: string, input: BulkAnalyzeInput) => void;
+  startBulkAnalyze: (projectId: string, input: BulkAnalyzeInput) => boolean;
 }
 
 const BulkProjectsContext = createContext<BulkProjectsContextValue | null>(null);
@@ -260,6 +260,18 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
           if (generationEpochRef.current.get(projectId) !== epoch) return;
           updateProject(projectId, { status: 'error' });
         },
+        onPersistScenes: (scenes) => {
+          if (generationEpochRef.current.get(projectId) !== epoch) return;
+          if (!persistReady) return;
+          const next = patchProject(projectsRef.current, projectId, {
+            scenes,
+            scenesDone: countScenesDone(scenes),
+            scenesTotal: scenes.length,
+            status: 'generating',
+          });
+          projectsRef.current = next;
+          saveBulkPersist(next, activeProjectIdRef.current);
+        },
         onScenesUpdate: (scenes) => {
           if (generationEpochRef.current.get(projectId) !== epoch) return;
           updateProject(projectId, {
@@ -289,17 +301,17 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
     }).finally(() => {
       analyzeInFlightRef.current.delete(projectId);
     });
-  }, [updateProject]);
+  }, [updateProject, persistReady]);
 
-  const startBulkAnalyze = useCallback((projectId: string, input: BulkAnalyzeInput) => {
+  const startBulkAnalyze = useCallback((projectId: string, input: BulkAnalyzeInput): boolean => {
     const project = projectsRef.current.find((p) => p.id === projectId);
-    if (!project) return;
+    if (!project) return false;
 
     if (project.status === 'analyzing' || project.status === 'generating') {
-      return;
+      return false;
     }
     if (analyzeInFlightRef.current.has(projectId)) {
-      return;
+      return false;
     }
 
     analyzeInFlightRef.current.add(projectId);
@@ -340,13 +352,15 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
         analyzeInFlightRef.current.delete(projectId);
       }
     })();
+
+    return true;
   }, [updateProject, runSceneGeneration]);
 
-  // Resume poll Veo sau refresh — không gọi predictLongRunning lại
+  // Resume poll Veo sau refresh — chỉ chạy 1 lần khi load persist, không gọi predictLongRunning lại
   useEffect(() => {
     if (!persistReady) return;
 
-    for (const project of projects) {
+    for (const project of projectsRef.current) {
       if (resumedProjectsRef.current.has(project.id)) continue;
       if (analyzeInFlightRef.current.has(project.id)) continue;
       if (!project.ttsInput || !project.veoInput) continue;
@@ -370,7 +384,7 @@ export function BulkProjectsProvider({ children }: { children: ReactNode }) {
         ttsInput: project.ttsInput,
       }, epoch, { resumeOnly: true });
     }
-  }, [projects, runSceneGeneration, persistReady]);
+  }, [persistReady, runSceneGeneration]);
 
   const value = useMemo(
     () => ({
