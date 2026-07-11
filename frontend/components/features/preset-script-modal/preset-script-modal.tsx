@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, Loader2, PlayCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { PresetScript } from '@/lib/preset-scripts';
 import { ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
@@ -12,10 +12,12 @@ interface PresetScriptModalProps {
   preset: PresetScript | null;
   onClose: () => void;
   onApply: (preset: PresetScript) => void;
+  /** Điền mục 1 & 2 rồi tự sinh luôn mục 3 & 4 bằng dữ liệu demo — không cần API key */
+  onApplyDemo: (preset: PresetScript) => void;
 }
 
 type Section = 'character' | 'input' | 'none';
-export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModalProps) {
+export function PresetScriptModal({ preset, onClose, onApply, onApplyDemo }: PresetScriptModalProps) {
   // Bản chỉnh sửa — clone để user có thể sửa mà không ảnh hưởng dữ liệu gốc
   const [draft, setDraft] = useState<PresetScript | null>(null);
   const [openSection, setOpenSection] = useState<Section>('character');
@@ -78,6 +80,10 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
     if (draft) onApply(draft);
   };
 
+  const handleApplyDemo = () => {
+    if (draft) onApplyDemo(draft);
+  };
+
   const toggleSection = (s: Section) =>
     setOpenSection((prev) => (prev === s ? 'none' : s));
 
@@ -137,6 +143,14 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
                 <> Tab <strong className="text-foreground">Từ hình ảnh</strong> mở sẵn 10 cảnh — tải ảnh stickman cho từng cảnh.</>
               )}
               {' '}Nhấn <strong className="text-foreground">Phân tích &amp; Tạo Kịch Bản</strong> ở mục 2 để AI sinh danh sách cảnh và timeline.
+            </p>
+          </div>
+
+          <div className="mx-6 mt-2 mb-2 px-4 py-3 bg-orange-500/5 border border-orange-500/20 rounded-xl">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              <span className="text-orange-400 font-semibold">Chưa có API Key?</span> Nhấn{' '}
+              <strong className="text-foreground">Xem demo ngay</strong> — tự động điền đủ mục 1, 2, 3 (Danh sách cảnh) &amp; 4 (Chỉnh sửa video)
+              bằng dữ liệu &amp; video mô phỏng dựng sẵn, không cần Gemini / Veo / ElevenLabs.
             </p>
           </div>
           {/* ── Section 1: Character ───────────────────────────────────── */}
@@ -384,14 +398,25 @@ export function PresetScriptModal({ preset, onClose, onApply }: PresetScriptModa
           >
             Huỷ
           </button>
-          <button
-            type="button"
-            onClick={handleApply}
-            className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors cursor-pointer"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            Áp dụng kịch bản
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleApplyDemo}
+              title="Điền mục 1, 2, 3 & 4 bằng dữ liệu demo — không cần API key"
+              className="flex items-center gap-2 px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/30 text-orange-400 text-sm font-bold rounded-xl transition-colors cursor-pointer"
+            >
+              <PlayCircle className="w-4 h-4" />
+              Xem demo ngay
+            </button>
+            <button
+              type="button"
+              onClick={handleApply}
+              className="flex items-center gap-2 px-5 py-2 bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-bold rounded-xl transition-colors cursor-pointer"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Áp dụng kịch bản
+            </button>
+          </div>
         </div>
       </div>
     </div>

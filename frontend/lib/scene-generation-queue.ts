@@ -6,6 +6,7 @@ import { attachAudioToSingleScene } from '@/lib/scene-tts';
 import { createSceneVideo } from '@/lib/scene-video';
 import { isFatalVeoError, sceneNeedsVeoResume } from '@/lib/veo-generation';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
+import { toUserMessage } from '@/lib/error-messages';
 
 export type SceneQueueStep = 'pending' | 'tts' | 'video' | 'done' | 'error';
 
@@ -70,7 +71,7 @@ export async function runSceneGenerationQueue(
       continue;
     }
 
-    let working = scene;
+    let working: VideoScene = { ...scene, errorMessage: undefined };
 
     const skipTts = Boolean(working.audioUrl);
 
@@ -81,8 +82,8 @@ export async function runSceneGenerationQueue(
       try {
         working = await attachAudioToSingleScene(working, ttsInput);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'TTS thất bại';
-        working = { ...working, status: 'error' as const };
+        const message = toUserMessage(err, 'Tạo giọng đọc (TTS) thất bại — thử lại.');
+        working = { ...working, status: 'error' as const, errorMessage: message };
         queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
         scenes = patchSceneAt(scenes, i, working);
         callbacks.onQueueUpdate?.([...queueItems]);
@@ -118,14 +119,16 @@ export async function runSceneGenerationQueue(
         videoUrl,
         veoOperationName: undefined,
         status: 'success' as const,
+        errorMessage: undefined,
       };
       queueItems[i] = { ...queueItems[i], step: 'done' };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Tạo video thất bại';
+      const rawMessage = err instanceof Error ? err.message : 'Tạo video thất bại';
+      const message = toUserMessage(err, 'Tạo video Veo thất bại — thử lại.');
 
-      if (isFatalVeoError(message, Boolean((err as Error & { fatal?: boolean }).fatal))) {
+      if (isFatalVeoError(rawMessage, Boolean((err as Error & { fatal?: boolean }).fatal))) {
         callbacks.onFatalError?.(message);
-        finished = { ...working, status: 'error' as const };
+        finished = { ...working, status: 'error' as const, errorMessage: message };
         queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
         scenes = patchSceneAt(scenes, i, finished);
         callbacks.onQueueUpdate?.([...queueItems]);
@@ -133,7 +136,7 @@ export async function runSceneGenerationQueue(
         break;
       }
 
-      finished = { ...working, status: 'error' as const };
+      finished = { ...working, status: 'error' as const, errorMessage: message };
       queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
       scenes = patchSceneAt(scenes, i, finished);
       callbacks.onQueueUpdate?.([...queueItems]);

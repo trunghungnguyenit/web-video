@@ -17,6 +17,10 @@ import {
   transitionMs,
 } from '@/lib/scene-transition';
 import { composeVideo, downloadBlob } from '@/lib/video-composer';
+import { toUserMessage } from '@/lib/error-messages';
+import { useAuth } from '@/contexts/auth-context';
+import { createClient } from '@/lib/supabase/client';
+import { insertRenderHistory } from '@/lib/supabase/render-history-remote';
 
 const PRESET_TRACKS = [
   { id: 1, name: 'Ambient Calm',     duration: '3:24', mood: 'Thư giãn' },
@@ -51,6 +55,8 @@ export function TimelineEditor({
   focusSceneId,
   onFocusSceneHandled,
 }: TimelineEditorProps = {}) {
+  const { user } = useAuth();
+  const supabaseRef = useRef(createClient());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bgmSectionRef = useRef<HTMLDivElement>(null);
   const previewARef = useRef<HTMLVideoElement>(null);
@@ -432,8 +438,28 @@ export function TimelineEditor({
       downloadBlob(result.blob, result.filename);
       setRenderDone(true);
       setTimeout(() => setRenderDone(false), 4000);
+
+      const supabase = supabaseRef.current;
+      if (user && supabase) {
+        insertRenderHistory(supabase, user.id, {
+          fileName: result.filename,
+          fileSizeBytes: result.blob.size,
+          durationSeconds: result.durationSeconds,
+          status: 'completed',
+        }).catch((err) => console.error('[render-history] Ghi lịch sử thất bại:', err));
+      }
     } catch (err) {
-      setRenderError(err instanceof Error ? err.message : 'Render thất bại — thử lại.');
+      const message = toUserMessage(err, 'Render video thất bại — thử lại hoặc giảm số cảnh.');
+      setRenderError(message);
+
+      const supabase = supabaseRef.current;
+      if (user && supabase) {
+        insertRenderHistory(supabase, user.id, {
+          fileName: `render-${Date.now()}.mp4`,
+          status: 'failed',
+          errorMessage: message,
+        }).catch((e) => console.error('[render-history] Ghi lịch sử thất bại:', e));
+      }
     } finally {
       setIsRendering(false);
     }

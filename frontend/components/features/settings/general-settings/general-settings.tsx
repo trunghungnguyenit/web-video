@@ -1,8 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path fill="#4285F4" d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.63h6.47a5.54 5.54 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.57-5.17 3.57-8.81Z" />
+      <path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.92l-3.88-3c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.26v3.11A12 12 0 0 0 12 24Z" />
+      <path fill="#FBBC05" d="M5.27 14.27a7.2 7.2 0 0 1 0-4.54v-3.11H1.26a12 12 0 0 0 0 10.76l4.01-3.11Z" />
+      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.26 6.62l4.01 3.11C6.22 6.86 8.87 4.75 12 4.75Z" />
+    </svg>
+  );
+}
 
 interface Toggle {
   id: string;
@@ -109,31 +121,11 @@ export function GeneralSettings() {
         ))}
       </div>
 
-      {/* Account info */}
-      <div className="border-t border-border pt-5 space-y-2">
-        <h5 className="text-xs font-semibold text-foreground uppercase tracking-wider mb-3">Tài khoản</h5>
-        {[
-          { label: 'Email', value: 'user@example.com' },
-          { label: 'Gói', value: 'Pro', highlight: true },
-          { label: 'Hết hạn', value: '31 tháng 12, 2025' },
-        ].map(({ label, value, highlight }) => (
-          <div key={label} className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">{label}</span>
-            <span className={cn('text-sm', highlight ? 'text-primary font-semibold' : 'text-foreground')}>
-              {value}
-            </span>
-          </div>
-        ))}
-      </div>
+      {/* Account */}
+      <AccountSection />
 
       {/* Actions */}
-      <div className="flex items-center justify-between border-t border-border pt-5">
-        <button
-          type="button"
-          className="px-4 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive text-sm font-medium rounded-lg transition-colors"
-        >
-          Đăng xuất
-        </button>
+      <div className="flex items-center justify-end border-t border-border pt-5">
         <button
           type="button"
           onClick={handleSave}
@@ -149,6 +141,72 @@ export function GeneralSettings() {
           ) : 'Lưu thay đổi'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function AccountSection() {
+  const { user, loading, signingIn, signingOut, signInWithGoogle, signOut } = useAuth();
+
+  return (
+    <div className="border-t border-border pt-5 space-y-3">
+      <h5 className="text-xs font-semibold text-foreground uppercase tracking-wider">Tài khoản</h5>
+
+      {loading ? (
+        <div className="flex items-center gap-3 py-1 animate-pulse">
+          <div className="w-10 h-10 rounded-full bg-muted" />
+          <div className="space-y-1.5">
+            <div className="h-3 w-32 rounded bg-muted" />
+            <div className="h-2.5 w-40 rounded bg-muted" />
+          </div>
+        </div>
+      ) : user ? (
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {user.user_metadata?.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.user_metadata.avatar_url}
+                alt=""
+                className="w-10 h-10 rounded-full object-cover border border-border shrink-0"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-primary/15 border border-primary/30 flex items-center justify-center text-sm font-bold text-primary shrink-0">
+                {(user.user_metadata?.full_name?.[0] ?? user.email?.[0] ?? '?').toUpperCase()}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground truncate">
+                {user.user_metadata?.full_name ?? user.email}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={signOut}
+            disabled={signingOut}
+            className="flex items-center gap-1.5 px-3 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive text-xs font-medium rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+          >
+            {signingOut && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Đăng xuất
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={signInWithGoogle}
+          disabled={signingIn}
+          className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 bg-background border border-border hover:border-primary/40 hover:bg-muted/30 rounded-lg text-sm font-semibold text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {signingIn ? (
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+          ) : (
+            <GoogleIcon className="w-4 h-4" />
+          )}
+          {signingIn ? 'Đang chuyển tới Google...' : 'Đăng nhập bằng Google'}
+        </button>
+      )}
     </div>
   );
 }

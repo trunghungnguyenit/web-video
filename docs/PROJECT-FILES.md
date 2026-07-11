@@ -25,8 +25,8 @@ Chi tiết từng file: [frontend/lib/README.md](../frontend/lib/README.md).
 
 | File | Chức năng |
 |------|-----------|
-| `project-settings-context.tsx` | Cài đặt video theo bulk (ngôn ngữ, số cảnh, Veo model, giọng…); sync về bulk khi đổi. |
-| `bulk-projects-context.tsx` | Quản lý nhiều bulk: tạo/chọn/xóa, `startBulkAnalyze`, queue sinh cảnh song song theo project. |
+| `project-settings-context.tsx` | Cài đặt video theo item (ngôn ngữ, số cảnh, Veo model, giọng…); sync về Kho video khi đổi. |
+| `video-library-context.tsx` | Quản lý Kho video: tạo/chọn/xóa/sửa tên, `startAnalyze`, `startRegenerate` (sửa & tạo lại), queue sinh cảnh song song theo item. |
 
 ---
 
@@ -34,7 +34,7 @@ Chi tiết từng file: [frontend/lib/README.md](../frontend/lib/README.md).
 
 | File | Chức năng |
 |------|-----------|
-| `page.tsx` | Trang chính: layout sidebar + bulk list + workspace (nhân vật, input, gallery, timeline). |
+| `page.tsx` | Trang chính: layout sidebar + Kho video + workspace (nhân vật, input, gallery, timeline). |
 | `layout.tsx` | Root layout Next.js, font, metadata. |
 | `globals.css` | Theme CSS variables (sidebar, primary…). |
 
@@ -44,13 +44,13 @@ Chi tiết từng file: [frontend/lib/README.md](../frontend/lib/README.md).
 
 | Thư mục | Chức năng |
 |---------|-----------|
-| `layout/sidebar` | Menu trái, điều hướng section, preset, mobile nav + Bulk List drawer. |
+| `layout/sidebar` | Menu trái, điều hướng section, preset, mobile nav + Kho video drawer. |
 | `layout/header` | Header sticky, nút menu mobile. |
 | `features/input-section` | Mục 2: tab text/link/ảnh/file, validate, gửi phân tích Gemini. |
 | `features/character-master` | Mục 1: CRUD nhân vật, avatar, style. |
 | `features/scene-gallery` | Mục 3: danh sách cảnh, retry, sửa prompt/voice. |
 | `features/timeline-editor` | Mục 4: timeline kéo-thả, preview crossfade, BGM, phụ đề. |
-| `features/bulk-list` | Panel/drawer danh sách bulk, tạo bulk mới. |
+| `features/video-library` | Panel/drawer Kho video: tạo, sửa tên/nội dung & tạo lại, xóa video. |
 | `features/preset-script-modal` | Modal chỉnh & áp dụng kịch bản mẫu. |
 | `features/api-keys-management` | Trang quản lý & test API keys. |
 | `features/video-settings` | Thanh cài đặt video (model, ngôn ngữ, cảnh…). |
@@ -91,4 +91,4 @@ Chi tiết từng file: [frontend/lib/README.md](../frontend/lib/README.md).
 4. Mỗi cảnh: TTS → Veo (hoặc placeholder)
 5. Timeline preview → `video-composer` + FFmpeg export MP4
 
-Nhiều bulk: mỗi bulk có state riêng trong `BulkProjectsProvider`; Veo xếp hàng global qua `veo-concurrency.ts`.
+Kho video: mỗi video có state riêng trong `VideoLibraryProvider`; Veo xếp hàng global qua `veo-concurrency.ts`.

@@ -7,6 +7,7 @@ import { VOICE_OPTIONS } from '@/lib/saved-scripts';
 import { getApiKey, API_KEY_IDS } from '@/lib/api-keys-store';
 import { getVoicePreviewText, voicePreviewCacheKey } from '@/lib/voice-preview';
 import { ttsService } from '@/services/tts.service';
+import { toUserMessage } from '@/lib/error-messages';
 
 interface VoiceSelectProps {
   value: string;
@@ -94,7 +95,7 @@ export function VoiceSelect({
       await audio.play();
       setPreviewing(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không phát được giọng mẫu.');
+      setError(toUserMessage(err, 'Không phát được giọng mẫu — thử lại.'));
       stopPreview();
     } finally {
       setLoading(false);

@@ -17,6 +17,8 @@ export interface VideoScene {
   voice: string;
   durationSeconds: number;
   status: SceneStatus;
+  /** Lý do lỗi gần nhất (status === 'error') — hiển thị cho user, clear khi thử lại thành công */
+  errorMessage?: string;
   /** Blob URL clip video — sinh sau khi cảnh hoàn thiện ở mục 3 */
   videoUrl?: string;
   /** Blob URL audio MP3 — ElevenLabs TTS từ voiceover */

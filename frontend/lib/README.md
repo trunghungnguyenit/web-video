@@ -37,11 +37,12 @@ Thư mục chứa **logic nghiệp vụ thuần TypeScript** (không React UI): 
 | `ffmpeg-client.ts` | Lazy-load FFmpeg.wasm từ CDN (singleton). |
 | `video-composer.ts` | Ghép clip cảnh + BGM + phụ đề → xuất MP4 cuối (client-side). |
 
-## Bulk / dự án song song
+## Kho video (video-library)
 
 | File | Chức năng |
 |------|-----------|
-| `bulk-project.ts` | Kiểu `VideoBulkProject`, tạo/lọc/sắp xếp bulk, tiến độ %. |
+| `video-library.ts` | Kiểu `VideoLibraryItem`, tạo/lọc/sắp xếp video, tiến độ %. |
+| `scene-styles.ts` | `SCENE_STYLES` — phong cách hình ảnh dùng chung input-section + video-item-modal. |
 
 ## Kịch bản mẫu (preset)
 
@@ -76,4 +77,4 @@ InputSection → pipeline-payload → gemini.service (backend)
   → video-composer (FFmpeg export)
 ```
 
-Bulk song song: `bulk-projects-context` (contexts) gọi cùng pipeline qua `startBulkAnalyze` + `scene-generation-queue`.
+Kho video: `video-library-context` (contexts) gọi cùng pipeline qua `startAnalyze`/`startRegenerate` + `scene-generation-queue`.

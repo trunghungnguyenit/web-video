@@ -1,11 +1,10 @@
 'use client';
 
-import { Settings, Key, Film, Clock } from 'lucide-react';
+import { Settings, Key, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { GeneralSettings } from '../general-settings';
 import { KeySetupSettings } from '../key-setup-settings';
 import { RenderHistorySettings } from '../render-history-settings';
-import { ExportSettings } from '../export-settings/export-settings';
 
 interface Tab {
   id: string;
@@ -16,9 +15,8 @@ interface Tab {
 
 const settingsTabs: Tab[] = [
   { id: 'general', label: 'Cài đặt chung', icon: Settings, desc: 'Ngôn ngữ, theme, tài khoản' },
-  { id: 'key',     label: 'License & API', icon: Key,      desc: 'License key, Gemini, Veo, TTS' },
-  { id: 'export',  label: 'Xuất & Render', icon: Film,     desc: 'Thư mục, phụ đề, watermark' },
-  { id: 'history', label: 'Lịch sử render',icon: Clock,    desc: 'Video đã xuất' },
+  { id: 'key', label: 'License', icon: Key, desc: 'License key' },
+  { id: 'history', label: 'Lịch sử render', icon: Clock, desc: 'Video đã xuất' },
 ];
 
 interface SettingsPanelProps {
@@ -66,8 +64,7 @@ export function SettingsPanel({ activeTab, onTabChange }: SettingsPanelProps) {
       {/* Content */}
       <div className="flex-1 min-w-0 w-full">
         {activeTab === 'general' && <GeneralSettings />}
-        {activeTab === 'key'     && <KeySetupSettings />}
-        {activeTab === 'export'  && <ExportSettings />}
+        {activeTab === 'key' && <KeySetupSettings />}
         {activeTab === 'history' && <RenderHistorySettings />}
       </div>
     </div>

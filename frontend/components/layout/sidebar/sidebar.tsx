@@ -1,29 +1,27 @@
 'use client';
 
 import {
-  ChevronRight, Settings, Sparkles, Key, Gauge, Palette, Music, Clapperboard,
-  PanelLeftClose, PanelLeftOpen, Clock, UserCircle2, PenSquare, Images, Film,
+  ChevronRight, Settings, Sparkles, Key, Gauge, Palette, Music,
+  PanelLeftClose, PanelLeftOpen, UserCircle2, PenSquare, Images, Film,
   Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 import { PRESET_SCRIPTS, type PresetScript } from '@/lib/preset-scripts';
 
-export type AppView = 'project' | 'api-keys' | 'settings';
+export type AppView = 'video-library' | 'video-detail' | 'api-keys' | 'settings';
 export type CreativeToolId =
   | 'character'          // Mục 1 — NHÂN VẬT CHÍNH
   | 'content'            // Mục 2 — Nhập nội dung
   | 'scene-gallery'      // Mục 3 — Danh sách cảnh
   | 'timeline'           // Mục 4 — Timeline
-  | 'bulk-list'          // Bulk List — drawer trên màn nhỏ
   | 'voice-speed'        // Mục 2 — mở accordion Tốc độ giọng
   | 'scene-style'        // Mục 2 — mở accordion Phong cách cảnh
-  | 'scene-duration'     // Mục 3 — mở panel Thời lượng cảnh
   | 'background-music';  // Mục 4 — mở panel Nhạc nền
 
-const menuItems: { id: string; view: AppView; icon: typeof Clapperboard; label: string }[] = [
-  { id: 'project',  view: 'project',  icon: Clapperboard, label: 'Video Studio' },
-  { id: 'api-keys', view: 'api-keys', icon: Key,          label: 'API Keys' },
+const menuItems: { id: string; view: AppView; icon: typeof Layers; label: string }[] = [
+  { id: 'video-library', view: 'video-library', icon: Layers, label: 'Kho video' },
+  { id: 'api-keys', view: 'api-keys', icon: Key, label: 'API Keys' },
 ];
 
 interface ToolDef {
@@ -33,21 +31,19 @@ interface ToolDef {
   desc: string;
 }
 
-/** Điều hướng nhanh — nhảy đến các section chính */
+/** Điều hướng nhanh — nhảy đến các section chính trong video chi tiết đang active */
 const navigationTools: ToolDef[] = [
-  { id: 'bulk-list',      icon: Layers,      label: 'Bulk List',      desc: 'Danh sách dự án bulk' },
-  { id: 'character',     icon: UserCircle2, label: 'Nhân vật',       desc: 'Đi đến Mục 1' },
-  { id: 'content',       icon: PenSquare,   label: 'Nhập nội dung',  desc: 'Đi đến Mục 2' },
-  { id: 'scene-gallery', icon: Images,      label: 'Danh sách cảnh', desc: 'Đi đến Mục 3' },
-  { id: 'timeline',      icon: Film,        label: 'Timeline',       desc: 'Đi đến Mục 4' },
+  { id: 'character', icon: UserCircle2, label: 'Nhân vật', desc: 'Đi đến Mục 1' },
+  { id: 'content', icon: PenSquare, label: 'Nhập nội dung', desc: 'Đi đến Mục 2' },
+  { id: 'scene-gallery', icon: Images, label: 'Danh sách cảnh', desc: 'Đi đến Mục 3' },
+  { id: 'timeline', icon: Film, label: 'Timeline', desc: 'Đi đến Mục 4' },
 ];
 
 /** Tùy chỉnh chi tiết — mở panel/accordion tại section tương ứng */
 const customizeTools: ToolDef[] = [
-  { id: 'voice-speed',      icon: Gauge,   label: 'Tốc độ giọng',    desc: 'Mục 2 · TTS' },
-  { id: 'scene-style',      icon: Palette, label: 'Phong cách cảnh', desc: 'Mục 2 · Visual' },
-  { id: 'scene-duration',   icon: Clock,   label: 'Thời lượng cảnh', desc: 'Mục 3 · Timing' },
-  { id: 'background-music', icon: Music,   label: 'Nhạc nền',        desc: 'Mục 4 · BGM' },
+  { id: 'voice-speed', icon: Gauge, label: 'Tốc độ giọng', desc: 'Mục 1 · TTS' },
+  { id: 'scene-style', icon: Palette, label: 'Phong cách cảnh', desc: 'Mục 2 · Visual' },
+  { id: 'background-music', icon: Music, label: 'Nhạc nền', desc: 'Mục 3 · BGM' },
 ];
 
 interface SidebarProps {
@@ -82,7 +78,6 @@ function ToolGroup({ title, tools, activeTool, collapsed, onClick }: ToolGroupPr
       <div className="space-y-0.5">
         {tools.map((tool) => {
           const isActive = activeTool === tool.id;
-          const mobileOnly = tool.id === 'bulk-list';
           return (
             <button
               key={tool.id}
@@ -93,7 +88,6 @@ function ToolGroup({ title, tools, activeTool, collapsed, onClick }: ToolGroupPr
               className={cn(
                 'relative w-full flex items-center rounded-lg transition-all duration-150 cursor-pointer',
                 collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-3 py-2',
-                mobileOnly && 'xl:hidden',
                 isActive
                   ? 'bg-primary/10 text-primary border border-primary/20 font-medium'
                   : 'text-sidebar-accent hover:bg-white/5 hover:text-sidebar-foreground border border-transparent',
@@ -306,9 +300,9 @@ interface MobileNavProps {
 
 export function MobileNav({ activeView, onMenuClick, onMenuOpen }: MobileNavProps) {
   const navItems = [
-    { id: 'project',  view: 'project'  as AppView, icon: Clapperboard, label: 'Video Studio' },
-    { id: 'api-keys', view: 'api-keys' as AppView, icon: Key,          label: 'API Keys' },
-    { id: 'settings', view: 'settings' as AppView, icon: Settings,     label: 'Cài đặt' },
+    { id: 'video-library', view: 'video-library' as AppView, icon: Layers, label: 'Kho video' },
+    { id: 'api-keys', view: 'api-keys' as AppView, icon: Key, label: 'API Keys' },
+    { id: 'settings', view: 'settings' as AppView, icon: Settings, label: 'Cài đặt' },
   ];
 
   return (
