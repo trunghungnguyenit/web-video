@@ -1,0 +1,773 @@
+'use client';
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from 'react';
+import type { PresetInput, PresetScript, PresetTimelineDemo } from '@/lib/preset-scripts';
+import type { SceneGenerationResult, VideoScene } from '@/lib/scenes';
+import { scenesFromGeminiScript } from '@/lib/scenes';
+import type { VideoSettings } from '@/contexts/project-settings-context';
+import { DEFAULT_VIDEO_SETTINGS } from '@/contexts/project-settings-context';
+import type { AnalyzePipelineRequest, TtsInput, VeoInput } from '@/lib/pipeline-payload';
+import { runSceneGenerationQueue, scenesNeedingVeoResume } from '@/lib/scene-generation-queue';
+import { normalizeSceneDurationSetting } from '@/lib/saved-scripts';
+import { buildDemoScenesFromPreset } from '@/lib/preset-demo-builder';
+import { geminiService } from '@/services/gemini.service';
+import {
+  countScenesDone,
+  createInitialVideoItem,
+  createVideoItem,
+  formatVideoItemTitle,
+  resolveVeoModelLabel,
+  type CreateVideoItemOptions,
+  type VideoLibraryItem,
+} from '@/lib/video-library';
+import { loadVideoLibraryPersist, saveVideoLibraryPersist } from '@/lib/video-library-persist';
+import { toUserMessage } from '@/lib/error-messages';
+import { useAuth } from '@/contexts/auth-context';
+import { createClient } from '@/lib/supabase/client';
+import { fetchRemoteVideoLibrary, pushVideoLibraryToRemote } from '@/lib/supabase/video-library-remote';
+
+interface AnalyzeInput {
+  pipeline: AnalyzePipelineRequest;
+  sourceContent: string;
+  sceneCount: string;
+  videoType: string;
+  language: string;
+}
+
+type GenerationMode = 'live' | 'regenerate';
+
+interface RunSceneGenerationOptions {
+  resumeOnly?: boolean;
+  mode?: GenerationMode;
+}
+
+interface VideoLibraryContextValue {
+  items: VideoLibraryItem[];
+  activeItemId: string;
+  activeItem: VideoLibraryItem;
+  createItem: (options: CreateVideoItemOptions) => string;
+  selectItem: (id: string) => void;
+  deleteItem: (id: string) => void;
+  deleteAllItems: () => void;
+  updateItem: (
+    id: string,
+    patch: Partial<VideoLibraryItem> | ((p: VideoLibraryItem) => Partial<VideoLibraryItem>),
+  ) => void;
+  renameItem: (id: string, title: string) => void;
+  updateActiveItem: (patch: Partial<VideoLibraryItem>) => void;
+  setActiveScenes: Dispatch<SetStateAction<VideoScene[]>>;
+  setActiveTimelineFocus: (sceneId: string | null) => void;
+  applyPresetToActive: (input: PresetInput, timeline: PresetTimelineDemo | null) => void;
+  /** Demo mục 3 & 4 không cần API key — dùng demoScenes có sẵn + video placeholder canvas */
+  applyPresetAsDemo: (preset: PresetScript) => boolean;
+  syncSettingsForItem: (itemId: string, settings: VideoSettings) => void;
+  startAnalyze: (itemId: string, input: AnalyzeInput) => boolean;
+  /** Sửa nội dung/settings 1 video đã có & tạo lại cảnh — giữ cảnh cũ tới khi xong */
+  startRegenerate: (itemId: string, input: AnalyzeInput) => boolean;
+}
+
+const VideoLibraryContext = createContext<VideoLibraryContextValue | null>(null);
+
+function patchItem(
+  items: VideoLibraryItem[],
+  id: string,
+  patch: Partial<VideoLibraryItem> | ((p: VideoLibraryItem) => Partial<VideoLibraryItem>),
+): VideoLibraryItem[] {
+  return items.map((p) => {
+    if (p.id !== id) return p;
+    const delta = typeof patch === 'function' ? patch(p) : patch;
+    return { ...p, ...delta, updatedAt: new Date().toISOString() };
+  });
+}
+
+export function VideoLibraryProvider({ children }: { children: ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
+  const supabaseRef = useRef(createClient());
+  /** userId đã đồng bộ remote — tránh fetch lại nhiều lần cho cùng 1 tài khoản */
+  const remoteSyncedForUserRef = useRef<string | null>(null);
+  /** Chỉ cho phép lưu lên Supabase sau khi đã fetch/migrate xong lần đầu — tránh
+   *  race ghi đè dữ liệu cloud bằng state cục bộ cũ trong lúc đang đồng bộ. */
+  const [remoteReady, setRemoteReady] = useState(false);
+
+  const initial = useMemo(() => [createInitialVideoItem()], []);
+  const [items, setItems] = useState<VideoLibraryItem[]>(initial);
+  const [activeItemId, setActiveItemId] = useState(initial[0].id);
+  const [persistReady, setPersistReady] = useState(false);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const activeItemIdRef = useRef(activeItemId);
+  activeItemIdRef.current = activeItemId;
+  /** Mỗi video có epoch riêng — tránh queue cũ ghi đè khi chạy lại (luồng live) */
+  const generationEpochRef = useRef<Map<string, number>>(new Map());
+  /** Chống double-click / gọi startAnalyze trùng (luồng live) */
+  const analyzeInFlightRef = useRef<Set<string>>(new Set());
+  /** Video đã resume poll sau refresh */
+  const resumedItemsRef = useRef<Set<string>>(new Set());
+  /** Epoch riêng cho luồng "Sửa & tạo lại" — tách biệt hoàn toàn khỏi luồng live */
+  const regenEpochRef = useRef<Map<string, number>>(new Map());
+  /** Chống gọi startRegenerate trùng */
+  const regenerateInFlightRef = useRef<Set<string>>(new Set());
+  /** Đánh dấu đã từng đăng nhập trong phiên này — phát hiện đúng thời điểm đăng xuất */
+  const wasLoggedInRef = useRef(false);
+
+  // Luôn nạp localStorage trước — có UI ngay, không chờ auth resolve
+  useEffect(() => {
+    const stored = loadVideoLibraryPersist();
+    if (stored) {
+      setItems(stored.items);
+      setActiveItemId(stored.activeItemId);
+    }
+    setPersistReady(true);
+  }, []);
+
+  // Có tài khoản đăng nhập → đồng bộ Supabase: tài khoản đã có dữ liệu thì tải về
+  // (Supabase thành nguồn sự thật), tài khoản mới thì đẩy dữ liệu cục bộ hiện có lên 1 lần.
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      remoteSyncedForUserRef.current = null;
+      setRemoteReady(false);
+      if (wasLoggedInRef.current) {
+        // Vừa đăng xuất — xóa sạch kho video của tài khoản cũ khỏi màn hình ngay,
+        // không chờ reload. Không lo mất dữ liệu vì đã đồng bộ lên Supabase, xem
+        // lại được khi đăng nhập lại đúng tài khoản đó.
+        wasLoggedInRef.current = false;
+        const fresh = createVideoItem({ title: formatVideoItemTitle(), settings: DEFAULT_VIDEO_SETTINGS });
+        setItems([fresh]);
+        setActiveItemId(fresh.id);
+      }
+      return;
+    }
+    wasLoggedInRef.current = true;
+    if (remoteSyncedForUserRef.current === user.id) return;
+
+    const supabase = supabaseRef.current;
+    if (!supabase) return;
+
+    remoteSyncedForUserRef.current = user.id;
+    setRemoteReady(false);
+
+    (async () => {
+      try {
+        const remoteItems = await fetchRemoteVideoLibrary(supabase, user.id);
+        if (remoteItems.length > 0) {
+          setItems(remoteItems);
+          setActiveItemId((prev) => (remoteItems.some((i) => i.id === prev) ? prev : remoteItems[0].id));
+        } else {
+          await pushVideoLibraryToRemote(supabase, user.id, itemsRef.current);
+        }
+      } catch (err) {
+        console.error('[video-library] Đồng bộ Supabase thất bại:', err);
+      } finally {
+        setRemoteReady(true);
+      }
+    })();
+  }, [user, authLoading]);
+
+  useEffect(() => {
+    if (!persistReady) return;
+    const supabase = supabaseRef.current;
+    const useRemote = Boolean(user) && remoteReady && Boolean(supabase);
+
+    const timer = window.setTimeout(() => {
+      if (useRemote && supabase && user) {
+        pushVideoLibraryToRemote(supabase, user.id, itemsRef.current).catch((err) => {
+          console.error('[video-library] Lưu Supabase thất bại:', err);
+        });
+      } else if (!user) {
+        saveVideoLibraryPersist(itemsRef.current, activeItemIdRef.current);
+      }
+      // user tồn tại nhưng remote chưa sẵn sàng (đang đồng bộ lần đầu) → bỏ qua lượt
+      // lưu này, tránh ghi đè dữ liệu cloud bằng state cũ trong lúc đang race với fetch.
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [items, activeItemId, persistReady, user, remoteReady]);
+
+  const activeItem = useMemo(
+    () => items.find((p) => p.id === activeItemId) ?? items[0],
+    [items, activeItemId],
+  );
+
+  const updateItem = useCallback((
+    id: string,
+    patch: Partial<VideoLibraryItem> | ((p: VideoLibraryItem) => Partial<VideoLibraryItem>),
+  ) => {
+    setItems((prev) => patchItem(prev, id, patch));
+  }, []);
+
+  const renameItem = useCallback((id: string, title: string) => {
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    updateItem(id, { title: trimmed });
+  }, [updateItem]);
+
+  const createItem = useCallback((options: CreateVideoItemOptions) => {
+    const item = createVideoItem(options);
+    setItems((prev) => [item, ...prev]);
+    setActiveItemId(item.id);
+    return item.id;
+  }, []);
+
+  const selectItem = useCallback((id: string) => {
+    if (itemsRef.current.some((p) => p.id === id)) {
+      setActiveItemId(id);
+    }
+  }, []);
+
+  const deleteItem = useCallback((id: string) => {
+    setItems((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      if (next.length === 0) {
+        const fresh = createVideoItem({ title: formatVideoItemTitle(), settings: DEFAULT_VIDEO_SETTINGS });
+        setActiveItemId(fresh.id);
+        return [fresh];
+      }
+      if (id === activeItemId) {
+        setActiveItemId(next[0].id);
+      }
+      return next;
+    });
+  }, [activeItemId]);
+
+  const deleteAllItems = useCallback(() => {
+    const fresh = createVideoItem({ title: formatVideoItemTitle(), settings: DEFAULT_VIDEO_SETTINGS });
+    setItems([fresh]);
+    setActiveItemId(fresh.id);
+  }, []);
+
+  const updateActiveItem = useCallback((patch: Partial<VideoLibraryItem>) => {
+    updateItem(activeItemId, patch);
+  }, [activeItemId, updateItem]);
+
+  const setActiveScenes = useCallback((updater: SetStateAction<VideoScene[]>) => {
+    setItems((prev) =>
+      prev.map((p) => {
+        if (p.id !== activeItemId) return p;
+        const scenes = typeof updater === 'function' ? updater(p.scenes) : updater;
+        return {
+          ...p,
+          scenes,
+          scenesDone: countScenesDone(scenes),
+          scenesTotal: scenes.length,
+          updatedAt: new Date().toISOString(),
+        };
+      }),
+    );
+  }, [activeItemId]);
+
+  const setActiveTimelineFocus = useCallback((sceneId: string | null) => {
+    updateItem(activeItemId, { timelineFocusSceneId: sceneId });
+  }, [activeItemId, updateItem]);
+
+  const applyPresetToActive = useCallback((input: PresetInput, timeline: PresetTimelineDemo | null) => {
+    updateItem(activeItemId, (p) => ({
+      appliedInput: input,
+      inputContent: input.content,
+      settings: {
+        ...p.settings,
+        language: input.language,
+        sceneCount: input.sceneCount,
+        videoType: input.videoType,
+        voice: input.voice,
+        aspectRatio: input.aspectRatio ?? '16:9',
+        sceneDuration: normalizeSceneDurationSetting(
+          input.sceneDuration ?? '6',
+          input.videoQuality ?? '720p',
+        ),
+        videoQuality: input.videoQuality ?? '720p',
+        veoModel: input.veoModel ?? '',
+        voiceSpeed: input.voiceSpeed ?? p.settings.voiceSpeed,
+        sceneStyle: input.sceneStyleId ?? p.settings.sceneStyle,
+      },
+      aspectRatio: input.aspectRatio ?? '16:9',
+      pendingTimelineDemo: timeline,
+      timelineDemo: null,
+      scenes: [],
+      ttsInput: null,
+      veoInput: null,
+      scenesDone: 0,
+      scenesTotal: 0,
+      status: 'draft' as const,
+    }));
+  }, [activeItemId, updateItem]);
+
+  const syncSettingsForItem = useCallback((itemId: string, settings: VideoSettings) => {
+    const item = itemsRef.current.find((p) => p.id === itemId);
+    updateItem(itemId, {
+      settings,
+      aspectRatio: settings.aspectRatio,
+      veoModelLabel: resolveVeoModelLabel(item?.veoInput ?? null, settings),
+    });
+  }, [updateItem]);
+
+  const runSceneGeneration = useCallback((
+    itemId: string,
+    result: SceneGenerationResult,
+    epoch: number,
+    options?: RunSceneGenerationOptions,
+  ) => {
+    const mode: GenerationMode = options?.mode ?? 'live';
+    const epochRef = mode === 'regenerate' ? regenEpochRef : generationEpochRef;
+    const inFlightRef = mode === 'regenerate' ? regenerateInFlightRef : analyzeInFlightRef;
+
+    const existing = itemsRef.current.find((p) => p.id === itemId);
+    const pendingScenes = options?.resumeOnly && existing
+      ? existing.scenes
+      : result.scenes.map((s) => ({ ...s, status: 'generating' as const }));
+
+    if (mode === 'live') {
+      if (!options?.resumeOnly) {
+        updateItem(itemId, {
+          status: 'generating',
+          errorMessage: undefined,
+          inputContent: result.sourceContent,
+          ttsInput: result.ttsInput,
+          veoInput: result.veoInput,
+          scenes: pendingScenes,
+          scenesDone: countScenesDone(pendingScenes),
+          scenesTotal: pendingScenes.length,
+          veoModelLabel: resolveVeoModelLabel(result.veoInput, {
+            ...DEFAULT_VIDEO_SETTINGS,
+            aspectRatio: result.veoInput.aspectRatio,
+            videoQuality: result.veoInput.videoQuality ?? '720p',
+            veoModel: result.veoInput.veoModel ?? '',
+          }),
+          aspectRatio: result.veoInput.aspectRatio,
+        });
+      } else {
+        updateItem(itemId, { status: 'generating', errorMessage: undefined });
+      }
+    } else {
+      // Tạo lại — ghi vào pendingRegeneration, KHÔNG đụng scenes/status sống
+      updateItem(itemId, (p) => ({
+        pendingRegeneration: {
+          status: 'generating',
+          errorMessage: undefined,
+          scenes: pendingScenes,
+          scenesDone: countScenesDone(pendingScenes),
+          scenesTotal: pendingScenes.length,
+          ttsInput: result.ttsInput,
+          veoInput: result.veoInput,
+          inputContent: result.sourceContent,
+          timelineDemo: p.pendingRegeneration?.timelineDemo ?? null,
+        },
+      }));
+    }
+
+    const ttsInput = result.ttsInput ?? existing?.ttsInput;
+    const veoInput = result.veoInput ?? existing?.veoInput;
+    if (!ttsInput || !veoInput) return;
+
+    void runSceneGenerationQueue(
+      pendingScenes,
+      ttsInput,
+      veoInput,
+      {
+        shouldContinue: () => epochRef.current.get(itemId) === epoch,
+        onFatalError: (message) => {
+          if (epochRef.current.get(itemId) !== epoch) return;
+          if (mode === 'live') {
+            updateItem(itemId, { status: 'error', errorMessage: message });
+          } else {
+            updateItem(itemId, (p) => ({
+              pendingRegeneration: p.pendingRegeneration
+                ? { ...p.pendingRegeneration, errorMessage: message }
+                : null,
+            }));
+          }
+        },
+        onPersistScenes: (scenes) => {
+          if (epochRef.current.get(itemId) !== epoch) return;
+          if (!persistReady) return;
+          const next = mode === 'live'
+            ? patchItem(itemsRef.current, itemId, {
+                scenes,
+                scenesDone: countScenesDone(scenes),
+                scenesTotal: scenes.length,
+                status: 'generating',
+              })
+            : patchItem(itemsRef.current, itemId, (p) => ({
+                pendingRegeneration: p.pendingRegeneration
+                  ? {
+                      ...p.pendingRegeneration,
+                      scenes,
+                      scenesDone: countScenesDone(scenes),
+                      scenesTotal: scenes.length,
+                    }
+                  : null,
+              }));
+          itemsRef.current = next;
+          saveVideoLibraryPersist(next, activeItemIdRef.current);
+        },
+        onScenesUpdate: (scenes) => {
+          if (epochRef.current.get(itemId) !== epoch) return;
+          if (mode === 'live') {
+            updateItem(itemId, {
+              scenes,
+              scenesDone: countScenesDone(scenes),
+              scenesTotal: scenes.length,
+              status: 'generating',
+            });
+          } else {
+            updateItem(itemId, (p) => ({
+              pendingRegeneration: p.pendingRegeneration
+                ? {
+                    ...p.pendingRegeneration,
+                    scenes,
+                    scenesDone: countScenesDone(scenes),
+                    scenesTotal: scenes.length,
+                  }
+                : null,
+            }));
+          }
+        },
+      },
+    ).then((finalScenes) => {
+      if (epochRef.current.get(itemId) !== epoch) return;
+      const erroredScenes = finalScenes.filter((s) => s.status === 'error');
+      const hasError = erroredScenes.length > 0;
+      const summaryMessage = hasError
+        ? erroredScenes.length === 1
+          ? (erroredScenes[0].errorMessage ?? 'Một cảnh tạo thất bại — xem chi tiết ở danh sách cảnh.')
+          : `${erroredScenes.length} cảnh tạo thất bại — xem chi tiết ở danh sách cảnh.`
+        : undefined;
+
+      if (mode === 'live') {
+        setItems((prev) =>
+          patchItem(prev, itemId, (p) => {
+            const timelineDemo = p.pendingTimelineDemo ?? p.timelineDemo;
+            return {
+              scenes: finalScenes,
+              scenesDone: countScenesDone(finalScenes),
+              scenesTotal: finalScenes.length,
+              status: hasError ? 'error' : 'completed',
+              errorMessage: summaryMessage,
+              timelineDemo,
+              pendingTimelineDemo: null,
+            };
+          }),
+        );
+        return;
+      }
+
+      if (hasError) {
+        // Tạo lại thất bại — giữ nguyên scenes/status sống, chỉ báo lỗi riêng
+        setItems((prev) =>
+          patchItem(prev, itemId, {
+            isRegenerating: false,
+            pendingRegeneration: null,
+            regenerateError: summaryMessage,
+          }),
+        );
+      } else {
+        // Tạo lại thành công — swap vào field sống
+        setItems((prev) =>
+          patchItem(prev, itemId, (p) => ({
+            scenes: finalScenes,
+            scenesDone: countScenesDone(finalScenes),
+            scenesTotal: finalScenes.length,
+            ttsInput: p.pendingRegeneration?.ttsInput ?? p.ttsInput,
+            veoInput: p.pendingRegeneration?.veoInput ?? p.veoInput,
+            inputContent: p.pendingRegeneration?.inputContent ?? p.inputContent,
+            status: 'completed',
+            errorMessage: undefined,
+            isRegenerating: false,
+            pendingRegeneration: null,
+            regenerateError: undefined,
+          })),
+        );
+      }
+    }).finally(() => {
+      inFlightRef.current.delete(itemId);
+    });
+  }, [updateItem, persistReady]);
+
+  /**
+   * Demo mục 3 & 4 không cần API key — bỏ qua bước gọi Gemini, dùng thẳng
+   * demoScenes có sẵn trong preset rồi chạy qua đúng hàng đợi sinh cảnh thật
+   * (runSceneGeneration). Vì ttsInput/veoInput không có apiKey, hàng đợi tự
+   * động bỏ qua TTS và dùng video placeholder canvas — cùng UI/logic y hệt
+   * luồng tạo video thật.
+   */
+  const applyPresetAsDemo = useCallback((preset: PresetScript): boolean => {
+    const itemId = activeItemId;
+    const item = itemsRef.current.find((p) => p.id === itemId);
+    if (!item) return false;
+    if (item.status === 'analyzing' || item.status === 'generating') return false;
+    if (item.isRegenerating) return false;
+    if (analyzeInFlightRef.current.has(itemId)) return false;
+
+    analyzeInFlightRef.current.add(itemId);
+    const epoch = (generationEpochRef.current.get(itemId) ?? 0) + 1;
+    generationEpochRef.current.set(itemId, epoch);
+
+    const input = preset.input;
+    const veoInput: VeoInput = {
+      aspectRatio: input.aspectRatio ?? '16:9',
+      sceneDuration: normalizeSceneDurationSetting(input.sceneDuration ?? '6', input.videoQuality ?? '720p'),
+      videoQuality: input.videoQuality ?? '720p',
+      veoModel: input.veoModel,
+      sceneStyleId: input.sceneStyleId,
+    };
+    const ttsInput: TtsInput = {
+      voice: input.voice,
+      language: input.language,
+      voiceSpeed: input.voiceSpeed ?? 1,
+    };
+
+    updateItem(itemId, (p) => ({
+      appliedInput: input,
+      inputContent: input.content,
+      settings: {
+        ...p.settings,
+        language: input.language,
+        sceneCount: String(preset.demoScenes.length),
+        videoType: input.videoType,
+        voice: input.voice,
+        aspectRatio: veoInput.aspectRatio,
+        sceneDuration: veoInput.sceneDuration,
+        videoQuality: veoInput.videoQuality ?? '720p',
+        veoModel: input.veoModel ?? '',
+        voiceSpeed: input.voiceSpeed ?? p.settings.voiceSpeed,
+        sceneStyle: input.sceneStyleId ?? p.settings.sceneStyle,
+      },
+      aspectRatio: veoInput.aspectRatio,
+      pendingTimelineDemo: preset.timeline,
+    }));
+
+    runSceneGeneration(itemId, {
+      scenes: buildDemoScenesFromPreset(preset),
+      sourceContent: input.content,
+      sceneCount: String(preset.demoScenes.length),
+      videoType: input.videoType,
+      language: input.language,
+      aspectRatio: veoInput.aspectRatio,
+      sceneDuration: veoInput.sceneDuration,
+      veoInput,
+      ttsInput,
+    }, epoch);
+
+    return true;
+  }, [activeItemId, updateItem, runSceneGeneration]);
+
+  const startAnalyze = useCallback((itemId: string, input: AnalyzeInput): boolean => {
+    const item = itemsRef.current.find((p) => p.id === itemId);
+    if (!item) return false;
+
+    if (item.status === 'analyzing' || item.status === 'generating') {
+      return false;
+    }
+    if (item.isRegenerating) {
+      return false;
+    }
+    if (analyzeInFlightRef.current.has(itemId)) {
+      return false;
+    }
+
+    analyzeInFlightRef.current.add(itemId);
+
+    const epoch = (generationEpochRef.current.get(itemId) ?? 0) + 1;
+    generationEpochRef.current.set(itemId, epoch);
+
+    updateItem(itemId, {
+      status: 'analyzing',
+      errorMessage: undefined,
+      inputContent: input.sourceContent,
+    });
+
+    void (async () => {
+      try {
+        const { script, veoInput, ttsInput } = await geminiService.analyzeScript(input.pipeline);
+        if (generationEpochRef.current.get(itemId) !== epoch) return;
+
+        const scenes = scenesFromGeminiScript(
+          script,
+          veoInput.sceneDuration,
+          veoInput.videoQuality,
+        );
+
+        runSceneGeneration(itemId, {
+          scenes,
+          sourceContent: input.sourceContent,
+          sceneCount: input.sceneCount,
+          videoType: input.videoType,
+          language: input.language,
+          aspectRatio: veoInput.aspectRatio,
+          sceneDuration: veoInput.sceneDuration,
+          veoInput,
+          ttsInput,
+        }, epoch);
+      } catch (err) {
+        if (generationEpochRef.current.get(itemId) !== epoch) return;
+        const message = toUserMessage(err, 'Phân tích kịch bản thất bại — kiểm tra lại Gemini API Key và thử lại.');
+        updateItem(itemId, { status: 'error', errorMessage: message });
+        analyzeInFlightRef.current.delete(itemId);
+      }
+    })();
+
+    return true;
+  }, [updateItem, runSceneGeneration]);
+
+  const startRegenerate = useCallback((itemId: string, input: AnalyzeInput): boolean => {
+    const item = itemsRef.current.find((p) => p.id === itemId);
+    if (!item) return false;
+
+    if (item.status === 'analyzing' || item.status === 'generating') {
+      return false;
+    }
+    if (item.isRegenerating) {
+      return false;
+    }
+    if (analyzeInFlightRef.current.has(itemId) || regenerateInFlightRef.current.has(itemId)) {
+      return false;
+    }
+
+    regenerateInFlightRef.current.add(itemId);
+
+    const epoch = (regenEpochRef.current.get(itemId) ?? 0) + 1;
+    regenEpochRef.current.set(itemId, epoch);
+
+    updateItem(itemId, {
+      isRegenerating: true,
+      regenerateError: undefined,
+      pendingRegeneration: {
+        status: 'analyzing',
+        scenes: [],
+        scenesDone: 0,
+        scenesTotal: 0,
+        ttsInput: null,
+        veoInput: null,
+        inputContent: input.sourceContent,
+        timelineDemo: null,
+      },
+    });
+
+    void (async () => {
+      try {
+        const { script, veoInput, ttsInput } = await geminiService.analyzeScript(input.pipeline);
+        if (regenEpochRef.current.get(itemId) !== epoch) return;
+
+        const scenes = scenesFromGeminiScript(
+          script,
+          veoInput.sceneDuration,
+          veoInput.videoQuality,
+        );
+
+        runSceneGeneration(itemId, {
+          scenes,
+          sourceContent: input.sourceContent,
+          sceneCount: input.sceneCount,
+          videoType: input.videoType,
+          language: input.language,
+          aspectRatio: veoInput.aspectRatio,
+          sceneDuration: veoInput.sceneDuration,
+          veoInput,
+          ttsInput,
+        }, epoch, { mode: 'regenerate' });
+      } catch (err) {
+        if (regenEpochRef.current.get(itemId) !== epoch) return;
+        const message = toUserMessage(err, 'Tạo lại kịch bản thất bại — kiểm tra lại Gemini API Key và thử lại.');
+        updateItem(itemId, { isRegenerating: false, pendingRegeneration: null, regenerateError: message });
+        regenerateInFlightRef.current.delete(itemId);
+      }
+    })();
+
+    return true;
+  }, [updateItem, runSceneGeneration]);
+
+  // Resume poll Veo sau refresh — chỉ chạy 1 lần khi load persist, không gọi predictLongRunning lại
+  useEffect(() => {
+    if (!persistReady) return;
+
+    for (const item of itemsRef.current) {
+      if (resumedItemsRef.current.has(item.id)) continue;
+      if (analyzeInFlightRef.current.has(item.id)) continue;
+      if (!item.ttsInput || !item.veoInput) continue;
+      if (scenesNeedingVeoResume(item.scenes).length === 0) continue;
+
+      resumedItemsRef.current.add(item.id);
+
+      const epoch = (generationEpochRef.current.get(item.id) ?? 0) + 1;
+      generationEpochRef.current.set(item.id, epoch);
+      analyzeInFlightRef.current.add(item.id);
+
+      runSceneGeneration(item.id, {
+        scenes: item.scenes,
+        sourceContent: item.inputContent,
+        sceneCount: item.settings.sceneCount,
+        videoType: item.settings.videoType,
+        language: item.settings.language,
+        aspectRatio: item.veoInput.aspectRatio,
+        sceneDuration: item.veoInput.sceneDuration,
+        veoInput: item.veoInput,
+        ttsInput: item.ttsInput,
+      }, epoch, { resumeOnly: true });
+    }
+  }, [persistReady, runSceneGeneration]);
+
+  const value = useMemo(
+    () => ({
+      items,
+      activeItemId,
+      activeItem,
+      createItem,
+      selectItem,
+      deleteItem,
+      deleteAllItems,
+      updateItem,
+      renameItem,
+      updateActiveItem,
+      setActiveScenes,
+      setActiveTimelineFocus,
+      applyPresetToActive,
+      applyPresetAsDemo,
+      syncSettingsForItem,
+      startAnalyze,
+      startRegenerate,
+    }),
+    [
+      items,
+      activeItemId,
+      activeItem,
+      createItem,
+      selectItem,
+      deleteItem,
+      deleteAllItems,
+      updateItem,
+      renameItem,
+      updateActiveItem,
+      setActiveScenes,
+      setActiveTimelineFocus,
+      applyPresetToActive,
+      applyPresetAsDemo,
+      syncSettingsForItem,
+      startAnalyze,
+      startRegenerate,
+    ],
+  );
+
+  return (
+    <VideoLibraryContext.Provider value={value}>
+      {children}
+    </VideoLibraryContext.Provider>
+  );
+}
+
+export function useVideoLibrary(): VideoLibraryContextValue {
+  const ctx = useContext(VideoLibraryContext);
+  if (!ctx) {
+    throw new Error('useVideoLibrary must be used within VideoLibraryProvider');
+  }
+  return ctx;
+}

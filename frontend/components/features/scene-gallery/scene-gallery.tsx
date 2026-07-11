@@ -9,6 +9,7 @@ import type { VideoScene } from '@/lib/scenes';
 import { formatSceneTimeRange, recalculateSceneTimings } from '@/lib/scenes';
 import { regenerateSceneAssets } from '@/lib/scene-tts';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
+import { toUserMessage } from '@/lib/error-messages';
 import { SceneToolbar } from './scene-toolbar';
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
@@ -237,12 +238,8 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
     overrides?: Record<string, Pick<VideoScene, 'prompt' | 'voice'>>,
   ) => {
     if (ids.length === 0 || isRegenerating) return;
-    if (!ttsInput?.apiKey?.trim()) {
-      showToast('Thiếu ElevenLabs API Key — vào mục API Keys.');
-      return;
-    }
-    if (!veoInput) {
-      showToast('Thiếu cấu hình Veo — submit lại mục 2.');
+    if (!ttsInput || !veoInput) {
+      showToast('Chưa có cấu hình cảnh — submit lại mục 2 hoặc áp dụng kịch bản mẫu.');
       return;
     }
 
@@ -262,7 +259,7 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
         continue;
       }
       const patch = overrides?.[id];
-      const working: VideoScene = patch ? { ...scene, ...patch } : scene;
+      const working: VideoScene = patch ? { ...scene, ...patch, errorMessage: undefined } : { ...scene, errorMessage: undefined };
       try {
         const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput, {
           onOperationStarted: (operationName) => {
@@ -275,10 +272,10 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
             );
           },
         });
-        patches.push({ id, scene: rebuilt });
+        patches.push({ id, scene: { ...rebuilt, errorMessage: undefined } });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Tạo lại cảnh thất bại';
-        patches.push({ id, scene: { ...working, status: 'error' as const }, error: message });
+        const message = toUserMessage(err, 'Tạo lại cảnh thất bại — thử lại.');
+        patches.push({ id, scene: { ...working, status: 'error' as const, errorMessage: message }, error: message });
       }
     }
 
@@ -483,6 +480,15 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
               </div>
 
               <div className="p-3 space-y-2 min-w-0 overflow-hidden">
+                {isError && scene.errorMessage && (
+                  <p
+                    title={scene.errorMessage}
+                    className="flex items-start gap-1 text-xs text-destructive leading-relaxed line-clamp-2"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>{scene.errorMessage}</span>
+                  </p>
+                )}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Video Prompt</p>
                   <p className="text-xs text-foreground line-clamp-2">{scene.prompt}</p>

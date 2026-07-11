@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { geminiRoute } from './routes/gemini';
 import { ttsRoute } from './routes/tts';
 import { veoRoute } from './routes/veo';
+import { licenseRoute } from './routes/license';
 
 const app = new Hono();
 
@@ -14,5 +15,6 @@ app.use('*', cors({
 app.route('/api/gemini', geminiRoute);
 app.route('/api/tts', ttsRoute);
 app.route('/api/veo', veoRoute);
+app.route('/api/license', licenseRoute);
 
 export default app;

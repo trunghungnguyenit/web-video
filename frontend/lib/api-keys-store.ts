@@ -87,3 +87,14 @@ export function setApiKey(id: string, value: string): void {
 export function getAllApiKeys(): Record<string, string> {
   return readAll();
 }
+
+/**
+ * Xóa sạch toàn bộ API key khỏi localStorage — gọi khi đăng xuất để key của
+ * tài khoản vừa thoát không còn dùng được nữa (tránh rò rỉ sang phiên sau).
+ * Chỉ dispatch 1 lần `API_KEYS_CHANGED_EVENT` thay vì gọi setApiKey lặp lại.
+ */
+export function clearAllApiKeys(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(STORAGE_KEY);
+  window.dispatchEvent(new CustomEvent(API_KEYS_CHANGED_EVENT));
+}

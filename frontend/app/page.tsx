@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { AlertCircle } from 'lucide-react';
 import { Sidebar, MobileNav, type AppView, type CreativeToolId } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { InputSection } from '@/components/features/input-section';
@@ -9,25 +10,33 @@ import { SceneGallery } from '@/components/features/scene-gallery';
 import { TimelineEditor } from '@/components/features/timeline-editor';
 import { ApiKeysManagement } from '@/components/features/api-keys-management';
 import { SettingsPanel } from '@/components/features/settings/settings-panel';
-import { SceneDurationPanel } from '@/components/features/scene-duration';
 import { PresetScriptModal } from '@/components/features/preset-script-modal';
 import { SavedScriptsPanel } from '@/components/features/saved-scripts';
-import { BulkListPanel, BulkListDrawer } from '@/components/features/bulk-list/bulk-list-panel';
+import { VideoLibraryView } from '@/components/features/video-library/video-library-view';
 import type { PresetScript } from '@/lib/preset-scripts';
 import type { SavedScript } from '@/lib/saved-scripts';
 import { generateScriptId, deriveTitle } from '@/lib/saved-scripts';
 import type { SavedCharacter } from '@/lib/saved-characters';
-import { BulkProjectsProvider, useBulkProjects } from '@/contexts/bulk-projects-context';
+import { VideoLibraryProvider, useVideoLibrary } from '@/contexts/video-library-context';
 import { VeoModelsProvider } from '@/contexts/veo-models-context';
 import { ProjectSettingsProvider, type VideoSettings } from '@/contexts/project-settings-context';
+import { useAuth } from '@/contexts/auth-context';
+import { createClient } from '@/lib/supabase/client';
+import {
+  fetchRemoteSavedScripts,
+  insertRemoteSavedScript,
+  updateRemoteSavedScript,
+  deleteRemoteSavedScript,
+} from '@/lib/supabase/saved-scripts-remote';
 
 const viewTitles: Record<AppView, string> = {
-  project: 'AI Video Studio',
+  'video-library': 'Kho video',
+  'video-detail': 'AI Video Studio',
   'api-keys': 'API Keys',
   settings: 'Cài đặt',
 };
 
-function ProjectWorkspace({
+function VideoDetailView({
   activeTool,
   setActiveTool,
   focusVoiceSpeedKey,
@@ -49,7 +58,7 @@ function ProjectWorkspace({
   onUpdateScript,
   onDeleteScript,
   scrollToRef,
-  onMenuOpen,
+  onBack,
 }: {
   activeTool: CreativeToolId | null;
   setActiveTool: (v: CreativeToolId | null) => void;
@@ -75,29 +84,30 @@ function ProjectWorkspace({
   onUpdateScript: (script: SavedScript) => void;
   onDeleteScript: (id: string) => void;
   scrollToRef: (ref: React.RefObject<HTMLDivElement | null>) => void;
-  onMenuOpen: () => void;
+  onBack: () => void;
 }) {
   const {
-    activeProject,
+    activeItem,
     setActiveScenes,
     setActiveTimelineFocus,
-    syncSettingsForProject,
+    syncSettingsForItem,
     applyPresetToActive,
-    updateActiveProject,
-  } = useBulkProjects();
+    applyPresetAsDemo,
+    updateActiveItem,
+  } = useVideoLibrary();
 
   const [applyKey, setApplyKey] = useState(0);
 
   const handleContentChange = useCallback((inputContent: string) => {
-    updateActiveProject({ inputContent });
-  }, [updateActiveProject]);
+    updateActiveItem({ inputContent });
+  }, [updateActiveItem]);
 
   const handleCharactersChange = useCallback((characters: SavedCharacter[]) => {
-    updateActiveProject({ characters });
-  }, [updateActiveProject]);
+    updateActiveItem({ characters });
+  }, [updateActiveItem]);
 
   const handleApplySavedScript = useCallback((script: SavedScript) => {
-    updateActiveProject({
+    updateActiveItem({
       appliedInput: {
         content: script.content,
         language: script.meta.language,
@@ -113,58 +123,70 @@ function ProjectWorkspace({
     setApplyKey((k) => k + 1);
     setFocusContentKey((k) => k + 1);
     setTimeout(() => scrollToRef(inputSectionRef), 100);
-  }, [updateActiveProject, setFocusContentKey, scrollToRef, inputSectionRef]);
+  }, [updateActiveItem, setFocusContentKey, scrollToRef, inputSectionRef]);
 
   const handleSettingsChange = useCallback((settings: VideoSettings) => {
-    syncSettingsForProject(activeProject.id, settings);
-  }, [syncSettingsForProject, activeProject.id]);
+    syncSettingsForItem(activeItem.id, settings);
+  }, [syncSettingsForItem, activeItem.id]);
 
   return (
     <ProjectSettingsProvider
-      projectKey={activeProject.id}
-      initialSettings={activeProject.settings}
+      projectKey={activeItem.id}
+      initialSettings={activeItem.settings}
       onSettingsChange={handleSettingsChange}
     >
       <div className="flex flex-1 flex-col overflow-hidden min-h-0">
         <Header
-          title={viewTitles.project}
+          title={viewTitles['video-detail']}
           showVideoSettings
-          onMenuOpen={onMenuOpen}
+          onBackClick={onBack}
         />
-
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-        <BulkListPanel />
 
         <div className="flex-1 overflow-y-auto min-w-0">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 space-y-8 pb-24 md:pb-6">
             <div className="flex items-center gap-2 px-1">
-              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Bulk</span>
-              <h2 className="text-sm font-bold text-foreground truncate">{activeProject.title}</h2>
-              {(activeProject.status === 'generating' || activeProject.status === 'analyzing') && (
+              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Video</span>
+              <h2 className="text-sm font-bold text-foreground truncate">{activeItem.title}</h2>
+              {(activeItem.status === 'generating' || activeItem.status === 'analyzing') && (
                 <span className="text-[10px] text-primary bg-primary/10 px-2 py-0.5 rounded-full shrink-0">Đang chạy</span>
+              )}
+              {activeItem.status === 'error' && (
+                <span className="text-[10px] text-destructive bg-destructive/10 px-2 py-0.5 rounded-full shrink-0">Lỗi</span>
               )}
             </div>
 
-            {activeTool === 'scene-duration' && (
-              <SceneDurationPanel onClose={() => setActiveTool(null)} />
+            {activeItem.status === 'error' && activeItem.errorMessage && (
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border border-destructive/40 bg-destructive/10">
+                <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-destructive leading-relaxed">{activeItem.errorMessage}</p>
+                  <button
+                    type="button"
+                    onClick={() => scrollToRef(inputSectionRef)}
+                    className="mt-1.5 text-xs font-semibold text-destructive underline underline-offset-2 hover:opacity-80"
+                  >
+                    Thử lại — về mục 2 để tạo lại kịch bản
+                  </button>
+                </div>
+              </div>
             )}
 
             <div ref={characterSectionRef}>
               <CharacterMaster
-                key={activeProject.id}
+                key={activeItem.id}
                 ref={characterMasterRef}
-                initialCharacters={activeProject.characters}
+                initialCharacters={activeItem.characters}
                 onCharactersChange={handleCharactersChange}
               />
             </div>
 
             <div ref={inputSectionRef}>
               <InputSection
-                key={activeProject.id}
-                projectId={activeProject.id}
-                presetData={activeProject.appliedInput}
+                key={activeItem.id}
+                projectId={activeItem.id}
+                presetData={activeItem.appliedInput}
                 presetKey={applyKey}
-                initialContent={activeProject.inputContent}
+                initialContent={activeItem.inputContent}
                 onContentChange={handleContentChange}
                 onSaveScript={onSaveScript}
                 focusVoiceSpeedKey={focusVoiceSpeedKey}
@@ -197,26 +219,25 @@ function ProjectWorkspace({
 
             <div ref={sceneSectionRef}>
               <SceneGallery
-                scenes={activeProject.scenes}
+                scenes={activeItem.scenes}
                 onScenesChange={setActiveScenes}
-                ttsInput={activeProject.ttsInput}
-                veoInput={activeProject.veoInput}
+                ttsInput={activeItem.ttsInput}
+                veoInput={activeItem.veoInput}
                 onSceneFocus={setActiveTimelineFocus}
               />
             </div>
 
             <div ref={timelineSectionRef}>
               <TimelineEditor
-                key={activeProject.id}
-                scenes={activeProject.scenes}
+                key={activeItem.id}
+                scenes={activeItem.scenes}
                 focusBgmKey={focusBgmKey}
-                timelineDefaults={activeProject.timelineDemo}
-                focusSceneId={activeProject.timelineFocusSceneId}
+                timelineDefaults={activeItem.timelineDemo}
+                focusSceneId={activeItem.timelineFocusSceneId}
                 onFocusSceneHandled={() => setActiveTimelineFocus(null)}
               />
             </div>
           </div>
-        </div>
         </div>
       </div>
 
@@ -230,22 +251,51 @@ function ProjectWorkspace({
           setApplyKey((k) => k + 1);
           setTimeout(() => scrollToRef(inputSectionRef), 100);
         }}
+        onApplyDemo={(preset) => {
+          setSelectedPreset(null);
+          characterMasterRef.current?.applyDemoCharacters(preset.characters);
+          const started = applyPresetAsDemo(preset);
+          setApplyKey((k) => k + 1);
+          if (started) {
+            setTimeout(() => scrollToRef(sceneSectionRef), 150);
+          }
+        }}
       />
     </ProjectSettingsProvider>
   );
 }
 
 export default function Page() {
-  const [currentView, setCurrentView] = useState<AppView>('project');
-  const [activeMenuId, setActiveMenuId] = useState('project');
+  const { user } = useAuth();
+  const supabaseRef = useRef(createClient());
+  const scriptsSyncedForUserRef = useRef<string | null>(null);
+
+  const [currentView, setCurrentView] = useState<AppView>('video-library');
+  const [activeMenuId, setActiveMenuId] = useState('video-library');
   const [activeTool, setActiveTool] = useState<CreativeToolId | null>(null);
   const [settingsTab, setSettingsTab] = useState('general');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [bulkDrawerOpen, setBulkDrawerOpen] = useState(false);
   const [selectedPreset, setSelectedPreset] = useState<PresetScript | null>(null);
   const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
   const savedScriptsSectionRef = useRef<HTMLDivElement>(null);
+
+  // Có tài khoản đăng nhập → tải "Kịch bản đã lưu" từ Supabase (mục này trước giờ
+  // không hề persist, luôn rỗng lại sau F5 — giờ đồng bộ theo tài khoản Google).
+  useEffect(() => {
+    if (!user) {
+      scriptsSyncedForUserRef.current = null;
+      return;
+    }
+    if (scriptsSyncedForUserRef.current === user.id) return;
+    const supabase = supabaseRef.current;
+    if (!supabase) return;
+
+    scriptsSyncedForUserRef.current = user.id;
+    fetchRemoteSavedScripts(supabase, user.id)
+      .then(setSavedScripts)
+      .catch((err) => console.error('[saved-scripts] Tải Supabase thất bại:', err));
+  }, [user]);
 
   const [focusVoiceSpeedKey, setFocusVoiceSpeedKey] = useState(0);
   const [focusSceneStyleKey, setFocusSceneStyleKey] = useState(0);
@@ -277,35 +327,57 @@ export default function Page() {
     };
     setSavedScripts((prev) => [newScript, ...prev]);
     setTimeout(() => savedScriptsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 150);
-  }, []);
+
+    const supabase = supabaseRef.current;
+    if (user && supabase) {
+      insertRemoteSavedScript(supabase, user.id, newScript).catch((err) =>
+        console.error('[saved-scripts] Lưu Supabase thất bại:', err),
+      );
+    }
+  }, [user]);
 
   const handleUpdateScript = useCallback((updated: SavedScript) => {
     setSavedScripts((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
-  }, []);
+
+    const supabase = supabaseRef.current;
+    if (user && supabase) {
+      updateRemoteSavedScript(supabase, updated).catch((err) =>
+        console.error('[saved-scripts] Cập nhật Supabase thất bại:', err),
+      );
+    }
+  }, [user]);
 
   const handleDeleteScript = useCallback((id: string) => {
     setSavedScripts((prev) => prev.filter((s) => s.id !== id));
-  }, []);
+
+    const supabase = supabaseRef.current;
+    if (user && supabase) {
+      deleteRemoteSavedScript(supabase, id).catch((err) =>
+        console.error('[saved-scripts] Xóa Supabase thất bại:', err),
+      );
+    }
+  }, [user]);
 
   const handleMenuClick = (menuId: string, view: AppView) => {
     setActiveMenuId(menuId);
     setCurrentView(view);
     setSidebarOpen(false);
-    if (view !== 'project') setActiveTool(null);
+    setActiveTool(null);
   };
 
+  const handleOpenVideoDetail = useCallback(() => {
+    setCurrentView('video-detail');
+    setActiveMenuId('video-library');
+    setActiveTool(null);
+    setSidebarOpen(false);
+  }, []);
+
   const handleToolClick = (toolId: CreativeToolId) => {
-    setCurrentView('project');
-    setActiveMenuId('project');
+    setCurrentView('video-detail');
+    setActiveMenuId('video-library');
     setSidebarOpen(false);
 
-    if (toolId === 'bulk-list') {
-      setBulkDrawerOpen(true);
-      setActiveTool('bulk-list');
-      return;
-    }
-
-    setActiveTool(toolId === 'scene-duration' ? (activeTool === 'scene-duration' ? null : 'scene-duration') : null);
+    setActiveTool(null);
 
     switch (toolId) {
       case 'character': setTimeout(() => scrollToRef(characterSectionRef), 50); break;
@@ -314,20 +386,19 @@ export default function Page() {
       case 'timeline': setTimeout(() => scrollToRef(timelineSectionRef), 50); break;
       case 'voice-speed': setFocusVoiceSpeedKey((k) => k + 1); setTimeout(() => scrollToRef(inputSectionRef), 50); break;
       case 'scene-style': setFocusSceneStyleKey((k) => k + 1); setTimeout(() => scrollToRef(inputSectionRef), 50); break;
-      case 'scene-duration': setTimeout(() => scrollToRef(sceneSectionRef), 50); break;
       case 'background-music': setFocusBgmKey((k) => k + 1); setTimeout(() => scrollToRef(timelineSectionRef), 50); break;
     }
   };
 
   const handlePresetSelect = (preset: PresetScript) => {
-    setCurrentView('project');
-    setActiveMenuId('project');
+    setCurrentView('video-detail');
+    setActiveMenuId('video-library');
     setSidebarOpen(false);
     setSelectedPreset(preset);
   };
 
   return (
-    <BulkProjectsProvider>
+    <VideoLibraryProvider>
       <VeoModelsProvider>
       <div className="flex h-screen bg-background overflow-hidden">
         <div className="hidden md:flex flex-shrink-0">
@@ -362,8 +433,8 @@ export default function Page() {
         )}
 
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {currentView === 'project' ? (
-            <ProjectWorkspace
+          {currentView === 'video-detail' ? (
+            <VideoDetailView
               activeTool={activeTool}
               setActiveTool={setActiveTool}
               focusVoiceSpeedKey={focusVoiceSpeedKey}
@@ -385,17 +456,18 @@ export default function Page() {
               onUpdateScript={handleUpdateScript}
               onDeleteScript={handleDeleteScript}
               scrollToRef={scrollToRef}
-              onMenuOpen={() => setSidebarOpen(true)}
+              onBack={() => setCurrentView('video-library')}
             />
           ) : (
             <>
               <Header
                 title={viewTitles[currentView]}
-                onBackClick={currentView === 'settings' ? () => handleMenuClick('project', 'project') : undefined}
+                onBackClick={currentView === 'settings' ? () => handleMenuClick('video-library', 'video-library') : undefined}
                 onMenuOpen={() => setSidebarOpen(true)}
               />
               <div className="flex-1 overflow-y-auto">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+                  {currentView === 'video-library' && <VideoLibraryView onOpenDetail={handleOpenVideoDetail} />}
                   {currentView === 'api-keys' && <ApiKeysManagement />}
                   {currentView === 'settings' && (
                     <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} />
@@ -411,16 +483,8 @@ export default function Page() {
           onMenuClick={handleMenuClick}
           onMenuOpen={() => setSidebarOpen(true)}
         />
-
-        <BulkListDrawer
-          open={bulkDrawerOpen}
-          onClose={() => {
-            setBulkDrawerOpen(false);
-            setActiveTool((t) => (t === 'bulk-list' ? null : t));
-          }}
-        />
       </div>
       </VeoModelsProvider>
-    </BulkProjectsProvider>
+    </VideoLibraryProvider>
   );
 }

@@ -1,11 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Eye, EyeOff, CheckCircle2, AlertCircle, Loader2,
-  Copy, Trash2, Pencil, Plus, ExternalLink,
+  Copy, Trash2, Pencil, Plus, ExternalLink, Mail,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { licenseService } from '@/services/license.service';
+import { toUserMessage } from '@/lib/error-messages';
+import { getSavedLicenseKey, saveLicenseKey, clearSavedLicenseKey } from '@/lib/license-store';
 
 // ─── License ─────────────────────────────────────────────────────────────────
 
@@ -97,10 +101,40 @@ async function simulateVerify(id: string, value: string): Promise<{ ok: boolean;
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function KeySetupSettings() {
+  const { user, accessToken } = useAuth();
+
   // License state
-  const [licenseKey, setLicenseKey] = useState('3L4Y-TXRH-J540-TQRF');
-  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>('valid');
+  const [licenseKey, setLicenseKey] = useState('');
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>('idle');
   const [licenseError, setLicenseError] = useState('');
+  const [licenseVisible, setLicenseVisible] = useState(false);
+  const [licenseCopied, setLicenseCopied] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
+
+  // Khôi phục key đã lưu (localStorage) khi có tài khoản — verify lại với Supabase
+  // để bắt kịp trường hợp admin đổi/thu hồi key thủ công trong bảng license_issued.
+  useEffect(() => {
+    if (!user || !accessToken) return;
+    const saved = getSavedLicenseKey(user.id);
+    if (!saved) return;
+
+    setLicenseKey(saved);
+    setLicenseStatus('checking');
+    licenseService.verify(accessToken, saved)
+      .then(({ valid }) => {
+        setLicenseStatus(valid ? 'valid' : 'invalid');
+        if (!valid) {
+          setLicenseError('Key đã lưu không còn hợp lệ — key có thể đã bị đổi, hãy kiểm tra lại.');
+          clearSavedLicenseKey();
+        }
+      })
+      .catch(() => {
+        // Mất kết nối backend — giữ nguyên key đã lưu trên input, không đổi trạng thái
+        // để tránh báo lỗi giả khi chỉ là do mạng.
+        setLicenseStatus('idle');
+      });
+  }, [user, accessToken]);
 
   // API keys state — keyed by id
   const [apiKeys, setApiKeys] = useState<Record<string, ApiKeyState>>(() =>
@@ -126,15 +160,62 @@ export function KeySetupSettings() {
   const handleLicenseCheck = async () => {
     const err = validateLicenseFormat(licenseKey);
     if (err) { setLicenseError(err); setLicenseStatus('invalid'); return; }
+    if (!user || !accessToken) {
+      setLicenseError('Vui lòng đăng nhập bằng Google (mục Cài đặt chung) trước khi kiểm tra License Key.');
+      setLicenseStatus('invalid');
+      return;
+    }
     setLicenseError('');
     setLicenseStatus('checking');
-    await new Promise((r) => setTimeout(r, 900));
-    // Simulate: key chứa "FAIL" thì invalid
-    if (licenseKey.includes('FAIL')) {
+    try {
+      const { valid } = await licenseService.verify(accessToken, licenseKey);
+      setLicenseStatus(valid ? 'valid' : 'invalid');
+      if (valid) {
+        saveLicenseKey(user.id, licenseKey);
+        setLicenseVisible(false);
+      } else {
+        setLicenseError('Key không hợp lệ — key này không khớp với tài khoản Google đang đăng nhập.');
+      }
+    } catch (err) {
       setLicenseStatus('invalid');
-      setLicenseError('Key không hợp lệ — vui lòng kiểm tra lại hoặc liên hệ hỗ trợ.');
-    } else {
-      setLicenseStatus('valid');
+      setLicenseError(toUserMessage(err, 'Không kiểm tra được License Key — thử lại.'));
+    }
+  };
+
+  /** Quay lại chế độ nhập để dán key khác — không xóa key đã lưu cho tới khi Kiểm tra lại thành công */
+  const handleLicenseEdit = () => {
+    setLicenseStatus('idle');
+    setLicenseError('');
+    setLicenseVisible(true);
+  };
+
+  const handleLicenseClear = () => {
+    setLicenseKey('');
+    setLicenseStatus('idle');
+    setLicenseError('');
+    setLicenseVisible(false);
+    clearSavedLicenseKey();
+  };
+
+  const handleLicenseCopy = () => {
+    if (!licenseKey) return;
+    navigator.clipboard.writeText(licenseKey);
+    setLicenseCopied(true);
+    setTimeout(() => setLicenseCopied(false), 2000);
+  };
+
+  const handleResendLicense = async () => {
+    if (!user || !accessToken) return;
+    setResending(true);
+    setResendMessage('');
+    try {
+      await licenseService.resend(accessToken);
+      setResendMessage(`Đã gửi License Key tới ${user.email}`);
+    } catch (err) {
+      setResendMessage(toUserMessage(err, 'Gửi License Key thất bại — thử lại sau.'));
+    } finally {
+      setResending(false);
+      setTimeout(() => setResendMessage(''), 5000);
     }
   };
 
@@ -186,45 +267,118 @@ export function KeySetupSettings() {
           <p className="text-xs text-muted-foreground mt-0.5">Kích hoạt đầy đủ tính năng của ứng dụng</p>
         </div>
 
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">License Key</label>
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <input
-                type="text"
-                value={licenseKey}
-                onChange={(e) => handleLicenseChange(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleLicenseCheck()}
-                placeholder="XXXX-XXXX-XXXX-XXXX"
-                maxLength={19}
-                spellCheck={false}
-                className={cn(
-                  'w-full px-3 py-2 bg-background border rounded-lg text-sm text-foreground font-mono focus:outline-none focus:ring-1 transition-colors pr-8',
-                  licenseError
-                    ? 'border-destructive focus:border-destructive focus:ring-destructive/25'
-                    : licenseStatus === 'valid'
-                      ? 'border-green-500/50 focus:border-green-500/50 focus:ring-green-500/20'
-                      : 'border-border focus:border-primary/50 focus:ring-primary/20',
-                )}
-              />
-              {licenseStatus === 'valid' && (
-                <CheckCircle2 className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-green-400 pointer-events-none" />
-              )}
-              {(licenseStatus === 'invalid' || licenseError) && (
-                <AlertCircle className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-destructive pointer-events-none" />
-              )}
-            </div>
+        {!user && (
+          <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg border border-orange-500/30 bg-orange-500/5">
+            <AlertCircle className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Đăng nhập bằng Google ở mục <strong className="text-foreground">Cài đặt chung</strong> để nhận License Key qua email và kích hoạt.
+            </p>
+          </div>
+        )}
+
+        {user && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border border-border bg-background/50">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              License Key gắn với tài khoản <strong className="text-foreground">{user.email}</strong> — đã được gửi qua email khi đăng nhập lần đầu.
+            </p>
             <button
               type="button"
-              onClick={handleLicenseCheck}
-              disabled={licenseStatus === 'checking'}
-              className="px-4 py-2 bg-primary/10 border border-primary/30 hover:bg-primary/20 text-primary text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0"
+              onClick={handleResendLicense}
+              disabled={resending}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
-              {licenseStatus === 'checking' ? (
-                <><Loader2 className="w-4 h-4 animate-spin" />Kiểm tra...</>
-              ) : 'Kiểm tra'}
+              {resending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+              Gửi lại qua email
             </button>
           </div>
+        )}
+        {resendMessage && (
+          <p className="text-xs text-muted-foreground -mt-2">{resendMessage}</p>
+        )}
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">License Key</label>
+
+          {licenseStatus === 'valid' ? (
+            /* ── Chế độ xem — key đã kích hoạt, ẩn/hiện giống mục Quản lý API Keys ── */
+            <div className="flex items-center gap-2">
+              <input
+                type={licenseVisible ? 'text' : 'password'}
+                value={licenseKey}
+                readOnly
+                className="flex-1 px-3 py-2 bg-background border border-green-500/50 rounded-lg text-sm text-foreground font-mono cursor-default"
+              />
+              <button
+                type="button"
+                onClick={() => setLicenseVisible((v) => !v)}
+                title={licenseVisible ? 'Ẩn key' : 'Hiện key'}
+                className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground"
+              >
+                {licenseVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={handleLicenseCopy}
+                title="Copy key"
+                className="p-2 hover:bg-muted rounded-lg transition-colors"
+              >
+                {licenseCopied
+                  ? <CheckCircle2 className="w-4 h-4 text-green-400" />
+                  : <Copy className="w-4 h-4 text-muted-foreground hover:text-foreground" />}
+              </button>
+              <button
+                type="button"
+                onClick={handleLicenseEdit}
+                title="Nhập key khác"
+                className="p-2 hover:bg-primary/10 rounded-lg transition-colors text-muted-foreground hover:text-primary"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleLicenseClear}
+                title="Xóa key"
+                className="p-2 hover:bg-destructive/10 rounded-lg transition-colors text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            /* ── Chế độ nhập — chưa kích hoạt / đang kiểm tra / key sai ── */
+            <div className="flex gap-2">
+              <div className="flex-1 relative">
+                <input
+                  type="text"
+                  value={licenseKey}
+                  onChange={(e) => handleLicenseChange(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLicenseCheck()}
+                  placeholder="XXXX-XXXX-XXXX-XXXX"
+                  maxLength={19}
+                  spellCheck={false}
+                  autoFocus={licenseVisible}
+                  className={cn(
+                    'w-full px-3 py-2 bg-background border rounded-lg text-sm text-foreground font-mono focus:outline-none focus:ring-1 transition-colors pr-8',
+                    licenseError
+                      ? 'border-destructive focus:border-destructive focus:ring-destructive/25'
+                      : 'border-border focus:border-primary/50 focus:ring-primary/20',
+                  )}
+                />
+                {(licenseStatus === 'invalid' || licenseError) && (
+                  <AlertCircle className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-destructive pointer-events-none" />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={handleLicenseCheck}
+                disabled={licenseStatus === 'checking'}
+                className="px-4 py-2 bg-primary/10 border border-primary/30 hover:bg-primary/20 text-primary text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 flex-shrink-0"
+              >
+                {licenseStatus === 'checking' ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" />Kiểm tra...</>
+                ) : 'Kiểm tra'}
+              </button>
+            </div>
+          )}
 
           {/* Feedback messages */}
           {licenseError && (
@@ -244,230 +398,6 @@ export function KeySetupSettings() {
               <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
               Key không hợp lệ — kiểm tra lại hoặc liên hệ support
             </p>
-          )}
-        </div>
-      </div>
-
-      {/* ── Section: API Keys ────────────────────────────────────────── */}
-      <div className="bg-card border border-border rounded-xl p-5 space-y-4">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h4 className="text-sm font-bold text-foreground">API Keys</h4>
-          </div>
-          <span className={cn(
-            'text-xs font-semibold px-2.5 py-1 rounded-full border flex-shrink-0',
-            connectedCount === API_KEYS_CONFIG.length
-              ? 'text-green-400 bg-green-500/10 border-green-500/30'
-              : 'text-muted-foreground bg-muted/10 border-muted/30',
-          )}>
-            {connectedCount}/{API_KEYS_CONFIG.length} kết nối
-          </span>
-        </div>
-
-        {/* Key cards */}
-        <div className="space-y-3">
-          {API_KEYS_CONFIG.map((cfg) => {
-            const ks = apiKeys[cfg.id];
-            const hasValue = !!ks.value;
-
-            return (
-              <div
-                key={cfg.id}
-                className={cn(
-                  'rounded-xl border p-4 space-y-3 transition-colors',
-                  ks.status === 'error'
-                    ? 'bg-destructive/5 border-destructive/30'
-                    : ks.status === 'valid'
-                      ? 'bg-green-500/5 border-green-500/20'
-                      : 'bg-background/50 border-border',
-                )}
-              >
-                {/* Card header */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-0.5 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{cfg.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{cfg.role}</p>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    {/* Status badge */}
-                    {ks.status === 'valid' && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-green-400 bg-green-500/10 border border-green-500/25 px-2 py-0.5 rounded-md">
-                        <CheckCircle2 className="w-3 h-3" />Hợp lệ
-                      </span>
-                    )}
-                    {ks.status === 'verifying' && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 border border-primary/25 px-2 py-0.5 rounded-md">
-                        <Loader2 className="w-3 h-3 animate-spin" />Xác thực...
-                      </span>
-                    )}
-                    {ks.status === 'error' && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-destructive bg-destructive/10 border border-destructive/25 px-2 py-0.5 rounded-md">
-                        <AlertCircle className="w-3 h-3" />Lỗi
-                      </span>
-                    )}
-                    {(ks.status === 'idle') && (
-                      <span className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground bg-muted/20 border border-muted/30 px-2 py-0.5 rounded-md">
-                        <AlertCircle className="w-3 h-3" />Chưa nhập
-                      </span>
-                    )}
-                    {/* Docs link */}
-                    <a
-                      href={cfg.docsUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Xem hướng dẫn lấy key"
-                      className="p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  </div>
-                </div>
-
-                {/* Edit mode */}
-                {ks.editing ? (
-                  <div className="space-y-2">
-                    <div className="relative">
-                      <input
-                        type={ks.visible ? 'text' : 'password'}
-                        value={ks.draft}
-                        onChange={(e) => patch(cfg.id, { draft: e.target.value, error: '' })}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleApiSave(cfg);
-                          if (e.key === 'Escape') cancelEdit(cfg.id);
-                        }}
-                        placeholder={cfg.placeholder}
-                        autoFocus
-                        spellCheck={false}
-                        className={cn(
-                          'w-full px-3 py-2 pr-10 bg-background border rounded-lg text-xs font-mono text-foreground focus:outline-none focus:ring-1 transition-colors',
-                          ks.error
-                            ? 'border-destructive focus:border-destructive focus:ring-destructive/25'
-                            : 'border-primary/40 focus:border-primary/60 focus:ring-primary/20',
-                        )}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => patch(cfg.id, { visible: !ks.visible })}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {ks.visible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-
-                    {/* Inline validation error */}
-                    {ks.error && (
-                      <p className="flex items-start gap-1.5 text-xs text-destructive leading-relaxed">
-                        <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                        {ks.error}
-                      </p>
-                    )}
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApiSave(cfg)}
-                        disabled={ks.status === 'verifying'}
-                        className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-primary/10 border border-primary/30 hover:bg-primary/20 text-primary text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {ks.status === 'verifying' ? (
-                          <><Loader2 className="w-3.5 h-3.5 animate-spin" />Đang xác thực...</>
-                        ) : 'Lưu & xác thực'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => cancelEdit(cfg.id)}
-                        disabled={ks.status === 'verifying'}
-                        className="px-3 py-1.5 border border-border text-muted-foreground hover:text-foreground text-xs rounded-lg transition-colors disabled:opacity-40"
-                      >
-                        Hủy
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* View mode */
-                  <div className="flex items-center gap-2">
-                    <input
-                      type={ks.visible ? 'text' : 'password'}
-                      value={ks.value}
-                      readOnly
-                      placeholder="Chưa nhập key"
-                      className="flex-1 min-w-0 px-3 py-2 bg-background border border-border rounded-lg text-xs font-mono text-muted-foreground cursor-default"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => patch(cfg.id, { visible: !ks.visible })}
-                      disabled={!hasValue}
-                      title={ks.visible ? 'Ẩn key' : 'Hiện key'}
-                      className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-                    >
-                      {ks.visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(cfg.id, ks.value)}
-                      disabled={!hasValue}
-                      title="Sao chép key"
-                      className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex-shrink-0"
-                    >
-                      {ks.copied
-                        ? <CheckCircle2 className="w-4 h-4 text-green-400" />
-                        : <Copy className="w-4 h-4 text-muted-foreground" />
-                      }
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEdit(cfg.id)}
-                      title="Chỉnh sửa key"
-                      className="p-2 hover:bg-primary/10 rounded-lg transition-colors text-muted-foreground hover:text-primary flex-shrink-0"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    {hasValue && (
-                      <button
-                        type="button"
-                        onClick={() => handleApiDelete(cfg.id)}
-                        title="Xóa key"
-                        className="p-2 hover:bg-destructive/10 rounded-lg transition-colors text-muted-foreground hover:text-destructive flex-shrink-0"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Server error on view mode */}
-                {!ks.editing && ks.status === 'error' && ks.error && (
-                  <p className="flex items-start gap-1.5 text-xs text-destructive leading-relaxed">
-                    <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                    {ks.error}
-                  </p>
-                )}
-
-                {/* CTA when not yet entered */}
-                {!ks.editing && ks.status === 'idle' && !hasValue && (
-                  <button
-                    type="button"
-                    onClick={() => startEdit(cfg.id)}
-                    className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors font-medium"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Nhập {cfg.name}
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between pt-1 border-t border-border/50">
-          <p className="text-xs text-muted-foreground">Keys mã hóa server-side · Không lưu ở client</p>
-          {connectedCount === API_KEYS_CONFIG.length && (
-            <span className="flex items-center gap-1 text-xs text-green-400 font-medium">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              Sẵn sàng tạo video
-            </span>
           )}
         </div>
       </div>

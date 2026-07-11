@@ -15,7 +15,8 @@ import { getVeoApiKey } from '@/lib/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
 import { logAnalyzePipeline } from '@/lib/pipeline-debug-log';
 import { useProjectSettings } from '@/contexts/project-settings-context';
-import { useBulkProjects } from '@/contexts/bulk-projects-context';
+import { useVideoLibrary } from '@/contexts/video-library-context';
+import { SCENE_STYLES } from '@/lib/scene-styles';
 
 // ─── Voice Speed config ───────────────────────────────────────────────────────
 const SPEED_OPTIONS = [
@@ -26,21 +27,7 @@ const SPEED_OPTIONS = [
   { value: 2,    label: '2×',    desc: 'Rất nhanh' },
 ];
 
-// ─── Scene Style config ───────────────────────────────────────────────────────
-const SCENE_STYLES = [
-  { id: 'cinematic',       label: 'Cinematic',        emoji: '🎥', desc: 'Chân thực, điện ảnh' },
-  { id: 'cartoon-finance', label: 'Cartoon',           emoji: '📊', desc: 'Nền trắng, dễ hiểu' },
-  { id: '2d-explainer',   label: '2D Animation',      emoji: '🎬', desc: 'Explainer video' },
-  { id: 'dark-fantasy',   label: 'Dark Fantasy',      emoji: '🌑', desc: 'Gothic, huyền bí' },
-  { id: 'watercolor',     label: 'Watercolor',        emoji: '🎨', desc: 'Màu nước nhẹ nhàng' },
-  { id: 'flat-design',    label: 'Flat Design',       emoji: '⬜', desc: 'Phẳng, tối giản' },
-  { id: 'anime',          label: 'Anime / Manga',     emoji: '🇯🇵', desc: 'Phong cách Nhật' },
-  { id: 'cyberpunk',      label: 'Cyberpunk',         emoji: '🌆', desc: 'Sci-Fi tương lai' },
-  { id: 'oil-painting',   label: 'Oil Painting',      emoji: '🖌️', desc: 'Sơn dầu cổ điển' },
-  { id: 'chalk-dark',     label: 'Chalk / Sketch',    emoji: '✏️', desc: 'Nền tối, phác thảo' },
-  { id: 'renaissance',    label: 'Renaissance',       emoji: '🖼️', desc: 'Caravaggio style' },
-  { id: 'comic',          label: 'Comic / Pop Art',   emoji: '💥', desc: 'Truyện tranh' },
-];
+// ─── Scene Style config — dùng chung frontend/lib/scene-styles.ts ────────────
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TabId = 'text' | 'link' | 'image' | 'file';
@@ -107,9 +94,9 @@ export interface InputSectionProps {
   focusSceneStyleKey?: number;
   /** Sau khi phân tích xong — optional legacy callback */
   onScenesGenerated?: (result: SceneGenerationResult, projectId: string) => void | Promise<void>;
-  /** ID bulk project — khóa kết quả phân tích đúng dự án */
+  /** ID video (kho video) — khóa kết quả phân tích đúng video */
   projectId?: string;
-  /** Nội dung prompt lưu theo bulk */
+  /** Nội dung prompt lưu theo từng video */
   initialContent?: string;
   onContentChange?: (content: string) => void;
   /** Ref mục 1 — lấy danh sách nhân vật khi gửi Gemini */
@@ -275,18 +262,18 @@ export function InputSection({
   const [savedScript, setSavedScript]   = useState(false);
 
   const { settings, patchSettings, applyFromPreset, hasVeoKey } = useProjectSettings();
-  const { startBulkAnalyze, projects } = useBulkProjects();
+  const { startAnalyze, items } = useVideoLibrary();
   const { voiceSpeed, sceneStyle } = settings;
 
-  const bulkStatus = projects.find((p) => p.id === projectId)?.status;
-  const isBulkBusy = bulkStatus === 'analyzing' || bulkStatus === 'generating';
+  const activeItemStatus = items.find((p) => p.id === projectId)?.status;
+  const isItemBusy = activeItemStatus === 'analyzing' || activeItemStatus === 'generating';
   const submitLockRef = useRef(false);
 
   useEffect(() => {
-    if (!isBulkBusy) {
+    if (!isItemBusy) {
       submitLockRef.current = false;
     }
-  }, [isBulkBusy]);
+  }, [isItemBusy]);
 
   const [showVoiceSpeed, setShowVoiceSpeed] = useState(false);
   const [showSceneStyle, setShowSceneStyle] = useState(false);
@@ -420,7 +407,7 @@ export function InputSection({
   };
 
   const handleSubmit = async () => {
-    if (submitLockRef.current || isBulkBusy) return;
+    if (submitLockRef.current || isItemBusy) return;
 
     const e = validate();
     if (Object.keys(e).length > 0) {
@@ -516,7 +503,7 @@ export function InputSection({
         : undefined,
     );
 
-    const started = startBulkAnalyze(submitProjectId, {
+    const started = startAnalyze(submitProjectId, {
       pipeline,
       sourceContent: contentForScenes,
       sceneCount: settings.sceneCount,
@@ -1257,16 +1244,16 @@ export function InputSection({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={isBulkBusy}
+          disabled={isItemBusy}
           className={cn(
             'flex-1 py-3 px-4 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2',
-            form.submitted && !isBulkBusy
+            form.submitted && !isItemBusy
               ? 'bg-green-600 text-white cursor-default'
               : 'bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-60 disabled:cursor-not-allowed',
           )}
         >
-          {isBulkBusy
-            ? <><Loader2 className="w-4 h-4 animate-spin" />{bulkStatus === 'analyzing' ? 'Đang phân tích...' : 'Đang tạo cảnh...'}</>
+          {isItemBusy
+            ? <><Loader2 className="w-4 h-4 animate-spin" />{activeItemStatus === 'analyzing' ? 'Đang phân tích...' : 'Đang tạo cảnh...'}</>
             : form.submitted
               ? <>✓ Kịch bản đã được tạo</>
               : <><Send className="w-4 h-4" />Phân Tích &amp; Tạo Kịch Bản</>}

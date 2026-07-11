@@ -1,9 +1,13 @@
 'use client';
 
 import { Eye, EyeOff, Copy, CheckCircle2, AlertCircle, HelpCircle, Loader2, Pencil, X, Plus, Trash2 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { getApiKey, setApiKey } from '@/lib/api-keys-store';
+import { useAuth } from '@/contexts/auth-context';
+import { createClient } from '@/lib/supabase/client';
+import { fetchRemoteApiKeys, saveRemoteApiKey } from '@/lib/supabase/api-keys-remote';
+import { toUserMessage } from '@/lib/error-messages';
 
 type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
 
@@ -71,21 +75,45 @@ async function verifyKey(_id: string, value: string): Promise<{ ok: boolean; msg
 }
 
 export function ApiKeysManagement() {
+  const { user, loading: authLoading } = useAuth();
+  const supabaseRef = useRef(createClient());
+  const syncedForUserRef = useRef<string | null>(null);
+
   const [keys, setKeys] = useState<ApiKeyEntry[]>(INITIAL_KEYS);
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
 
+  // Tải key đã lưu của tài khoản từ Supabase, đồng thời đồng bộ vào localStorage
+  // (api-keys-store.ts) để phần còn lại của app — vốn đọc key qua localStorage
+  // đồng bộ (input-section, voice-select, veo-models-context...) — dùng được ngay
+  // mà không phải sửa lại toàn bộ các nơi đó sang gọi async.
   useEffect(() => {
-    setKeys((prev) =>
-      prev.map((k) => {
-        const stored = getApiKey(k.id);
-        return stored
-          ? { ...k, value: stored, status: 'connected' as const }
-          : k;
-      }),
-    );
-  }, []);
+    if (authLoading || !user) return;
+    if (syncedForUserRef.current === user.id) return;
+    const supabase = supabaseRef.current;
+    if (!supabase) return;
+
+    syncedForUserRef.current = user.id;
+    setLoadError('');
+
+    fetchRemoteApiKeys(supabase, user.id)
+      .then((remote) => {
+        for (const k of INITIAL_KEYS) {
+          setApiKey(k.id, remote[k.id] ?? '');
+        }
+        setKeys((prev) =>
+          prev.map((k) => {
+            const value = remote[k.id];
+            return value
+              ? { ...k, value, status: 'connected' as const }
+              : { ...k, value: '', status: 'disconnected' as const };
+          }),
+        );
+      })
+      .catch((err) => setLoadError(toUserMessage(err, 'Không tải được API Keys — thử lại.')));
+  }, [user, authLoading]);
 
   const toggleVisibility = (id: string) =>
     setVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -98,20 +126,37 @@ export function ApiKeysManagement() {
 
   const handleSave = async (id: string, value: string) => {
     setApiKey(id, value);
-    console.log('[API Key] lưu:', { id });
 
     setKeys((prev) =>
       prev.map((k) => k.id === id ? { ...k, value: value, status: 'connected' } : k),
     );
     cancelEdit(id);
+
+    const supabase = supabaseRef.current;
+    if (user && supabase) {
+      try {
+        await saveRemoteApiKey(supabase, user.id, id, value);
+      } catch (err) {
+        console.error('[api-keys] Lưu Supabase thất bại:', err);
+      }
+    }
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     setApiKey(id, '');
     setKeys((prev) =>
       prev.map((k) => k.id === id ? { ...k, value: '', status: 'disconnected', errorMsg: undefined } : k),
     );
     cancelEdit(id);
+
+    const supabase = supabaseRef.current;
+    if (user && supabase) {
+      try {
+        await saveRemoteApiKey(supabase, user.id, id, '');
+      } catch (err) {
+        console.error('[api-keys] Xóa Supabase thất bại:', err);
+      }
+    }
   };
 
   const handleCopy = (id: string, value: string) => {
@@ -148,8 +193,43 @@ export function ApiKeysManagement() {
   const totalCount = keys.length;
   const allConnected = connectedCount === totalCount;
 
+  if (authLoading) {
+    return (
+      <section className="space-y-6">
+        <div className="h-24 rounded-xl bg-muted/20 animate-pulse" />
+      </section>
+    );
+  }
+
+  if (!user) {
+    return (
+      <section className="space-y-6">
+        <h2 className="text-xs font-bold text-primary uppercase tracking-widest">
+          QUẢN LÝ API KEYS
+        </h2>
+        <div className="flex flex-col items-center text-center gap-3 bg-card border border-dashed border-border rounded-2xl p-10">
+          <div className="w-12 h-12 rounded-xl bg-orange-500/10 border border-orange-500/30 flex items-center justify-center">
+            <AlertCircle className="w-6 h-6 text-orange-400" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-foreground">Cần đăng nhập để quản lý API Keys</p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+              API Key được lưu riêng theo tài khoản Google — đăng nhập ở mục Cài đặt chung để xem, nhập hoặc đồng bộ key trên nhiều thiết bị.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="space-y-6">
+      {loadError && (
+        <p className="flex items-center gap-1.5 text-xs text-destructive">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {loadError}
+        </p>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold text-primary uppercase tracking-widest">
           QUẢN LÝ API KEYS
