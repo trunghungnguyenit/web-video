@@ -20,4 +20,4 @@ backend/dist/
 .DS_Store
 frontend/.env
 .vscode
-supabase
+supabase-data
