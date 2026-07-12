@@ -13,6 +13,14 @@ const RESEND_COOLDOWN_MS = 60_000;
  * POST /api/license/issue
  * Gọi tự động ngay sau khi đăng nhập (auth-context.tsx) — chỉ gửi email License Key
  * lần đầu tiên tài khoản này xuất hiện, các lần đăng nhập sau không gửi lại.
+ *
+ * Insert TRƯỚC rồi mới gửi email (không phải select-rồi-insert) — insert "giành
+ * quyền phát hành" nhờ user_id là primary key của license_issued, nên 2 request
+ * chạy chồng lấn (vd. đăng nhập cùng lúc ở 2 tab) chỉ có đúng 1 request insert
+ * thành công, request còn lại nhận lỗi unique_violation (23505) và bỏ qua, tránh
+ * gửi trùng email. Đánh đổi: nếu gửi email thất bại sau khi insert đã thành công,
+ * hàng đã tồn tại nên lần đăng nhập sau sẽ không tự thử gửi lại — người dùng cần tự
+ * bấm "Gửi lại qua email" trong Cài đặt (POST /resend) để nhận key.
  */
 licenseRoute.post('/issue', async (c) => {
   const user = await getAuthedUser(c);
@@ -21,21 +29,11 @@ licenseRoute.post('/issue', async (c) => {
   const supabase = getSupabaseAdmin();
   if (!supabase) return fail(c, 'Server chưa cấu hình Supabase.', 500);
 
-  const { data: existing, error: selectError } = await supabase
-    .from('license_issued')
-    .select('user_id')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (selectError) return fail(c, selectError.message, 500);
-  if (existing) return ok(c, { sent: false, alreadyIssued: true });
-
   let licenseKey: string;
   try {
     licenseKey = generateLicenseKey(user.id);
-    await sendLicenseEmail(user.email, licenseKey);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Gửi email License Key thất bại.';
+    const message = err instanceof Error ? err.message : 'Không tạo được License Key.';
     return fail(c, message, 500);
   }
 
@@ -44,7 +42,19 @@ licenseRoute.post('/issue', async (c) => {
     email: user.email,
     license_key: licenseKey,
   });
-  if (insertError) return fail(c, insertError.message, 500);
+
+  if (insertError) {
+    // Request khác đã insert trước — coi như đã issue, không gửi email lần nữa.
+    if (insertError.code === '23505') return ok(c, { sent: false, alreadyIssued: true });
+    return fail(c, insertError.message, 500);
+  }
+
+  try {
+    await sendLicenseEmail(user.email, licenseKey);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Gửi email License Key thất bại.';
+    return fail(c, message, 500);
+  }
 
   return ok(c, { sent: true, alreadyIssued: false });
 });

@@ -36,6 +36,7 @@ import { toUserMessage } from '@/lib/error-messages';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { fetchRemoteVideoLibrary, pushVideoLibraryToRemote } from '@/lib/supabase/video-library-remote';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 interface AnalyzeInput {
   pipeline: AnalyzePipelineRequest;
@@ -120,6 +121,10 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
   const regenerateInFlightRef = useRef<Set<string>>(new Set());
   /** Đánh dấu đã từng đăng nhập trong phiên này — phát hiện đúng thời điểm đăng xuất */
   const wasLoggedInRef = useRef(false);
+  /** Đang có 1 lượt push lên Supabase chạy — chặn gọi chồng lấn trong cùng tab */
+  const pushRunningRef = useRef(false);
+  /** items đổi tiếp trong lúc push đang chạy — chạy thêm đúng 1 lượt nữa sau khi xong */
+  const pushDirtyRef = useRef(false);
 
   // Luôn nạp localStorage trước — có UI ngay, không chờ auth resolve
   useEffect(() => {
@@ -175,6 +180,31 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     })();
   }, [user, authLoading]);
 
+  /**
+   * Chạy pushVideoLibraryToRemote tối đa 1 lượt tại 1 thời điểm cho tab này — nếu
+   * items đổi tiếp trong lúc đang push, chạy thêm đúng 1 lượt nữa ngay sau khi lượt
+   * hiện tại xong (dùng itemsRef.current mới nhất) thay vì để 2 lượt chạy chồng lấn.
+   */
+  const runPushToRemote = useCallback((supabase: SupabaseClient, userId: string) => {
+    if (pushRunningRef.current) {
+      pushDirtyRef.current = true;
+      return;
+    }
+    pushRunningRef.current = true;
+    void (async () => {
+      try {
+        do {
+          pushDirtyRef.current = false;
+          await pushVideoLibraryToRemote(supabase, userId, itemsRef.current);
+        } while (pushDirtyRef.current);
+      } catch (err) {
+        console.error('[video-library] Lưu Supabase thất bại:', err);
+      } finally {
+        pushRunningRef.current = false;
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     if (!persistReady) return;
     const supabase = supabaseRef.current;
@@ -182,9 +212,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
 
     const timer = window.setTimeout(() => {
       if (useRemote && supabase && user) {
-        pushVideoLibraryToRemote(supabase, user.id, itemsRef.current).catch((err) => {
-          console.error('[video-library] Lưu Supabase thất bại:', err);
-        });
+        runPushToRemote(supabase, user.id);
       } else if (!user) {
         saveVideoLibraryPersist(itemsRef.current, activeItemIdRef.current);
       }
@@ -192,7 +220,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       // lưu này, tránh ghi đè dữ liệu cloud bằng state cũ trong lúc đang race với fetch.
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [items, activeItemId, persistReady, user, remoteReady]);
+  }, [items, activeItemId, persistReady, user, remoteReady, runPushToRemote]);
 
   const activeItem = useMemo(
     () => items.find((p) => p.id === activeItemId) ?? items[0],
