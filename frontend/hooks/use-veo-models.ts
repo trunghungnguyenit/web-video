@@ -3,8 +3,6 @@
 import { useEffect } from 'react';
 import { suggestVeoModelForQuality, type VeoModelOption } from '@/lib/veo-models';
 
-export { useVeoModels } from '@/contexts/veo-models-context';
-
 export function useDefaultVeoModel(
   models: VeoModelOption[],
   videoQuality: string,

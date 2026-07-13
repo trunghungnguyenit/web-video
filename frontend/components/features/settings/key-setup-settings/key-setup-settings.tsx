@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import {
-  Eye, EyeOff, CheckCircle2, AlertCircle, Loader2,
-  Copy, Trash2, Pencil, Plus, ExternalLink, Mail,
-} from 'lucide-react';
+import { CheckCircle2, AlertCircle, Loader2, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
+import { SecretField } from '@/components/ui/secret-field';
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { useAuth } from '@/contexts/auth-context';
 import { licenseService } from '@/services/license.service';
 import { toUserMessage } from '@/lib/error-messages';
-import { getSavedLicenseKey, saveLicenseKey, clearSavedLicenseKey } from '@/lib/license-store';
+import { saveLicenseKey, clearSavedLicenseKey, getSavedLicenseKey } from '@/lib/license-store';
 
 // ─── License ─────────────────────────────────────────────────────────────────
 
@@ -25,79 +25,6 @@ function validateLicenseFormat(raw: string): string | null {
   return null;
 }
 
-// ─── API Keys ─────────────────────────────────────────────────────────────────
-
-type KeyStatus = 'idle' | 'verifying' | 'valid' | 'error';
-
-interface ApiKey {
-  id: 'gemini' | 'veo' | 'tts';
-  name: string;
-  role: string;
-  placeholder: string;
-  docsUrl: string;
-  prefixHint: string;   // expected prefix untuk validasi awal
-  minLength: number;
-}
-
-const API_KEYS_CONFIG: ApiKey[] = [
-  {
-    id: 'gemini',
-    name: 'Gemini API Key',
-    role: 'Tạo kịch bản · phân cảnh · lời thoại',
-    placeholder: 'AIzaSy...',
-    docsUrl: 'https://aistudio.google.com/app/apikey',
-    prefixHint: 'AIza',
-    minLength: 20,
-  },
-  {
-    id: 'veo',
-    name: 'Veo API Key',
-    role: 'Tạo video từng cảnh · tỷ lệ · độ phân giải',
-    placeholder: 'veo-...',
-    docsUrl: 'https://cloud.google.com/vertex-ai/generative-ai/docs/video/generate-videos',
-    prefixHint: 'veo-',
-    minLength: 10,
-  },
-  {
-    id: 'tts',
-    name: 'ElevenLabs API Key',
-    role: 'Tạo giọng đọc · giọng nam/nữ · đa ngôn ngữ',
-    placeholder: 'sk_...',
-    docsUrl: 'https://elevenlabs.io/app/settings/api-keys',
-    prefixHint: 'sk_',
-    minLength: 20,
-  },
-];
-
-interface ApiKeyState {
-  value: string;
-  draft: string;
-  status: KeyStatus;
-  error: string;
-  editing: boolean;
-  visible: boolean;
-  copied: boolean;
-}
-
-function validateApiKey(cfg: ApiKey, value: string): string | null {
-  const v = value.trim();
-  if (!v) return `Vui lòng nhập ${cfg.name}.`;
-  if (v.length < cfg.minLength) return `Key quá ngắn (tối thiểu ${cfg.minLength} ký tự).`;
-  if (cfg.prefixHint && !v.startsWith(cfg.prefixHint)) {
-    return `Key không đúng định dạng — phải bắt đầu bằng "${cfg.prefixHint}".`;
-  }
-  return null;
-}
-
-async function simulateVerify(id: string, value: string): Promise<{ ok: boolean; serverMsg?: string }> {
-  await new Promise((r) => setTimeout(r, 1100));
-  // Simulate: key bắt đầu bằng "FAIL" thì server trả về lỗi
-  if (value.toLowerCase().includes('fail')) {
-    return { ok: false, serverMsg: 'Server từ chối key — quota vượt giới hạn hoặc key bị thu hồi.' };
-  }
-  return { ok: true };
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function KeySetupSettings() {
@@ -108,7 +35,7 @@ export function KeySetupSettings() {
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus>('idle');
   const [licenseError, setLicenseError] = useState('');
   const [licenseVisible, setLicenseVisible] = useState(false);
-  const [licenseCopied, setLicenseCopied] = useState(false);
+  const { copiedId, copy: copyToClipboard } = useCopyToClipboard();
   const [resending, setResending] = useState(false);
   const [resendMessage, setResendMessage] = useState('');
 
@@ -135,16 +62,6 @@ export function KeySetupSettings() {
         setLicenseStatus('idle');
       });
   }, [user, accessToken]);
-
-  // API keys state — keyed by id
-  const [apiKeys, setApiKeys] = useState<Record<string, ApiKeyState>>(() =>
-    Object.fromEntries(
-      API_KEYS_CONFIG.map((cfg) => [
-        cfg.id,
-        { value: '', draft: '', status: 'idle' as KeyStatus, error: '', editing: false, visible: false, copied: false },
-      ]),
-    ),
-  );
 
   // ── License handlers ──────────────────────────────────────────────────────
 
@@ -197,12 +114,6 @@ export function KeySetupSettings() {
     clearSavedLicenseKey();
   };
 
-  const handleLicenseCopy = () => {
-    if (!licenseKey) return;
-    navigator.clipboard.writeText(licenseKey);
-    setLicenseCopied(true);
-    setTimeout(() => setLicenseCopied(false), 2000);
-  };
 
   const handleResendLicense = async () => {
     if (!user || !accessToken) return;
@@ -218,45 +129,6 @@ export function KeySetupSettings() {
       setTimeout(() => setResendMessage(''), 5000);
     }
   };
-
-  // ── API key handlers ──────────────────────────────────────────────────────
-
-  const patch = (id: string, delta: Partial<ApiKeyState>) =>
-    setApiKeys((prev) => ({ ...prev, [id]: { ...prev[id], ...delta } }));
-
-  const startEdit = (id: string) =>
-    patch(id, { editing: true, draft: apiKeys[id].value, error: '' });
-
-  const cancelEdit = (id: string) =>
-    patch(id, { editing: false, draft: '', error: '' });
-
-  const handleApiSave = async (cfg: ApiKey) => {
-    const { draft } = apiKeys[cfg.id];
-    const localErr = validateApiKey(cfg, draft);
-    if (localErr) { patch(cfg.id, { error: localErr }); return; }
-    patch(cfg.id, { status: 'verifying', error: '' });
-    const result = await simulateVerify(cfg.id, draft);
-    if (result.ok) {
-      patch(cfg.id, { value: draft, status: 'valid', editing: false, draft: '' });
-    } else {
-      patch(cfg.id, { status: 'error', error: result.serverMsg ?? 'Xác thực thất bại.' });
-    }
-  };
-
-  const handleApiDelete = (id: string) =>
-    patch(id, { value: '', status: 'idle', error: '', editing: false, draft: '', visible: false });
-
-  const handleCopy = (id: string, value: string) => {
-    if (!value) return;
-    navigator.clipboard.writeText(value);
-    patch(id, { copied: true });
-    setTimeout(() => patch(id, { copied: false }), 2000);
-  };
-
-  // ── Render ────────────────────────────────────────────────────────────────
-
-  const connectedCount = API_KEYS_CONFIG.filter((c) => apiKeys[c.id].status === 'valid').length;
-
   return (
     <div className="space-y-5">
 
@@ -301,48 +173,17 @@ export function KeySetupSettings() {
 
           {licenseStatus === 'valid' ? (
             /* ── Chế độ xem — key đã kích hoạt, ẩn/hiện giống mục Quản lý API Keys ── */
-            <div className="flex items-center gap-2">
-              <input
-                type={licenseVisible ? 'text' : 'password'}
-                value={licenseKey}
-                readOnly
-                className="flex-1 px-3 py-2 bg-background border border-green-500/50 rounded-lg text-sm text-foreground font-mono cursor-default"
-              />
-              <button
-                type="button"
-                onClick={() => setLicenseVisible((v) => !v)}
-                title={licenseVisible ? 'Ẩn key' : 'Hiện key'}
-                className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground"
-              >
-                {licenseVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={handleLicenseCopy}
-                title="Copy key"
-                className="p-2 hover:bg-muted rounded-lg transition-colors"
-              >
-                {licenseCopied
-                  ? <CheckCircle2 className="w-4 h-4 text-green-400" />
-                  : <Copy className="w-4 h-4 text-muted-foreground hover:text-foreground" />}
-              </button>
-              <button
-                type="button"
-                onClick={handleLicenseEdit}
-                title="Nhập key khác"
-                className="p-2 hover:bg-primary/10 rounded-lg transition-colors text-muted-foreground hover:text-primary"
-              >
-                <Pencil className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleLicenseClear}
-                title="Xóa key"
-                className="p-2 hover:bg-destructive/10 rounded-lg transition-colors text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-            </div>
+            <SecretField
+              value={licenseKey}
+              visible={licenseVisible}
+              onToggleVisibility={() => setLicenseVisible((v) => !v)}
+              copied={copiedId === 'license'}
+              onCopy={() => copyToClipboard('license', licenseKey)}
+              onEdit={handleLicenseEdit}
+              editTitle="Nhập key khác"
+              onDelete={handleLicenseClear}
+              inputClassName="border-green-500/50"
+            />
           ) : (
             /* ── Chế độ nhập — chưa kích hoạt / đang kiểm tra / key sai ── */
             <div className="flex gap-2">
@@ -381,12 +222,7 @@ export function KeySetupSettings() {
           )}
 
           {/* Feedback messages */}
-          {licenseError && (
-            <p className="flex items-start gap-1.5 text-xs text-destructive leading-relaxed">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-              {licenseError}
-            </p>
-          )}
+          {licenseError && <FieldError>{licenseError}</FieldError>}
           {!licenseError && licenseStatus === 'valid' && (
             <p className="flex items-center gap-1.5 text-xs text-green-400">
               <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0" />
@@ -394,10 +230,7 @@ export function KeySetupSettings() {
             </p>
           )}
           {!licenseError && licenseStatus === 'invalid' && (
-            <p className="flex items-center gap-1.5 text-xs text-destructive">
-              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-              Key không hợp lệ — kiểm tra lại hoặc liên hệ support
-            </p>
+            <FieldError className="items-center">Key không hợp lệ — kiểm tra lại hoặc liên hệ support</FieldError>
           )}
         </div>
       </div>

@@ -7,6 +7,7 @@ import {
   Sliders, X, Plus,
 } from 'lucide-react';
 import { cn, formatCount } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
 import type { SceneGenerationResult } from '@/lib/scenes';
 import type { CharacterMasterHandle } from '@/components/features/character-master';
 import type { PresetInput } from '@/lib/preset-scripts';
@@ -814,10 +815,7 @@ export function InputSection({
             />
             <div className="flex items-center justify-between mt-1.5 gap-3">
               {errors.content ? (
-                <p id="content-error" className="flex items-start gap-1 text-xs text-destructive leading-relaxed">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                  <span>{errors.content}</span>
-                </p>
+                <FieldError id="content-error" className="gap-1">{errors.content}</FieldError>
               ) : (
                 <p className="text-xs text-muted-foreground">
                   Cần tối thiểu <span className="font-medium text-foreground">{MIN_CONTENT_CHARS}</span> ký tự.
@@ -870,10 +868,7 @@ export function InputSection({
               )}
             />
             {errors.linkUrl ? (
-              <p id="link-error" className="flex items-start gap-1 text-xs text-destructive mt-1.5 leading-relaxed">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                <span>{errors.linkUrl}</span>
-              </p>
+              <FieldError id="link-error" className="gap-1 mt-1.5">{errors.linkUrl}</FieldError>
             ) : (
               <p id="link-hint" className="text-xs text-muted-foreground mt-2">
                 Hỗ trợ: YouTube, TikTok, Vimeo, Facebook.
@@ -1042,12 +1037,7 @@ export function InputSection({
               </p>
             </div>
 
-            {errors.upload && (
-              <p className="flex items-start gap-1 text-xs text-destructive leading-relaxed">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>{errors.upload}</span>
-              </p>
-            )}
+            {errors.upload && <FieldError className="gap-1">{errors.upload}</FieldError>}
           </div>
         )}
 
@@ -1092,12 +1082,7 @@ export function InputSection({
                 </>
               )}
             </div>
-            {errors.upload && (
-              <p className="flex items-start gap-1 text-xs text-destructive mt-1.5 leading-relaxed">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>{errors.upload}</span>
-              </p>
-            )}
+            {errors.upload && <FieldError className="gap-1 mt-1.5">{errors.upload}</FieldError>}
           </div>
         )}
       </div>
@@ -1234,12 +1219,7 @@ export function InputSection({
       </div>
 
       {/* Actions row */}
-      {errors.submit && (
-        <p className="flex items-start gap-1.5 text-xs text-destructive leading-relaxed">
-          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-          <span>{errors.submit}</span>
-        </p>
-      )}
+      {errors.submit && <FieldError>{errors.submit}</FieldError>}
       <div className="flex flex-col sm:flex-row gap-2">
         <button
           type="button"

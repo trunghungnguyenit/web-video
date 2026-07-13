@@ -1,8 +1,8 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
+import { SelectVeo } from '@/components/ui/veomodel';
 import {
   ASPECT_RATIO_OPTIONS,
   LANGUAGE_OPTIONS,
@@ -28,7 +28,7 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={cn('flex-shrink-0 min-w-[7.5rem] sm:min-w-[8.5rem]', className)}>
+    <div className={cn('shrink-0 min-w-[7.5rem] sm:min-w-[8.5rem]', className)}>
       <label
         htmlFor={htmlFor}
         className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1 truncate"
@@ -59,23 +59,15 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
       <div className="flex gap-2 overflow-x-auto scrollbar-none pb-0.5 -mx-0.5 px-0.5">
         {hasVeoKey && (
           <Field label="Model Veo" htmlFor="header-veo-model" className="min-w-[9rem]">
-            <div className="relative">
-              <select
-                id="header-veo-model"
-                value={settings.veoModel}
-                onChange={(e) => patchSettings({ veoModel: e.target.value })}
-                disabled={veoModelsLoading || veoModels.length === 0}
-                className={selectClass}
-              >
-                {veoModelsLoading && <option value="">Đang tải...</option>}
-                {!veoModelsLoading && veoModels.map((m) => (
-                  <option key={m.id} value={m.id}>{m.displayName}</option>
-                ))}
-              </select>
-              {veoModelsLoading && (
-                <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-primary animate-spin pointer-events-none" />
-              )}
-            </div>
+            <SelectVeo
+              id="header-veo-model"
+              showLabel={false}
+              value={settings.veoModel}
+              onChange={(veoModel) => patchSettings({ veoModel })}
+              options={veoModels}
+              loading={veoModelsLoading}
+              selectClassName={selectClass}
+            />
           </Field>
         )}
 

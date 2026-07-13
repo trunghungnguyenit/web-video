@@ -55,6 +55,8 @@ export const SCENE_COUNT_LABELS: Record<string, string> = {
 };
 
 export const SCENE_COUNT_OPTIONS = Object.entries(SCENE_COUNT_LABELS) as [string, string][];
+export const VIDEO_TYPE_OPTIONS = Object.entries(VIDEO_TYPE_LABELS) as [string, string][];
+export const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_LABELS) as [string, string][];
 
 /** Nhãn hiển thị số cảnh từ giá trị form */
 export function formatSceneCount(value: string): string {
@@ -66,7 +68,6 @@ export const VOICE_LABELS: Record<string, string> = {
   'female-natural': 'Nữ – tự nhiên',
   'male-pro': 'Nam – chuyên nghiệp',
   'female-young': 'Nữ – trẻ trung',
-
 };
 
 export const VOICE_OPTIONS = Object.entries(VOICE_LABELS) as [string, string][];
@@ -87,36 +88,10 @@ export const VIDEO_QUALITY_LABELS: Record<string, string> = {
 
 export const VIDEO_QUALITY_OPTIONS = Object.entries(VIDEO_QUALITY_LABELS) as [string, string][];
 
-/** Nhãn hiển thị chất lượng video từ giá trị form */
-export function formatVideoQuality(value: string): string {
-  return VIDEO_QUALITY_LABELS[value] ?? value;
-}
-
 /** Nhãn hiển thị tỷ lệ khung hình từ giá trị form */
 export function formatAspectRatio(value: string): string {
   return ASPECT_RATIO_LABELS[value] ?? value;
 }
-
-export const SCENE_DURATION_LABELS: Record<string, string> = {
-  auto: 'Tự động (4–8 giây · Veo 3)',
-  '4': '4 giây/cảnh',
-  '6': '6 giây/cảnh',
-  '8': '8 giây/cảnh',
-};
-
-export const SCENE_DURATION_OPTIONS = Object.entries(SCENE_DURATION_LABELS) as [string, string][];
-
-/** Nhãn hiển thị thời lượng cảnh từ giá trị form (re-export veo-duration) */
-export function formatSceneDuration(value: string): string {
-  return SCENE_DURATION_LABELS[value] ?? `${value}s/cảnh`;
-}
-
-export {
-  getSceneDurationOptions,
-  normalizeSceneDurationSetting,
-  snapToVeoDuration,
-  VEO_SCENE_DURATIONS,
-} from '@/lib/veo-duration';
 
 /** Format thời gian ngắn gọn: "hôm nay 14:30", "hôm qua", "3 ngày trước"... */
 export function formatRelativeDate(isoString: string): string {
@@ -134,3 +109,12 @@ export function formatRelativeDate(isoString: string): string {
   if (diffD < 7) return `${diffD} ngày trước`;
   return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
+
+export {
+  SCENE_DURATION_LABELS,
+  formatSceneDuration,
+  getSceneDurationOptions,
+  normalizeSceneDurationSetting,
+  snapToVeoDuration,
+  VEO_SCENE_DURATIONS,
+} from '@/lib/veo-duration';

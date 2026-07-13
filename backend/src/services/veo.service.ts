@@ -8,9 +8,6 @@ import {
 import { isFatalVeoMessage, isTransientHttpStatus, VeoApiError, withVeoRetry } from '../lib/veo-errors';
 
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-export const VEO_POLL_INTERVAL_MS = 10_000;
-export const VEO_MAX_POLL_MS = 10 * 60 * 1000;
-export const VEO_MAX_POLLS = Math.floor(VEO_MAX_POLL_MS / VEO_POLL_INTERVAL_MS);
 
 interface LongRunningResponse {
   name?: string;
@@ -158,33 +155,4 @@ export async function downloadVideo(apiKey: string, uri: string): Promise<Buffer
 
     return Buffer.from(await res.arrayBuffer());
   });
-}
-
-/** Poll mỗi 10s, tối đa 10 phút — chỉ operations.get, dừng ngay khi DONE */
-export async function waitForVideoOperation(
-  apiKey: string,
-  operationName: string,
-): Promise<string> {
-  for (let i = 0; i < VEO_MAX_POLLS; i++) {
-    await new Promise((r) => setTimeout(r, VEO_POLL_INTERVAL_MS));
-
-    const status = await pollVideoOperation(apiKey, operationName);
-    if (status.done && status.videoUri) {
-      return status.videoUri;
-    }
-  }
-
-  throw new VeoApiError('Veo quá thời gian chờ — thử lại sau.');
-}
-
-/** Luồng đầy đủ server-side (start → poll → download) — dùng khi resume hoặc tạo mới */
-export async function generateSceneVideo(
-  params: GenerateSceneVideoParams & { operationName?: string },
-): Promise<Buffer> {
-  const operationName = params.operationName?.trim()
-    ? params.operationName
-    : await startVideoGeneration(params);
-
-  const videoUri = await waitForVideoOperation(params.apiKey, operationName);
-  return downloadVideo(params.apiKey, videoUri);
 }

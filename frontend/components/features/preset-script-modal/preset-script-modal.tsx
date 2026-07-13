@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, Loader2, PlayCircle } from 'lucide-react';
+import { X, User, FileText, CheckCircle2, RotateCcw, ChevronDown, ChevronUp, PlayCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ModalOverlay } from '@/components/ui/modal-overlay';
 import type { PresetScript } from '@/lib/preset-scripts';
 import { ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS, getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
+import { SelectVeo } from '@/components/ui/veomodel';
 import { useDefaultVeoModel } from '@/hooks/use-veo-models';
 import { useVeoModels } from '@/contexts/veo-models-context';
 interface PresetScriptModalProps {
@@ -88,14 +90,7 @@ export function PresetScriptModal({ preset, onClose, onApply, onApplyDemo }: Pre
     setOpenSection((prev) => (prev === s ? 'none' : s));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
+    <ModalOverlay onClose={onClose}>
       {/* Modal */}
       <div
         className="relative z-10 w-full max-w-3xl max-h-[90vh] bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
@@ -352,25 +347,12 @@ export function PresetScriptModal({ preset, onClose, onApply, onApplyDemo }: Pre
                   </div>
 
                   {hasVeoKey && (
-                    <div>
-                      <label className="field-label block mb-1.5">Model Veo</label>
-                      <div className="relative">
-                        <select
-                          value={draft.input.veoModel ?? ''}
-                          onChange={(e) => setInput('veoModel', e.target.value)}
-                          disabled={veoModelsLoading || veoModels.length === 0}
-                          className="input-base w-full min-w-0 disabled:opacity-60"
-                        >
-                          {veoModelsLoading && <option value="">Đang tải model...</option>}
-                          {!veoModelsLoading && veoModels.map((m) => (
-                            <option key={m.id} value={m.id}>{m.displayName}</option>
-                          ))}
-                        </select>
-                        {veoModelsLoading && (
-                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin pointer-events-none" />
-                        )}
-                      </div>
-                    </div>
+                    <SelectVeo
+                      value={draft.input.veoModel ?? ''}
+                      onChange={(veoModel) => setInput('veoModel', veoModel)}
+                      options={veoModels}
+                      loading={veoModelsLoading}
+                    />
                   )}
 
                   <div>
@@ -419,6 +401,6 @@ export function PresetScriptModal({ preset, onClose, onApply, onApplyDemo }: Pre
           </div>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }

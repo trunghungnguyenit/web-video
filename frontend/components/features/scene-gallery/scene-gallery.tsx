@@ -5,6 +5,8 @@ import {
   ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film, Volume2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
+import { ModalOverlay } from '@/components/ui/modal-overlay';
 import type { VideoScene } from '@/lib/scenes';
 import { formatSceneTimeRange, recalculateSceneTimings } from '@/lib/scenes';
 import { regenerateSceneAssets } from '@/lib/scene-tts';
@@ -46,8 +48,7 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
   const isDirty = prompt.trim() !== scene.prompt || voice.trim() !== scene.voice;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-hidden />
+    <ModalOverlay onClose={onClose}>
       <div
         className="relative z-10 w-full max-w-lg bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
         role="dialog"
@@ -92,11 +93,7 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
                   : 'border-border focus:border-primary/50 focus:ring-primary/20',
               )}
             />
-            {errors.prompt && (
-              <p className="flex items-center gap-1 text-xs text-destructive">
-                <AlertCircle className="w-3.5 h-3.5" />{errors.prompt}
-              </p>
-            )}
+            {errors.prompt && <FieldError className="items-center gap-1">{errors.prompt}</FieldError>}
           </div>
 
           <div className="space-y-1.5">
@@ -116,11 +113,7 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
                   : 'border-border focus:border-primary/50 focus:ring-primary/20',
               )}
             />
-            {errors.voice && (
-              <p className="flex items-center gap-1 text-xs text-destructive">
-                <AlertCircle className="w-3.5 h-3.5" />{errors.voice}
-              </p>
-            )}
+            {errors.voice && <FieldError className="items-center gap-1">{errors.voice}</FieldError>}
           </div>
         </div>
 
@@ -157,7 +150,7 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
           </div>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -481,13 +474,9 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
 
               <div className="p-3 space-y-2 min-w-0 overflow-hidden">
                 {isError && scene.errorMessage && (
-                  <p
-                    title={scene.errorMessage}
-                    className="flex items-start gap-1 text-xs text-destructive leading-relaxed line-clamp-2"
-                  >
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                    <span>{scene.errorMessage}</span>
-                  </p>
+                  <FieldError title={scene.errorMessage} className="gap-1 line-clamp-2">
+                    {scene.errorMessage}
+                  </FieldError>
                 )}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Video Prompt</p>

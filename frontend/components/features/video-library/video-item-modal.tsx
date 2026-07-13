@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Loader2, Pencil, Plus, X } from 'lucide-react';
+import { Pencil, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ModalOverlay } from '@/components/ui/modal-overlay';
+import { SelectVeo } from '@/components/ui/veomodel';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 import {
   ASPECT_RATIO_OPTIONS,
@@ -200,8 +202,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
   const isEdit = mode === 'edit';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-hidden />
+    <ModalOverlay onClose={onClose}>
       <div
         className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto bg-card border border-border rounded-2xl shadow-2xl"
         role="dialog"
@@ -300,22 +301,14 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             </Field>
             {hasVeoKey && (
               <Field label="Model Veo" className="col-span-2">
-                <div className="relative">
-                  <select
-                    value={settings.veoModel}
-                    onChange={(e) => patch({ veoModel: e.target.value })}
-                    disabled={veoModelsLoading || veoModels.length === 0}
-                    className={selectClass}
-                  >
-                    {veoModelsLoading && <option value="">Đang tải...</option>}
-                    {!veoModelsLoading && veoModels.map((m) => (
-                      <option key={m.id} value={m.id}>{m.displayName}</option>
-                    ))}
-                  </select>
-                  {veoModelsLoading && (
-                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary animate-spin" />
-                  )}
-                </div>
+                <SelectVeo
+                  showLabel={false}
+                  value={settings.veoModel}
+                  onChange={(veoModel) => patch({ veoModel })}
+                  options={veoModels}
+                  loading={veoModelsLoading}
+                  selectClassName={selectClass}
+                />
               </Field>
             )}
             <Field label="Giọng đọc" className="col-span-2">
@@ -372,7 +365,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
           )}
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 

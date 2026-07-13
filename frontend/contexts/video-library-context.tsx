@@ -618,7 +618,11 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       try {
         const { script, veoInput, ttsInput } = await geminiService.analyzeScript(input.pipeline);
         if (generationEpochRef.current.get(itemId) !== epoch) return;
-
+       //đoạn này là chia kịch bản thành các cảnh
+       // script là kịch bản từ Gemini
+       // sceneDurationSetting là độ dài của cảnh
+       // videoQuality là chất lượng video
+       // trả về mảng các cảnh
         const scenes = scenesFromGeminiScript(
           script,
           veoInput.sceneDuration,
@@ -646,6 +650,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
 
     return true;
   }, [updateItem, runSceneGeneration]);
+
 
   const startRegenerate = useCallback((itemId: string, input: AnalyzeInput): boolean => {
     const item = itemsRef.current.find((p) => p.id === itemId);

@@ -7,6 +7,7 @@ import {
   Loader2, Film, Subtitles, Mic2, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
 import type { VideoScene } from '@/lib/scenes';
 import type { PresetTimelineDemo } from '@/lib/preset-scripts';
 import { formatSceneTimeRange, findSceneAtPlayhead, scenesTimingSignature } from '@/lib/scenes';
@@ -748,9 +749,7 @@ export function TimelineEditor({
                 <p className="text-xs text-muted-foreground">Tối đa {MAX_AUDIO_MB} MB</p>
               </div>
             </div>
-            {uploadError && (
-              <p className="flex items-center gap-1.5 text-xs text-destructive"><AlertCircle className="w-3.5 h-3.5" />{uploadError}</p>
-            )}
+            {uploadError && <FieldError className="items-center">{uploadError}</FieldError>}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase">Thư viện (demo — cần tải file để render)</label>
@@ -831,11 +830,7 @@ export function TimelineEditor({
             </div>
           )}
 
-          {renderError && (
-            <p className="flex items-center gap-1.5 text-xs text-destructive">
-              <AlertCircle className="w-3.5 h-3.5" />{renderError}
-            </p>
-          )}
+          {renderError && <FieldError className="items-center">{renderError}</FieldError>}
 
           {renderDone && (
             <p className="flex items-center gap-1.5 text-xs text-green-400">

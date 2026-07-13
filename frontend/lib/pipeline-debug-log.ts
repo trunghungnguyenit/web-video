@@ -16,11 +16,13 @@ export interface ImageLogItem {
   prompt: string;
 }
 
-/** Log payload gửi Gemini — mở DevTools → Console */
+/** Log payload gửi Gemini — chỉ chạy ở development */
 export function logAnalyzePipeline(
   pipeline: AnalyzePipelineRequest,
   extra?: { images?: ImageLogItem[] },
 ): void {
+  if (process.env.NODE_ENV === 'production') return;
+
   const { geminiInput, veoInput, ttsInput } = pipeline;
 
   const safe = {

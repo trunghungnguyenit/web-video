@@ -3,6 +3,7 @@ import type {
   GeminiVideoScript,
   PipelineCharacter,
 } from '../types/pipeline';
+import { VEO_QUALITY_LABELS } from '../lib/veo-config';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -51,12 +52,6 @@ const SCENE_DURATION_LABELS: Record<string, string> = {
   '8': '8 giây/cảnh',
 };
 
-const VIDEO_QUALITY_LABELS: Record<string, string> = {
-  '720p': '720p – Tiêu chuẩn',
-  '1080p': '1080p – HD cao',
-  '720p-fast': '720p – Nhanh (Veo Fast)',
-};
-
 const VOICE_SPEED_LABELS: Record<number, string> = {
   0.75: '0.75× — Chậm',
   1: '1× — Bình thường',
@@ -92,7 +87,7 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
   const voice = VOICE_LABELS[ttsInput.voice] ?? ttsInput.voice;
   const ratio = ASPECT_RATIO_LABELS[veoInput.aspectRatio] ?? veoInput.aspectRatio;
   const duration = SCENE_DURATION_LABELS[veoInput.sceneDuration] ?? veoInput.sceneDuration;
-  const quality = VIDEO_QUALITY_LABELS[veoInput.videoQuality ?? '720p'] ?? veoInput.videoQuality ?? '720p';
+  const quality = VEO_QUALITY_LABELS[veoInput.videoQuality ?? '720p'] ?? veoInput.videoQuality ?? '720p';
   const style = veoInput.sceneStyle?.trim()
     ? `\n- Phong cách cảnh Veo (visual): ${veoInput.sceneStyle}`
     : '';

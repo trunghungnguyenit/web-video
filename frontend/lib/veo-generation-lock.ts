@@ -26,7 +26,3 @@ export function withOperationPollLock(operationName: string, fn: () => Promise<s
   operationLocks.set(operationName, promise);
   return promise;
 }
-
-export function isSceneVideoLocked(sceneId: string): boolean {
-  return sceneLocks.has(sceneId);
-}

@@ -153,17 +153,6 @@ export async function runSceneGenerationQueue(
   return scenes;
 }
 
-export function queueProgress(items: SceneQueueItem[]): { done: number; total: number; percent: number } {
-  const total = items.length;
-  const done = items.filter((i) => i.step === 'done' || i.step === 'error').length;
-  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
-  return { done, total, percent };
-}
-
-export function isQueueRunning(items: SceneQueueItem[]): boolean {
-  return items.some((i) => i.step === 'tts' || i.step === 'video');
-}
-
 /** Cảnh cần resume poll sau refresh */
 export function scenesNeedingVeoResume(scenes: VideoScene[]): VideoScene[] {
   return scenes.filter(sceneNeedsVeoResume);

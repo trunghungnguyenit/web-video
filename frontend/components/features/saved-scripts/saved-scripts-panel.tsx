@@ -2,10 +2,12 @@
 
 import { useState, useCallback } from 'react';
 import {
-  BookOpen, Pencil, Trash2, CheckCircle2, AlertCircle,
+  BookOpen, Pencil, Trash2, CheckCircle2,
   Clock, ChevronRight, X, RotateCcw, Search, FileText,
 } from 'lucide-react';
 import { cn, formatCount } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
+import { ModalOverlay } from '@/components/ui/modal-overlay';
 import type { SavedScript, SavedScriptMeta } from '@/lib/saved-scripts';
 import {
   VIDEO_TYPE_LABELS, LANGUAGE_LABELS, SCENE_COUNT_LABELS,
@@ -86,8 +88,7 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
   const MAX = 5000;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onKeyDown={handleKeyDown}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-hidden />
+    <ModalOverlay onClose={onClose} onKeyDown={handleKeyDown}>
       <div
         className="relative z-10 w-full max-w-2xl max-h-[90vh] bg-card border border-border rounded-2xl flex flex-col shadow-2xl"
         role="dialog"
@@ -146,11 +147,7 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
                   : 'border-border focus:border-primary/50 focus:ring-primary/20',
               )}
             />
-            {errors.title && (
-              <p className="flex items-center gap-1.5 text-xs text-destructive">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />{errors.title}
-              </p>
-            )}
+            {errors.title && <FieldError className="items-center">{errors.title}</FieldError>}
           </div>
 
           {/* Content */}
@@ -184,11 +181,7 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
                   : 'border-border focus:border-primary/50 focus:ring-primary/20',
               )}
             />
-            {errors.content && (
-              <p className="flex items-start gap-1.5 text-xs text-destructive leading-relaxed">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />{errors.content}
-              </p>
-            )}
+            {errors.content && <FieldError>{errors.content}</FieldError>}
           </div>
 
           {/* Meta settings */}
@@ -251,7 +244,7 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
           </div>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 
@@ -265,8 +258,7 @@ interface DeleteConfirmProps {
 
 function DeleteConfirm({ scriptTitle, onConfirm, onCancel }: DeleteConfirmProps) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onCancel} aria-hidden />
+    <ModalOverlay onClose={onCancel} backdropClassName="bg-black/60 backdrop-blur-sm">
       <div className="relative z-10 w-full max-w-sm bg-card border border-border rounded-2xl p-5 shadow-2xl space-y-4">
         <div className="flex items-start gap-3">
           <div className="w-9 h-9 bg-destructive/10 rounded-xl flex items-center justify-center flex-shrink-0">
@@ -296,7 +288,7 @@ function DeleteConfirm({ scriptTitle, onConfirm, onCancel }: DeleteConfirmProps)
           </button>
         </div>
       </div>
-    </div>
+    </ModalOverlay>
   );
 }
 

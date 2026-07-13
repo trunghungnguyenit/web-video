@@ -1,8 +1,11 @@
 'use client';
 
-import { Eye, EyeOff, Copy, CheckCircle2, AlertCircle, HelpCircle, Loader2, Pencil, X, Plus, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, Plus } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
+import { SecretField } from '@/components/ui/secret-field';
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { getApiKey, setApiKey } from '@/lib/api-keys-store';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -82,7 +85,7 @@ export function ApiKeysManagement() {
   const [keys, setKeys] = useState<ApiKeyEntry[]>(INITIAL_KEYS);
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, string>>({});
-  const [copied, setCopied] = useState<string | null>(null);
+  const { copiedId, copy: copyToClipboard } = useCopyToClipboard();
   const [loadError, setLoadError] = useState('');
 
   // Tải key đã lưu của tài khoản từ Supabase, đồng thời đồng bộ vào localStorage
@@ -159,13 +162,6 @@ export function ApiKeysManagement() {
     }
   };
 
-  const handleCopy = (id: string, value: string) => {
-    if (!value) return;
-    navigator.clipboard.writeText(value);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
-  };
-
   const statusConfig: Record<KeyStatus, { color: string; icon: React.ReactNode; label: string }> = {
     connected: {
       color: 'text-green-400 bg-green-500/10 border-green-500/30',
@@ -224,12 +220,7 @@ export function ApiKeysManagement() {
 
   return (
     <section className="space-y-6">
-      {loadError && (
-        <p className="flex items-center gap-1.5 text-xs text-destructive">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          {loadError}
-        </p>
-      )}
+      {loadError && <FieldError>{loadError}</FieldError>}
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold text-primary uppercase tracking-widest">
           QUẢN LÝ API KEYS
@@ -331,72 +322,23 @@ export function ApiKeysManagement() {
                 </div>
               ) : (
                 /* Key input — view mode */
-                <div className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <input
-                      type={isVisible ? 'text' : 'password'}
-                      value={displayValue || ''}
-                      readOnly
-                      placeholder="Chưa nhập key"
-                      className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs font-mono text-muted-foreground cursor-default"
-                    />
-                  </div>
-
-                  {/* Toggle visibility */}
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility(entry.id)}
-                    disabled={!hasValue}
-                    title={isVisible ? 'Ẩn key' : 'Hiện key'}
-                    className="p-2 hover:bg-muted rounded-lg transition-colors text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    {isVisible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-
-                  {/* Copy */}
-                  <button
-                    type="button"
-                    onClick={() => handleCopy(entry.id, displayValue)}
-                    title="Copy key"
-                    disabled={!hasValue}
-                    className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                  >
-                    {copied === entry.id
-                      ? <CheckCircle2 className="w-4 h-4 text-green-400" />
-                      : <Copy className="w-4 h-4 text-muted-foreground hover:text-foreground" />
-                    }
-                  </button>
-
-                  {/* Edit */}
-                  <button
-                    type="button"
-                    onClick={() => startEdit(entry)}
-                    title="Chỉnh sửa key"
-                    className="p-2 hover:bg-primary/10 rounded-lg transition-colors text-muted-foreground hover:text-primary"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-
-                  {/* Delete / clear key */}
-                  {hasValue && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(entry.id)}
-                      title="Xóa key"
-                      className="p-2 hover:bg-destructive/10 rounded-lg transition-colors text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
+                <SecretField
+                  value={displayValue || ''}
+                  visible={isVisible}
+                  onToggleVisibility={() => toggleVisibility(entry.id)}
+                  copied={copiedId === entry.id}
+                  onCopy={() => copyToClipboard(entry.id, displayValue)}
+                  onEdit={() => startEdit(entry)}
+                  onDelete={hasValue ? () => handleDelete(entry.id) : undefined}
+                  disabled={!hasValue}
+                  placeholder="Chưa nhập key"
+                  inputClassName="text-xs text-muted-foreground"
+                />
               )}
 
               {/* Error message */}
               {entry.status === 'error' && entry.errorMsg && (
-                <p className="flex items-center gap-1.5 text-xs text-destructive">
-                  <X className="w-3.5 h-3.5 flex-shrink-0" />
-                  {entry.errorMsg}
-                </p>
+                <FieldError>{entry.errorMsg}</FieldError>
               )}
 
               {/* CTA for disconnected */}

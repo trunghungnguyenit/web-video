@@ -24,21 +24,22 @@ geminiRoute.post('/analyze', async (c) => {
       return fail(c, 'Thiếu veoInput hoặc ttsInput.');
     }
 
-    console.log('[gemini/analyze] Nhận request:', {
-      inputType: body.geminiInput.inputType,
-      sceneCount: body.geminiInput.sceneCount,
-      language: body.geminiInput.language,
-      videoType: body.geminiInput.videoType,
-      contentLength: body.geminiInput.content.length,
-      characterCount: body.geminiInput.characters?.length ?? 0,
-      veo: {
-        aspectRatio: body.veoInput.aspectRatio,
-        sceneDuration: body.veoInput.sceneDuration,
-        videoQuality: body.veoInput.videoQuality,
-        veoModel: body.veoInput.veoModel,
-      },
-    });
-    console.log('[gemini/analyze] content:\n', body.geminiInput.content);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[gemini/analyze] Nhận request:', {
+        inputType: body.geminiInput.inputType,
+        sceneCount: body.geminiInput.sceneCount,
+        language: body.geminiInput.language,
+        videoType: body.geminiInput.videoType,
+        contentLength: body.geminiInput.content.length,
+        characterCount: body.geminiInput.characters?.length ?? 0,
+        veo: {
+          aspectRatio: body.veoInput.aspectRatio,
+          sceneDuration: body.veoInput.sceneDuration,
+          videoQuality: body.veoInput.videoQuality,
+          veoModel: body.veoInput.veoModel,
+        },
+      });
+    }
 
     const script = await analyzeContent(body);
     return ok(c, {
