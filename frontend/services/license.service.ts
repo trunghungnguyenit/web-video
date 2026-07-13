@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { fetchApi } from '@/services/http';
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -7,19 +7,14 @@ interface ApiEnvelope<T> {
 }
 
 async function callLicenseApi<T>(path: string, accessToken: string, body?: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/api/license/${path}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-  } catch {
-    throw new Error(`Không kết nối được backend (${API_BASE}). Hãy chạy npm run dev:be.`);
-  }
+  const res = await fetchApi(`/api/license/${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
 
   const json = (await res.json().catch(() => null)) as ApiEnvelope<T> | null;
   if (!res.ok || !json?.success) {

@@ -13,7 +13,10 @@ import {
 import type { PresetInput } from '@/lib/preset-scripts';
 import {
   ASPECT_RATIO_OPTIONS,
+  LANGUAGE_OPTIONS,
+  SCENE_COUNT_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
+  VIDEO_TYPE_OPTIONS,
   getSceneDurationOptions,
   normalizeSceneDurationSetting,
 } from '@/lib/saved-scripts';
@@ -175,26 +178,10 @@ export function useProjectSettings(): ProjectSettingsContextValue {
   return ctx;
 }
 
-export const VIDEO_TYPE_OPTIONS = [
-  ['storytelling', 'Kể chuyện'],
-  ['tutorial', 'Hướng dẫn'],
-  ['ads', 'Quảng cáo'],
-  ['review', 'Review'],
-] as const;
-
-export const LANGUAGE_OPTIONS = [
-  ['vi', 'Tiếng Việt'],
-  ['en', 'English'],
-  ['zh', '中文'],
-  ['ja', '日本語'],
-] as const;
-
-export const SCENE_COUNT_OPTIONS = [
-  ['3', '3 cảnh'],
-  ['5', '5 cảnh'],
-  ['8', '8 cảnh'],
-  ['10', '10 cảnh'],
-  ['15', '15 cảnh'],
-] as const;
-
-export { ASPECT_RATIO_OPTIONS, VIDEO_QUALITY_OPTIONS };
+export {
+  ASPECT_RATIO_OPTIONS,
+  LANGUAGE_OPTIONS,
+  SCENE_COUNT_OPTIONS,
+  VIDEO_QUALITY_OPTIONS,
+  VIDEO_TYPE_OPTIONS,
+};

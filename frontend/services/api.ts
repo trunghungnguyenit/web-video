@@ -1,15 +1,10 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+import { fetchApi } from '@/services/http';
 
 async function request(path: string, options?: RequestInit) {
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}${path}`, {
-      headers: { 'Content-Type': 'application/json', ...options?.headers },
-      ...options,
-    });
-  } catch {
-    throw new Error(`Không kết nối được backend (${API_BASE}). Hãy chạy npm run dev:be.`);
-  }
+  const res = await fetchApi(path, {
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    ...options,
+  });
 
   let json: { success?: boolean; error?: string; data?: unknown };
   try {

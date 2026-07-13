@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Trash2, CheckCircle2, AlertCircle, Film, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -115,12 +116,7 @@ export function RenderHistorySettings() {
         <p className="text-xs text-muted-foreground mt-0.5">{items.length} video · đã render</p>
       </div>
 
-      {loadError && (
-        <p className="flex items-center gap-1.5 text-xs text-destructive">
-          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          {loadError}
-        </p>
-      )}
+      {loadError && <FieldError>{loadError}</FieldError>}
 
       {/* List */}
       {loading ? (

@@ -2,9 +2,10 @@
 
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import {
-  User, Upload, AlertCircle, CheckCircle2, Plus, Trash2, Users,
+  User, Upload, CheckCircle2, Plus, Trash2, Users,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { FieldError } from '@/components/ui/field-error';
 import type { PresetCharacter } from '@/lib/preset-scripts';
 import {
   type SavedCharacter,
@@ -367,12 +368,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
                     : 'border-border focus:border-primary/50 focus:ring-1 focus:ring-primary/20',
                 )}
               />
-              {errors.name && (
-                <div className="flex items-center gap-1 text-xs text-destructive mt-1">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                  {errors.name}
-                </div>
-              )}
+              {errors.name && <FieldError className="items-center gap-1 mt-1">{errors.name}</FieldError>}
             </div>
 
             {/* Role / Traits / Outfit */}
@@ -423,12 +419,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
                     : 'border-border focus:border-primary/50 focus:ring-1 focus:ring-primary/20',
                 )}
               />
-              {errors.description && (
-                <div className="flex items-center gap-1 text-xs text-destructive mt-1">
-                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                  {errors.description}
-                </div>
-              )}
+              {errors.description && <FieldError className="items-center gap-1 mt-1">{errors.description}</FieldError>}
             </div>
 
             {/* Actions */}

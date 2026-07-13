@@ -1,8 +1,8 @@
 // ─── Lưu metadata Kho video (kịch bản, operation Veo…) — không lưu blob video ─
 
 import type { VideoLibraryItem } from '@/lib/video-library';
-import { createInitialVideoItem } from '@/lib/video-library';
 import type { VideoScene } from '@/lib/scenes';
+import { readJSON, writeJSON } from '@/lib/local-storage';
 
 const STORAGE_KEY = 'web-video-video-library-v1';
 /** Key cũ (thời "Bulk List") — chỉ đọc fallback 1 lần, không xoá để tránh mất dữ liệu */
@@ -59,33 +59,22 @@ function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
 }
 
 function loadLegacyBulkPersist(): VideoLibraryPersistSnapshot | null {
-  try {
-    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as LegacyBulkPersistSnapshot;
-    if (!parsed.projects?.length) return null;
-    return { items: parsed.projects, activeItemId: parsed.activeProjectId };
-  } catch {
-    return null;
-  }
+  const parsed = readJSON<LegacyBulkPersistSnapshot | null>(LEGACY_STORAGE_KEY, null);
+  if (!parsed?.projects?.length) return null;
+  return { items: parsed.projects, activeItemId: parsed.activeProjectId };
 }
 
 export function loadVideoLibraryPersist(): VideoLibraryPersistSnapshot | null {
   if (typeof window === 'undefined') return null;
 
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as VideoLibraryPersistSnapshot;
-      if (!parsed.items?.length) return null;
-      const items = parsed.items.map(normalizeItemOnLoad);
-      const activeItemId = items.some((p) => p.id === parsed.activeItemId)
-        ? parsed.activeItemId
-        : items[0].id;
-      return { items, activeItemId };
-    }
-  } catch {
-    // fallthrough — thử đọc key cũ
+  const parsed = readJSON<VideoLibraryPersistSnapshot | null>(STORAGE_KEY, null);
+  if (parsed) {
+    if (!parsed.items?.length) return null;
+    const items = parsed.items.map(normalizeItemOnLoad);
+    const activeItemId = items.some((p) => p.id === parsed.activeItemId)
+      ? parsed.activeItemId
+      : items[0].id;
+    return { items, activeItemId };
   }
 
   const legacy = loadLegacyBulkPersist();
@@ -103,7 +92,6 @@ export function loadVideoLibraryPersist(): VideoLibraryPersistSnapshot | null {
 }
 
 export function saveVideoLibraryPersist(items: VideoLibraryItem[], activeItemId: string): void {
-  if (typeof window === 'undefined') return;
   const snapshot: VideoLibraryPersistSnapshot = {
     items: items.map((p) => ({
       ...p,
@@ -111,10 +99,5 @@ export function saveVideoLibraryPersist(items: VideoLibraryItem[], activeItemId:
     })),
     activeItemId,
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-}
-
-export function defaultVideoLibraryPersist(): VideoLibraryPersistSnapshot {
-  const initial = createInitialVideoItem();
-  return { items: [initial], activeItemId: initial.id };
+  writeJSON(STORAGE_KEY, snapshot);
 }

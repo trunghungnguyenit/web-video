@@ -47,15 +47,4 @@ export function buildDemoScenesFromPreset(preset: PresetScript): VideoScene[] {
   return recalculateSceneTimings(scenes);
 }
 
-/** Thống kê preset: số nhân vật, cảnh, tổng giây, timeline demo */
-export function getPresetSummary(preset: PresetScript) {
-  const totalSec = preset.demoScenes.reduce((s, c) => s + c.durationSeconds, 0);
-  return {
-    characterCount: preset.characters.length,
-    sceneCount: preset.demoScenes.length,
-    totalDuration: totalSec,
-    timeline: preset.timeline,
-  };
-}
-
 export type { PresetDemoScene, PresetTimelineDemo };

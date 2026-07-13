@@ -1,16 +1,14 @@
 // ─── ElevenLabs TTS cho từng cảnh — gắn audioUrl + duration ──────────────────
 
 import type { VideoScene } from '@/lib/scenes';
-import { recalculateSceneTimings } from '@/lib/scenes';
-import type { TtsInput } from '@/lib/pipeline-payload';
+import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { ttsService } from '@/services/tts.service';
 import { revokeSceneVideoUrl } from '@/lib/scene-video-placeholder';
 import { createSceneVideo } from '@/lib/scene-video';
 import type { SceneVideoCallbacks } from '@/lib/veo-generation';
-import type { VeoInput } from '@/lib/pipeline-payload';
 
 /** Thu hồi blob URL audio TTS (tránh rò bộ nhớ) */
-export function revokeSceneAudioUrl(url?: string) {
+function revokeSceneAudioUrl(url?: string) {
   if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
 }
 
@@ -41,7 +39,7 @@ function durationForAudio(baseSeconds: number, audioSeconds: number): number {
 }
 
 /** Gọi ElevenLabs TTS → trả blob URL audio (undefined nếu voice rỗng) */
-export async function synthesizeSceneAudio(
+async function synthesizeSceneAudio(
   scene: Pick<VideoScene, 'voice'>,
   ttsInput: TtsInput,
   apiKey: string,
@@ -115,35 +113,4 @@ export async function regenerateSceneAssets(
       status: 'error',
     };
   }
-}
-
-/** TTS tuần tự cho tất cả cảnh — throw nếu mọi cảnh có voice đều thất bại */
-export async function attachAudioToScenes(
-  scenes: VideoScene[],
-  ttsInput: TtsInput,
-): Promise<VideoScene[]> {
-  const apiKey = ttsInput.apiKey?.trim();
-  if (!apiKey) return scenes;
-
-  let firstError: Error | null = null;
-  let successCount = 0;
-  const results: VideoScene[] = [];
-
-  for (const scene of scenes) {
-    try {
-      const updated = await attachAudioToSingleScene(scene, ttsInput);
-      if (updated.audioUrl) successCount++;
-      results.push(updated);
-    } catch (err) {
-      if (!firstError && err instanceof Error) firstError = err;
-      results.push(scene);
-    }
-  }
-
-  const voiceScenes = scenes.filter((s) => s.voice.trim());
-  if (voiceScenes.length > 0 && successCount === 0 && firstError) {
-    throw firstError;
-  }
-
-  return recalculateSceneTimings(results);
 }
