@@ -418,15 +418,16 @@ export function InputSection({
 
     submitLockRef.current = true;
 
+    // Gemini API Key không bắt buộc — bỏ trống thì backend tự dùng key dự phòng của server (nếu có)
     const geminiKey = getApiKey('gemini');
-    if (!geminiKey.trim()) {
-      submitLockRef.current = false;
-      setErrors((p) => ({
-        ...p,
-        submit: 'Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.',
-      }));
-      return;
-    }
+    // if (!geminiKey.trim()) {
+    //   submitLockRef.current = false;
+    //   setErrors((p) => ({
+    //     ...p,
+    //     submit: 'Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.',
+    //   }));
+    //   return;
+    // }
 
     const veoKey = getVeoApiKey();
     if (!veoKey) {

@@ -31,7 +31,7 @@ import {
   type CreateVideoItemOptions,
   type VideoLibraryItem,
 } from '@/lib/video-library';
-import { loadVideoLibraryPersist, saveVideoLibraryPersist } from '@/lib/video-library-persist';
+import { loadVideoLibraryPersist, saveVideoLibraryPersist, normalizeItemOnLoad } from '@/lib/video-library-persist';
 import { toUserMessage } from '@/lib/error-messages';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -165,7 +165,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const remoteItems = await fetchRemoteVideoLibrary(supabase, user.id);
+        const remoteItems = (await fetchRemoteVideoLibrary(supabase, user.id)).map(normalizeItemOnLoad);
         if (remoteItems.length > 0) {
           setItems(remoteItems);
           setActiveItemId((prev) => (remoteItems.some((i) => i.id === prev) ? prev : remoteItems[0].id));

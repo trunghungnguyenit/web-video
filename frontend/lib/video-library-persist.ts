@@ -26,7 +26,8 @@ function stripBlobUrls(scenes: VideoScene[]): VideoScene[] {
   }));
 }
 
-function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
+/** Dọn trạng thái "treo" (generating mồ côi, không operation, không video) khi nạp item — dùng cho cả localStorage lẫn Supabase */
+export function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
   const scenes = item.scenes.map((s) => {
     let status = s.status;
     if (s.veoOperationName?.trim() && !s.videoUrl) {
