@@ -14,9 +14,9 @@ geminiRoute.post('/analyze', async (c) => {
   try {
     const body = await c.req.json<AnalyzePipelineRequest>();
 
-    if (!body.geminiInput?.apiKey?.trim()) {
-      return fail(c, 'Thiếu Gemini API Key — nhập tại mục API Keys.');
-    }
+    // if (!body.geminiInput?.apiKey?.trim()) {
+    //   return fail(c, 'Thiếu Gemini API Key — nhập tại mục API Keys.');
+    // }
     if (!body.geminiInput?.content?.trim()) {
       return fail(c, 'Nội dung không được để trống.');
     }

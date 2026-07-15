@@ -139,11 +139,12 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       return;
     }
 
+    // Gemini API Key không bắt buộc — bỏ trống thì backend tự dùng key dự phòng của server (nếu có)
     const geminiKey = getApiKey('gemini');
-    if (!geminiKey.trim()) {
-      setError('Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.');
-      return;
-    }
+    // if (!geminiKey.trim()) {
+    //   setError('Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.');
+    //   return;
+    // }
     const veoKey = getVeoApiKey();
     if (!veoKey) {
       setError('Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo).');

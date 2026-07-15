@@ -47,10 +47,7 @@ export function SelectVeo({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           disabled={isDisabled}
-          className={cn(
-            'input-base w-full min-w-0 disabled:opacity-60',
-            selectClassName,
-          )}
+          className={selectClassName ?? cn('input-base w-full min-w-0 disabled:opacity-60')}
         >
           {loading && <option value="">Đang tải model...</option>}
           {!loading && options.length === 0 && (

@@ -4,6 +4,7 @@ import type {
   PipelineCharacter,
 } from '../types/pipeline';
 import { VEO_QUALITY_LABELS } from '../lib/veo-config';
+import { hasPoolKeys, poolKeysInOrder, advancePoolCursor } from '../lib/gemini-key-pool';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -211,18 +212,42 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
   return text;
 }
 
+/** Gọi Gemini bằng key pool của server — hết quota key này thì tự xoay sang key kế tiếp */
+async function callGeminiWithPool(prompt: string): Promise<string> {
+  const keys = poolKeysInOrder();
+  let lastError: Error | null = null;
+
+  for (const key of keys) {
+    try {
+      return await callGemini(key, prompt);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error('Gemini API lỗi.');
+      advancePoolCursor(key);
+    }
+  }
+
+  throw new Error(
+    `${lastError?.message ?? 'Gemini API lỗi.'} — tất cả key dự phòng trên server đều đang lỗi/hết quota.`,
+  );
+}
+
 export async function analyzeContent(request: AnalyzePipelineRequest): Promise<GeminiVideoScript> {
   const { geminiInput } = request;
 
-  if (!geminiInput.apiKey?.trim()) {
-    throw new Error('Thiếu Gemini API Key.');
-  }
+  // if (!geminiInput.apiKey?.trim()) {
+  //   throw new Error('Thiếu Gemini API Key.');
+  // }
   if (!geminiInput.content?.trim()) {
     throw new Error('Nội dung không được để trống.');
   }
 
+  const userKey = geminiInput.apiKey?.trim();
+  if (!userKey && !hasPoolKeys()) {
+    throw new Error('Thiếu Gemini API Key — nhập tại mục API Keys.');
+  }
+
   const prompt = buildPrompt(request);
-  const raw = await callGemini(geminiInput.apiKey.trim(), prompt);
+  const raw = userKey ? await callGemini(userKey, prompt) : await callGeminiWithPool(prompt);
 
   try {
     return parseScript(raw);
