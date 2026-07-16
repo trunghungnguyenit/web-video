@@ -1,1 +1,1 @@
-export { InputSection } from './input-section';
+export { InputSection, type TabId } from './input-section';

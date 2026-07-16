@@ -17,6 +17,8 @@ import {
 } from '@/lib/character/saved-characters';
 import { presetCharactersToSaved } from '@/lib/preset/preset-demo-builder';
 
+const MAX_AVATAR_MB = 5;
+
 type CharacterFormField = 'name' | 'role' | 'traits' | 'outfit' | 'description';
 
 export interface CharacterMasterHandle {
@@ -51,11 +53,10 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
       () => (initialCharacters?.length ? initialCharacters : [createEmptyCharacter()]),
     );
     const [activeId, setActiveId] = useState(() => characters[0]?.id ?? '');
-    const [avatarPreviews, setAvatarPreviews] = useState<Record<string, string>>({});
     const [showStylePicker, setShowStylePicker] = useState(false);
     const [savedFlashId, setSavedFlashId] = useState<string | null>(null);
     const [justApplied, setJustApplied] = useState(false);
-    const [errors, setErrors] = useState<{ name?: string; description?: string }>({});
+    const [errors, setErrors] = useState<{ name?: string; description?: string; avatar?: string }>({});
 
     const activeCharacter = characters.find((c) => c.id === activeId) ?? characters[0];
 
@@ -105,9 +106,34 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
 
     const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
+      e.target.value = '';
       if (!file || !activeCharacter) return;
-      const url = URL.createObjectURL(file);
-      setAvatarPreviews((prev) => ({ ...prev, [activeCharacter.id]: url }));
+
+      if (!file.type.startsWith('image/')) {
+        setErrors((prev) => ({ ...prev, avatar: 'File phải là hình ảnh (JPG, PNG, WebP...).' }));
+        return;
+      }
+      if (file.size > MAX_AVATAR_MB * 1024 * 1024) {
+        setErrors((prev) => ({ ...prev, avatar: `Ảnh quá lớn — tối đa ${MAX_AVATAR_MB}MB.` }));
+        return;
+      }
+
+      const activeCharacterId = activeCharacter.id;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        if (typeof dataUrl !== 'string') return;
+        setCharacters((prev) =>
+          prev.map((c) =>
+            c.id === activeCharacterId ? { ...c, avatarDataUrl: dataUrl, updatedAt: new Date().toISOString() } : c,
+          ),
+        );
+        setErrors((prev) => ({ ...prev, avatar: undefined }));
+      };
+      reader.onerror = () => {
+        setErrors((prev) => ({ ...prev, avatar: 'Không đọc được file ảnh — thử lại.' }));
+      };
+      reader.readAsDataURL(file);
     };
 
     const handleAddCharacter = () => {
@@ -130,18 +156,12 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
         const reset = createEmptyCharacter();
         setCharacters([reset]);
         setActiveId(reset.id);
-        setAvatarPreviews({});
         setErrors({});
         return;
       }
 
       const next = characters.filter((c) => c.id !== id);
       setCharacters(next);
-      setAvatarPreviews((prev) => {
-        const copy = { ...prev };
-        delete copy[id];
-        return copy;
-      });
       if (activeId === id) {
         setActiveId(next[0]?.id ?? '');
       }
@@ -174,7 +194,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
 
     if (!activeCharacter) return null;
 
-    const avatarPreview = avatarPreviews[activeCharacter.id] ?? null;
+    const avatarPreview = activeCharacter.avatarDataUrl ?? null;
     const isSavedFlash = savedFlashId === activeId;
     const canAddMore = characters.length < MAX_CHARACTERS;
 
@@ -211,7 +231,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
         <div className="flex gap-2 overflow-x-auto overflow-y-visible py-1 scrollbar-thin">
           {characters.map((char, index) => {
             const isActive = char.id === activeId;
-            const preview = avatarPreviews[char.id];
+            const preview = char.avatarDataUrl;
             return (
               <div
                 key={char.id}
@@ -316,6 +336,10 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
                 <Upload className="w-6 h-6 text-white" />
               </div>
             </button>
+            <p className="text-[10px] text-muted-foreground leading-relaxed md:max-w-[9rem]">
+              Ảnh tham chiếu — dùng để giữ nhân vật nhất quán qua các cảnh khi tạo video.
+            </p>
+            {errors.avatar && <FieldError className="items-center gap-1">{errors.avatar}</FieldError>}
 
             {/* Style picker */}
             <div className="relative">

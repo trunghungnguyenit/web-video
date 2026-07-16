@@ -88,6 +88,9 @@ export async function generateSceneVideoAsset(
           prompt: scene.prompt,
           veoInput,
           durationSeconds: scene.durationSeconds,
+          image: scene.sourceImageBase64 && scene.sourceImageMimeType
+            ? { base64: scene.sourceImageBase64, mimeType: scene.sourceImageMimeType }
+            : undefined,
         }),
       );
       operationName = started.operationName;

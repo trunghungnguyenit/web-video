@@ -14,6 +14,7 @@ interface StartBody {
   prompt: string;
   veoInput: VeoInput;
   durationSeconds: number;
+  image?: { base64: string; mimeType: string };
 }
 
 interface PollBody {
@@ -81,6 +82,7 @@ veoRoute.post('/generate/start', async (c) => {
       prompt: body.prompt,
       veoInput: body.veoInput,
       durationSeconds: body.durationSeconds ?? 6,
+      image: body.image,
     });
 
     return ok(c, { operationName });

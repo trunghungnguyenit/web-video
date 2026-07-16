@@ -1,7 +1,7 @@
 // ─── Kho video: kiểu, tạo/lọc video, tiến độ % ───────────────────────────────
 
 import type { PresetInput, PresetTimelineDemo } from '@/lib/preset/preset-scripts';
-import type { VideoScene } from '@/lib/scene/scenes';
+import type { SceneGenerationResult, VideoScene } from '@/lib/scene/scenes';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import type { SavedCharacter } from '@/lib/character/saved-characters';
 import { createEmptyCharacter } from '@/lib/character/saved-characters';
@@ -49,8 +49,16 @@ export interface VideoLibraryItem {
   settings: VideoSettings;
   /** Prompt / nội dung mục 2 — riêng từng video */
   inputContent: string;
+  /** Tab nguồn mục 2 lúc phân tích gần nhất — quyết định giao diện hiển thị cảnh (link dùng layout khác) */
+  inputType?: 'text' | 'link' | 'image' | 'file';
   /** Nhân vật mục 1 — riêng từng video */
   characters: SavedCharacter[];
+  /** Prompt mô tả toàn bộ dàn nhân vật (Gemini tự sinh — chỉ có khi inputType === 'link') */
+  masterCastPrompt?: string;
+  /** Ảnh tham chiếu dàn nhân vật — user tự upload (data URL base64) */
+  masterCastImageDataUrl?: string;
+  /** Kết quả phân tích tab link đang chờ xác nhận — chưa gọi TTS/Veo, chỉ hiện preview để xem/upload ảnh */
+  pendingLinkReview?: SceneGenerationResult | null;
   appliedInput: PresetInput | null;
   timelineDemo: PresetTimelineDemo | null;
   pendingTimelineDemo: PresetTimelineDemo | null;

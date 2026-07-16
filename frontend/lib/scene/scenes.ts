@@ -34,6 +34,9 @@ export interface VideoScene {
   videoPath?: string;
   /** Path trong Supabase Storage bucket `scene-audio` */
   audioPath?: string;
+  /** Ảnh nguồn (base64, tab "Từ hình ảnh") — Veo dùng làm ảnh mồi tạo video cho đúng cảnh này */
+  sourceImageBase64?: string;
+  sourceImageMimeType?: string;
 }
 
 export interface SceneGenerationResult {
@@ -46,6 +49,9 @@ export interface SceneGenerationResult {
   sceneDuration: string;
   veoInput: VeoInput;
   ttsInput: TtsInput;
+  inputType?: 'text' | 'link' | 'image' | 'file';
+  /** Prompt mô tả toàn bộ dàn nhân vật (Gemini tự sinh — chỉ có khi inputType === 'link') */
+  masterCastPrompt?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

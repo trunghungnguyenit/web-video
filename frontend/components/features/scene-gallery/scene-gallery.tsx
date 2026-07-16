@@ -207,6 +207,8 @@ interface SceneGalleryProps {
   onSaveVideos: () => Promise<{ saved: number; failed: number }>;
   /** Xoá file Storage của các cảnh vừa bị xoá — gọi cùng lúc với xoá khỏi state */
   onDeleteScenes: (scenes: VideoScene[]) => void;
+  /** 'rows' — mỗi cảnh 1 hàng ngang (dùng cho video tạo từ tab link). Mặc định 'grid'. */
+  layout?: 'grid' | 'rows';
 }
 
 export function SceneGallery({
@@ -219,6 +221,7 @@ export function SceneGallery({
   projectStatus,
   onSaveVideos,
   onDeleteScenes,
+  layout = 'grid',
 }: SceneGalleryProps) {
   const scenesRef = useRef(scenes);
   scenesRef.current = scenes;
@@ -514,12 +517,13 @@ export function SceneGallery({
         onBulkAction={handleBulkAction}
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+      <div className={layout === 'rows' ? 'flex flex-col gap-3' : 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3'}>
         {scenes.map((scene) => {
           const isSelected = selectedIds.includes(scene.id);
           const isError = scene.status === 'error';
           const isEdited = scene.status === 'edited';
           const isGenerating = scene.status === 'generating';
+          const isRows = layout === 'rows';
 
           return (
             <div
@@ -535,6 +539,7 @@ export function SceneGallery({
               }}
               className={cn(
                 'text-left bg-card border rounded-lg overflow-hidden transition-colors cursor-pointer select-none min-w-0',
+                isRows && 'flex flex-col sm:flex-row',
                 isSelected
                   ? 'border-primary ring-1 ring-primary/40'
                   : isError
@@ -544,7 +549,10 @@ export function SceneGallery({
                       : 'border-border hover:border-primary/50',
               )}
             >
-              <div className="w-full aspect-[4/3] bg-muted relative overflow-hidden isolate">
+              <div className={cn(
+                'bg-muted relative overflow-hidden isolate shrink-0',
+                isRows ? 'w-full sm:w-64 aspect-video' : 'w-full aspect-[4/3]',
+              )}>
                 {scene.videoUrl ? (
                   <>
                     <video
@@ -586,7 +594,7 @@ export function SceneGallery({
                 )}
               </div>
 
-              <div className="p-3 space-y-2 min-w-0 overflow-hidden">
+              <div className={cn('p-3 space-y-2 min-w-0 overflow-hidden', isRows && 'flex-1')}>
                 {isError && scene.errorMessage && (
                   <FieldError title={scene.errorMessage} className="gap-1 line-clamp-2">
                     {scene.errorMessage}
@@ -594,13 +602,15 @@ export function SceneGallery({
                 )}
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Video Prompt</p>
-                  <p className="text-xs text-foreground line-clamp-2">{scene.prompt}</p>
+                  <p className={cn('text-xs text-foreground', !isRows && 'line-clamp-2')}>{scene.prompt}</p>
                 </div>
 
                 <div>
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Voice (TTS)</p>
                   <div className="flex items-center gap-1.5">
-                    <p className="text-xs text-foreground line-clamp-1 flex-1">{scene.voice}</p>
+                    <p className={cn('text-xs text-foreground flex-1', !isRows && 'line-clamp-1')}>
+                      {scene.voice || '(Trống)'}
+                    </p>
                     {scene.audioUrl && (
                       <button
                         type="button"

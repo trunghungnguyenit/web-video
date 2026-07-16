@@ -9,6 +9,17 @@ export interface PipelineCharacter {
   outfit: string;
   description: string;
   style: string;
+  /** Ảnh tham chiếu (base64, không kèm prefix data URL) — gửi làm ảnh mồi cho Veo giữ nhất quán ngoại hình qua các cảnh */
+  imageBase64?: string;
+  imageMimeType?: string;
+}
+
+/** Tách data URL (`data:image/png;base64,xxx`) thành base64 thuần + mimeType — undefined nếu không parse được */
+export function parseDataUrl(dataUrl: string | undefined): { base64: string; mimeType: string } | undefined {
+  if (!dataUrl) return undefined;
+  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  if (!match) return undefined;
+  return { mimeType: match[1], base64: match[2] };
 }
 
 export interface GeminiInput {
@@ -53,14 +64,19 @@ export interface AnalyzePipelineRequest {
 export function toPipelineCharacters(list: SavedCharacter[]): PipelineCharacter[] {
   return list
     .filter((c) => c.name.trim())
-    .map((c) => ({
-      name: c.name.trim(),
-      role: c.role.trim(),
-      traits: c.traits.trim(),
-      outfit: c.outfit.trim(),
-      description: c.description.trim(),
-      style: c.style.trim() || 'Realistic',
-    }));
+    .map((c) => {
+      const image = parseDataUrl(c.avatarDataUrl);
+      return {
+        name: c.name.trim(),
+        role: c.role.trim(),
+        traits: c.traits.trim(),
+        outfit: c.outfit.trim(),
+        description: c.description.trim(),
+        style: c.style.trim() || 'Realistic',
+        imageBase64: image?.base64,
+        imageMimeType: image?.mimeType,
+      };
+    });
 }
 
 export interface BuildPipelineParams {

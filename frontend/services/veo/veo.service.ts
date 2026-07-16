@@ -8,6 +8,7 @@ export interface GenerateSceneVideoPayload {
   veoInput: VeoInput;
   durationSeconds: number;
   operationName?: string;
+  image?: { base64: string; mimeType: string };
 }
 
 export interface PollOperationPayload {

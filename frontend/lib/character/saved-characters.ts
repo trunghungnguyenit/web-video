@@ -10,6 +10,8 @@ export interface SavedCharacter {
   style: string;
   createdAt: string;
   updatedAt: string;
+  /** Ảnh tham chiếu nhân vật (data URL base64) — làm ảnh mồi cho Veo giữ nhất quán ngoại hình qua các cảnh. Chỉ tồn tại trong phiên làm việc, không đồng bộ Supabase. */
+  avatarDataUrl?: string;
 }
 
 /** Style nhân vật — dropdown mục 1 */
