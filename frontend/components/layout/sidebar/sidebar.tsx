@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-import { PRESET_SCRIPTS, type PresetScript } from '@/lib/preset-scripts';
+import { PRESET_SCRIPTS, type PresetScript } from '@/lib/preset/preset-scripts';
 
 export type AppView = 'video-library' | 'video-detail' | 'api-keys' | 'settings';
 export type CreativeToolId =

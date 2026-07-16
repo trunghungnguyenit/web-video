@@ -7,9 +7,9 @@ import { FieldError } from '@/components/ui/field-error';
 import { SecretField } from '@/components/ui/secret-field';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
 import { useAuth } from '@/contexts/auth-context';
-import { licenseService } from '@/services/license.service';
+import { licenseService } from '@/services/license/license.service';
 import { toUserMessage } from '@/lib/error-messages';
-import { saveLicenseKey, clearSavedLicenseKey, getSavedLicenseKey } from '@/lib/license-store';
+import { saveLicenseKey, clearSavedLicenseKey, getSavedLicenseKey } from '@/lib/license/license-store';
 
 // ─── License ─────────────────────────────────────────────────────────────────
 

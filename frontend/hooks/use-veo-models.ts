@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { suggestVeoModelForQuality, type VeoModelOption } from '@/lib/veo-models';
+import { suggestVeoModelForQuality, type VeoModelOption } from '@/lib/veo/veo-models';
 
 export function useDefaultVeoModel(
   models: VeoModelOption[],

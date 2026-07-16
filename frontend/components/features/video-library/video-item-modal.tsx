@@ -4,18 +4,23 @@ import { useEffect, useState } from 'react';
 import { Pencil, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ModalOverlay } from '@/components/ui/modal-overlay';
+import { FieldError } from '@/components/ui/field-error';
 import { SelectVeo } from '@/components/ui/veomodel';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 import {
   ASPECT_RATIO_OPTIONS,
   DEFAULT_VIDEO_SETTINGS,
+  KIE_MODE_OPTIONS,
+  KIE_VIDEO_QUALITY_OPTIONS,
   LANGUAGE_OPTIONS,
+  resolveVideoQualityForProvider,
   SCENE_COUNT_OPTIONS,
+  VIDEO_PROVIDER_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
   VIDEO_TYPE_OPTIONS,
   type VideoSettings,
 } from '@/contexts/project-settings-context';
-import { getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts';
+import { getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts/saved-scripts';
 import { useDefaultVeoModel } from '@/hooks/use-veo-models';
 import { useVeoModels } from '@/contexts/veo-models-context';
 import { useVideoLibrary } from '@/contexts/video-library-context';
@@ -24,11 +29,11 @@ import {
   resolveVeoModelLabel,
   type CreateVideoItemOptions,
   type VideoLibraryItem,
-} from '@/lib/video-library';
-import { getApiKey, API_KEY_IDS } from '@/lib/api-keys-store';
-import { getVeoApiKey } from '@/lib/veo-models';
+} from '@/lib/video-library/video-library';
+import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { getVeoApiKey } from '@/lib/veo/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
-import { resolveSceneStyleLabel } from '@/lib/scene-styles';
+import { resolveSceneStyleLabel } from '@/lib/scene/scene-styles';
 
 interface VideoItemModalProps {
   mode: 'create' | 'edit';
@@ -51,7 +56,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
   const [settings, setSettings] = useState<VideoSettings>(DEFAULT_VIDEO_SETTINGS);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<{ title?: string; content?: string; submit?: string }>({});
   const [saved, setSaved] = useState(false);
 
   const { models: veoModels, loading: veoModelsLoading, hasKey: hasVeoKey } = useVeoModels();
@@ -65,7 +70,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
 
   useEffect(() => {
     if (!open) return;
-    setError(null);
+    setErrors({});
     setSaved(false);
     if (mode === 'edit' && initialItem) {
       setTitle(initialItem.title);
@@ -85,6 +90,14 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     });
   }, [settings.videoQuality]);
 
+  // Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p — đổi provider thì clamp lại videoQuality
+  useEffect(() => {
+    setSettings((prev) => {
+      const next = resolveVideoQualityForProvider(prev.videoQuality, prev.videoProvider);
+      return next === prev.videoQuality ? prev : { ...prev, videoQuality: next };
+    });
+  }, [settings.videoProvider]);
+
   if (!open) return null;
   if (mode === 'edit' && !initialItem) return null;
 
@@ -102,9 +115,10 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
   const handleCreate = () => {
     const name = title.trim();
     if (!name) {
-      setError('Vui lòng đặt tên cho video.');
+      setErrors({ title: 'Vui lòng đặt tên cho video.' });
       return;
     }
+    setErrors({});
     onCreate?.({ title: name, settings: { ...settings } });
     onClose();
   };
@@ -113,9 +127,10 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     if (!initialItem) return;
     const name = title.trim();
     if (!name) {
-      setError('Vui lòng đặt tên cho video.');
+      setErrors({ title: 'Vui lòng đặt tên cho video.' });
       return;
     }
+    setErrors({});
     updateItem(initialItem.id, {
       title: name,
       settings: { ...settings },
@@ -130,30 +145,36 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     if (!initialItem) return;
     const name = title.trim();
     if (!name) {
-      setError('Vui lòng đặt tên cho video.');
+      setErrors({ title: 'Vui lòng đặt tên cho video.' });
       return;
     }
     const trimmedContent = content.trim();
     if (trimmedContent.length < MIN_CONTENT_CHARS) {
-      setError(`Nội dung quá ngắn — cần ít nhất ${MIN_CONTENT_CHARS} ký tự.`);
+      setErrors({ content: `Nội dung quá ngắn — cần ít nhất ${MIN_CONTENT_CHARS} ký tự.` });
       return;
     }
 
     // Gemini API Key không bắt buộc — bỏ trống thì backend tự dùng key dự phòng của server (nếu có)
     const geminiKey = getApiKey('gemini');
     // if (!geminiKey.trim()) {
-    //   setError('Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.');
+    //   setErrors({ submit: 'Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.' });
     //   return;
     // }
-    const veoKey = getVeoApiKey();
-    if (!veoKey) {
-      setError('Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo).');
+    const isKieProvider = settings.videoProvider === 'kie';
+    const videoApiKey = isKieProvider ? getApiKey(API_KEY_IDS.kie) : getVeoApiKey();
+    if (!videoApiKey) {
+      setErrors({
+        submit: isKieProvider
+          ? 'Chưa có Kie.ai API Key — nhập key riêng tại mục API Keys (ô Kie.ai).'
+          : 'Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo).',
+      });
       return;
     }
-    if (!settings.veoModel?.trim()) {
-      setError('Chưa chọn model Veo — đợi danh sách model tải xong và chọn trong cài đặt.');
+    if (!isKieProvider && !settings.veoModel?.trim()) {
+      setErrors({ submit: 'Chưa chọn model Veo — đợi danh sách model tải xong và chọn trong cài đặt.' });
       return;
     }
+    setErrors({});
 
     // Lưu title/settings ngay — tạo lại chạy nền, không chặn phần lưu cơ bản
     updateItem(initialItem.id, {
@@ -166,7 +187,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     const characters = toPipelineCharacters(initialItem.characters);
     const pipeline = buildAnalyzePipeline({
       geminiApiKey: geminiKey,
-      veoApiKey: veoKey,
+      veoApiKey: videoApiKey,
       ttsApiKey: getApiKey(API_KEY_IDS.elevenlabs),
       content: trimmedContent,
       inputType: 'text',
@@ -182,6 +203,8 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       sceneStyleId: settings.sceneStyle,
       voice: settings.voice,
       voiceSpeed: settings.voiceSpeed,
+      provider: settings.videoProvider,
+      kieMode: settings.kieMode,
     });
 
     const started = startRegenerate(initialItem.id, {
@@ -193,7 +216,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     });
 
     if (!started) {
-      setError('Video đang xử lý — vui lòng thử lại sau.');
+      setErrors({ submit: 'Video đang xử lý — vui lòng thử lại sau.' });
       return;
     }
 
@@ -234,11 +257,12 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             <input
               type="text"
               value={title}
-              onChange={(e) => { setTitle(e.target.value); setError(null); }}
+              onChange={(e) => { setTitle(e.target.value); setErrors((p) => ({ ...p, title: undefined })); }}
               placeholder={formatVideoItemTitle()}
               maxLength={80}
-              className={cn(selectClass, error && 'border-destructive')}
+              className={cn(selectClass, errors.title && 'border-destructive')}
             />
+            {errors.title && <FieldError>{errors.title}</FieldError>}
           </div>
 
           {isEdit && (
@@ -248,23 +272,46 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
               </label>
               <textarea
                 value={content}
-                onChange={(e) => { setContent(e.target.value); setError(null); }}
+                onChange={(e) => { setContent(e.target.value); setErrors((p) => ({ ...p, content: undefined })); }}
                 placeholder="Nội dung để AI tạo video..."
                 rows={5}
                 className={cn(
                   'w-full resize-y min-h-[110px] px-3 py-2 text-sm rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
-                  error ? 'border-destructive/60 focus:ring-destructive/30' : 'border-border focus:ring-primary/30',
+                  errors.content ? 'border-destructive/60 focus:ring-destructive/30' : 'border-border focus:ring-primary/30',
                 )}
               />
-              <p className="text-[10px] text-muted-foreground leading-relaxed">
-                Chỉ hỗ trợ sửa nội dung dạng text. Muốn đổi từ link/ảnh/file, hãy vào lại workspace chính.
-              </p>
+              {errors.content ? (
+                <FieldError>{errors.content}</FieldError>
+              ) : (
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Chỉ hỗ trợ sửa nội dung dạng text. Muốn đổi từ link/ảnh/file, hãy vào lại workspace chính.
+                </p>
+              )}
             </div>
           )}
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
-
           <div className="grid grid-cols-2 gap-3">
+            <Field label="Nhà cung cấp">
+              <select
+                value={settings.videoProvider}
+                onChange={(e) => patch({ videoProvider: e.target.value as 'veo' | 'kie' })}
+                className={selectClass}
+              >
+                {VIDEO_PROVIDER_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </Field>
+            {settings.videoProvider === 'kie' && (
+              <Field label="Chế độ">
+                <select
+                  value={settings.kieMode}
+                  onChange={(e) => patch({ kieMode: e.target.value as 'fun' | 'normal' | 'spicy' })}
+                  className={selectClass}
+                  title={settings.kieMode === 'spicy' ? 'Spicy có thể tạo nội dung nhạy cảm/gợi dục.' : undefined}
+                >
+                  {KIE_MODE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+              </Field>
+            )}
             <Field label="Ngôn ngữ">
               <select value={settings.language} onChange={(e) => patch({ language: e.target.value })} className={selectClass}>
                 {LANGUAGE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -287,7 +334,9 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             </Field>
             <Field label="Chất lượng">
               <select value={settings.videoQuality} onChange={(e) => patch({ videoQuality: e.target.value })} className={selectClass}>
-                {VIDEO_QUALITY_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                {(settings.videoProvider === 'kie' ? KIE_VIDEO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
               </select>
             </Field>
             <Field label="Thời lượng cảnh">
@@ -300,7 +349,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
                 {sceneDurationOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
-            {hasVeoKey && (
+            {settings.videoProvider === 'veo' && hasVeoKey && (
               <Field label="Model Veo" className="col-span-2">
                 <SelectVeo
                   showLabel={false}
@@ -321,6 +370,8 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
               />
             </Field>
           </div>
+
+          {errors.submit && <FieldError>{errors.submit}</FieldError>}
         </div>
 
         <div className="sticky bottom-0 flex justify-end gap-2 px-5 py-4 border-t border-border bg-card/95 backdrop-blur-sm">

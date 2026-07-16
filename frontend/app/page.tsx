@@ -13,10 +13,10 @@ import { SettingsPanel } from '@/components/features/settings/settings-panel';
 import { PresetScriptModal } from '@/components/features/preset-script-modal';
 import { SavedScriptsPanel } from '@/components/features/saved-scripts';
 import { VideoLibraryView } from '@/components/features/video-library/video-library-view';
-import type { PresetScript } from '@/lib/preset-scripts';
-import type { SavedScript } from '@/lib/saved-scripts';
-import { generateScriptId, deriveTitle } from '@/lib/saved-scripts';
-import type { SavedCharacter } from '@/lib/saved-characters';
+import type { PresetScript } from '@/lib/preset/preset-scripts';
+import type { SavedScript } from '@/lib/saved-scripts/saved-scripts';
+import { generateScriptId, deriveTitle } from '@/lib/saved-scripts/saved-scripts';
+import type { SavedCharacter } from '@/lib/character/saved-characters';
 import { VideoLibraryProvider, useVideoLibrary } from '@/contexts/video-library-context';
 import { VeoModelsProvider } from '@/contexts/veo-models-context';
 import { ProjectSettingsProvider, type VideoSettings } from '@/contexts/project-settings-context';
@@ -27,7 +27,7 @@ import {
   insertRemoteSavedScript,
   updateRemoteSavedScript,
   deleteRemoteSavedScript,
-} from '@/lib/supabase/saved-scripts-remote';
+} from '@/lib/saved-scripts/saved-scripts-remote';
 
 const viewTitles: Record<AppView, string> = {
   'video-library': 'Kho video',
@@ -94,6 +94,8 @@ function VideoDetailView({
     applyPresetToActive,
     applyPresetAsDemo,
     updateActiveItem,
+    saveActiveSceneVideos,
+    deleteSceneStorageAssets,
   } = useVideoLibrary();
 
   const [applyKey, setApplyKey] = useState(0);
@@ -223,6 +225,10 @@ function VideoDetailView({
                 onScenesChange={setActiveScenes}
                 ttsInput={activeItem.ttsInput}
                 veoInput={activeItem.veoInput}
+                projectId={activeItem.id}
+                projectStatus={activeItem.status}
+                onSaveVideos={saveActiveSceneVideos}
+                onDeleteScenes={deleteSceneStorageAssets}
                 onSceneFocus={setActiveTimelineFocus}
               />
             </div>

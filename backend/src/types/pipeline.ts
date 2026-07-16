@@ -19,7 +19,7 @@ export interface GeminiInput {
   characters?: PipelineCharacter[];
 }
 
-/** Bước 2 — Veo 3: tạo video từ scene.visual */
+/** Bước 2 — sinh video từ scene.visual — Veo 3 (mặc định) hoặc Grok Imagine (kie.ai) */
 export interface VeoInput {
   apiKey?: string;
   aspectRatio: string;
@@ -31,6 +31,10 @@ export interface VeoInput {
   sceneStyle?: string;
   sceneStyleId?: string;
   characters?: PipelineCharacter[];
+  /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
+  provider?: 'veo' | 'kie';
+  /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
+  kieMode?: 'fun' | 'normal' | 'spicy';
 }
 
 /** Bước 3 — ElevenLabs TTS: tạo audio từ scene.voiceover */

@@ -10,9 +10,34 @@ import {
   filterVideoItems,
   formatVideoItemCardDate,
   type VideoLibrarySortOrder,
+  type VideoLibraryStatus,
   type VideoLibraryStatusFilter,
   type VideoLibraryItem,
-} from '@/lib/video-library';
+} from '@/lib/video-library/video-library';
+
+const STATUS_LABELS: Record<VideoLibraryStatus, string> = {
+  draft: 'Nháp',
+  analyzing: 'Đang phân tích...',
+  generating: 'Đang tạo video...',
+  completed: 'Hoàn thành',
+  error: 'Lỗi',
+};
+
+/** Badge nhà cung cấp — tách riêng khỏi veoModelLabel để nhìn rõ khi chạy nhiều luồng song song */
+function ProviderBadge({ provider }: { provider: 'veo' | 'kie' }) {
+  if (provider === 'kie') {
+    return (
+      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25">
+        Grok Imagine
+      </span>
+    );
+  }
+  return (
+    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/25">
+      Veo 3
+    </span>
+  );
+}
 
 const STATUS_FILTER_OPTIONS: { value: VideoLibraryStatusFilter; label: string }[] = [
   { value: 'all', label: 'Tất cả' },
@@ -64,6 +89,7 @@ function VideoLibraryCard({
       </div>
 
       <div className="flex flex-wrap gap-1.5 mb-3">
+        <ProviderBadge provider={item.settings.videoProvider ?? 'veo'} />
         <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25 truncate max-w-full">
           {item.veoModelLabel}
         </span>
@@ -71,6 +97,15 @@ function VideoLibraryCard({
           {item.aspectRatio}
         </span>
       </div>
+
+      <p
+        className={cn(
+          'text-[11px] font-semibold mb-1.5',
+          hasError ? 'text-destructive' : item.status === 'completed' ? 'text-green-400' : 'text-orange-400',
+        )}
+      >
+        {STATUS_LABELS[item.status]}
+      </p>
 
       <div className="flex items-center gap-2 mb-2">
         <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">

@@ -11,7 +11,7 @@ import {
   deleteRenderHistoryEntry,
   clearRenderHistory,
   type RenderHistoryEntry,
-} from '@/lib/supabase/render-history-remote';
+} from '@/lib/render-history/render-history-remote';
 import { toUserMessage } from '@/lib/error-messages';
 
 function formatDate(iso: string): string {

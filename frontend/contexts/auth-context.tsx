@@ -14,8 +14,8 @@ import { CheckCircle2, AlertCircle, X } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { toUserMessage } from '@/lib/error-messages';
-import { licenseService } from '@/services/license.service';
-import { clearAllApiKeys } from '@/lib/api-keys-store';
+import { licenseService } from '@/services/license/license.service';
+import { clearAllApiKeys } from '@/lib/api-keys/api-keys-store';
 
 interface AuthContextValue {
   user: User | null;

@@ -9,9 +9,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { API_KEYS_CHANGED_EVENT } from '@/lib/api-keys-store';
-import { getVeoApiKey, type VeoModelOption } from '@/lib/veo-models';
-import { fetchVeoModelsCached, invalidateVeoModelsCache } from '@/lib/veo-models-cache';
+import { API_KEYS_CHANGED_EVENT } from '@/lib/api-keys/api-keys-store';
+import { getVeoApiKey, type VeoModelOption } from '@/lib/veo/veo-models';
+import { fetchVeoModelsCached, invalidateVeoModelsCache } from '@/lib/veo/veo-models-cache';
 
 interface VeoModelsContextValue {
   models: VeoModelOption[];

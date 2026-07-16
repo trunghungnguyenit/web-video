@@ -12,16 +12,16 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import type { PresetInput, PresetScript, PresetTimelineDemo } from '@/lib/preset-scripts';
-import type { SceneGenerationResult, VideoScene } from '@/lib/scenes';
-import { scenesFromGeminiScript } from '@/lib/scenes';
+import type { PresetInput, PresetScript, PresetTimelineDemo } from '@/lib/preset/preset-scripts';
+import type { SceneGenerationResult, VideoScene } from '@/lib/scene/scenes';
+import { scenesFromGeminiScript } from '@/lib/scene/scenes';
 import type { VideoSettings } from '@/contexts/project-settings-context';
 import { DEFAULT_VIDEO_SETTINGS } from '@/contexts/project-settings-context';
 import type { AnalyzePipelineRequest, TtsInput, VeoInput } from '@/lib/pipeline-payload';
-import { runSceneGenerationQueue, scenesNeedingVeoResume } from '@/lib/scene-generation-queue';
-import { normalizeSceneDurationSetting } from '@/lib/saved-scripts';
-import { buildDemoScenesFromPreset } from '@/lib/preset-demo-builder';
-import { geminiService } from '@/services/gemini.service';
+import { runSceneGenerationQueue, scenesNeedingVeoResume } from '@/lib/scene/scene-generation-queue';
+import { normalizeSceneDurationSetting } from '@/lib/saved-scripts/saved-scripts';
+import { buildDemoScenesFromPreset } from '@/lib/preset/preset-demo-builder';
+import { geminiService } from '@/services/gemini/gemini.service';
 import {
   countScenesDone,
   createInitialVideoItem,
@@ -30,12 +30,22 @@ import {
   resolveVeoModelLabel,
   type CreateVideoItemOptions,
   type VideoLibraryItem,
-} from '@/lib/video-library';
-import { loadVideoLibraryPersist, saveVideoLibraryPersist, normalizeItemOnLoad } from '@/lib/video-library-persist';
+} from '@/lib/video-library/video-library';
+import {
+  loadVideoLibraryPersist,
+  saveVideoLibraryPersist,
+  normalizeItemOnLoad,
+} from '@/lib/video-library/video-library-persist';
 import { toUserMessage } from '@/lib/error-messages';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
-import { fetchRemoteVideoLibrary, pushVideoLibraryToRemote } from '@/lib/supabase/video-library-remote';
+import { fetchRemoteVideoLibrary, pushVideoLibraryToRemote } from '@/lib/video-library/video-library-remote';
+import {
+  resolveSceneSignedUrls,
+  uploadSceneAssets,
+  deleteSceneAssets,
+  deleteProjectStorageAssets,
+} from '@/lib/video-library/video-library-storage';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 interface AnalyzeInput {
@@ -76,6 +86,10 @@ interface VideoLibraryContextValue {
   startAnalyze: (itemId: string, input: AnalyzeInput) => boolean;
   /** Sửa nội dung/settings 1 video đã có & tạo lại cảnh — giữ cảnh cũ tới khi xong */
   startRegenerate: (itemId: string, input: AnalyzeInput) => boolean;
+  /** Upload video/audio cảnh (blob:) của project active lên Supabase Storage */
+  saveActiveSceneVideos: () => Promise<{ saved: number; failed: number }>;
+  /** Xoá file Storage của các cảnh vừa bị xoá khỏi mục 3 */
+  deleteSceneStorageAssets: (scenes: VideoScene[]) => void;
 }
 
 const VideoLibraryContext = createContext<VideoLibraryContextValue | null>(null);
@@ -165,7 +179,8 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const remoteItems = (await fetchRemoteVideoLibrary(supabase, user.id)).map(normalizeItemOnLoad);
+        const rawItems = (await fetchRemoteVideoLibrary(supabase, user.id)).map(normalizeItemOnLoad);
+        const remoteItems = await resolveSceneSignedUrls(supabase, rawItems);
         if (remoteItems.length > 0) {
           setItems(remoteItems);
           setActiveItemId((prev) => (remoteItems.some((i) => i.id === prev) ? prev : remoteItems[0].id));
@@ -253,7 +268,19 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Xoá file Storage (scene-videos/scene-audio) của 1 hoặc nhiều project — chạy nền, không chặn UI, lỗi chỉ log */
+  const cleanupProjectStorage = useCallback((projectIds: string[]) => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user || projectIds.length === 0) return;
+    for (const projectId of projectIds) {
+      void deleteProjectStorageAssets(supabase, user.id, projectId).catch((err) => {
+        console.error('[video-library] Xoá file Storage của project thất bại:', err);
+      });
+    }
+  }, [user]);
+
   const deleteItem = useCallback((id: string) => {
+    cleanupProjectStorage([id]);
     setItems((prev) => {
       const next = prev.filter((p) => p.id !== id);
       if (next.length === 0) {
@@ -266,13 +293,14 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       }
       return next;
     });
-  }, [activeItemId]);
+  }, [activeItemId, cleanupProjectStorage]);
 
   const deleteAllItems = useCallback(() => {
+    cleanupProjectStorage(itemsRef.current.map((p) => p.id));
     const fresh = createVideoItem({ title: formatVideoItemTitle(), settings: DEFAULT_VIDEO_SETTINGS });
     setItems([fresh]);
     setActiveItemId(fresh.id);
-  }, []);
+  }, [cleanupProjectStorage]);
 
   const updateActiveItem = useCallback((patch: Partial<VideoLibraryItem>) => {
     updateItem(activeItemId, patch);
@@ -293,6 +321,59 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       }),
     );
   }, [activeItemId]);
+
+  /**
+   * Upload video/audio (blob: URL) của các cảnh đã sinh thành công trong project
+   * đang active lên Supabase Storage — tránh mất khi F5 (phải tạo lại bằng AI).
+   * Patch videoPath/audioPath ngay sau mỗi cảnh upload xong (không đợi hết mới
+   * patch 1 lần) để UI cập nhật dần; auto-sync debounce sẵn có sẽ tự đẩy path
+   * này lên bảng video_scenes, không cần gọi ghi DB riêng ở đây.
+   */
+  const saveActiveSceneVideos = useCallback(async (): Promise<{ saved: number; failed: number }> => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user) {
+      throw new Error('Cần đăng nhập để lưu video lên cloud.');
+    }
+
+    const item = itemsRef.current.find((p) => p.id === activeItemIdRef.current);
+    if (!item) return { saved: 0, failed: 0 };
+
+    const targets = item.scenes.filter(
+      (s) => s.status === 'success' && s.videoUrl?.startsWith('blob:') && !s.videoPath,
+    );
+    if (targets.length === 0) return { saved: 0, failed: 0 };
+
+    let saved = 0;
+    let failed = 0;
+
+    for (const scene of targets) {
+      try {
+        const { videoPath, audioPath } = await uploadSceneAssets(supabase, user.id, item.id, scene);
+        setActiveScenes((prev) =>
+          prev.map((s) =>
+            s.id === scene.id
+              ? { ...s, videoPath: videoPath ?? s.videoPath, audioPath: audioPath ?? s.audioPath }
+              : s,
+          ),
+        );
+        saved++;
+      } catch (err) {
+        console.error('[video-library] Lưu video Storage thất bại:', err);
+        failed++;
+      }
+    }
+
+    return { saved, failed };
+  }, [user, setActiveScenes]);
+
+  /** Xoá file Storage của các cảnh vừa bị xoá khỏi mục 3 — chạy nền, không chặn UI, lỗi chỉ log */
+  const deleteSceneStorageAssets = useCallback((scenes: VideoScene[]) => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user) return;
+    void deleteSceneAssets(supabase, scenes).catch((err) => {
+      console.error('[video-library] Xoá file Storage của cảnh thất bại:', err);
+    });
+  }, [user]);
 
   const setActiveTimelineFocus = useCallback((sceneId: string | null) => {
     updateItem(activeItemId, { timelineFocusSceneId: sceneId });
@@ -618,15 +699,16 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       try {
         const { script, veoInput, ttsInput } = await geminiService.analyzeScript(input.pipeline);
         if (generationEpochRef.current.get(itemId) !== epoch) return;
-       //đoạn này là chia kịch bản thành các cảnh
-       // script là kịch bản từ Gemini
-       // sceneDurationSetting là độ dài của cảnh
-       // videoQuality là chất lượng video
-       // trả về mảng các cảnh
+        //đoạn này là chia kịch bản thành các cảnh
+        // script là kịch bản từ Gemini
+        // sceneDurationSetting là độ dài của cảnh
+        // videoQuality là chất lượng video
+        // trả về mảng các cảnh
         const scenes = scenesFromGeminiScript(
           script,
           veoInput.sceneDuration,
           veoInput.videoQuality,
+          veoInput.provider,
         );
 
         runSceneGeneration(itemId, {
@@ -695,6 +777,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           script,
           veoInput.sceneDuration,
           veoInput.videoQuality,
+          veoInput.provider,
         );
 
         runSceneGeneration(itemId, {
@@ -768,6 +851,8 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       syncSettingsForItem,
       startAnalyze,
       startRegenerate,
+      saveActiveSceneVideos,
+      deleteSceneStorageAssets,
     }),
     [
       items,
@@ -787,6 +872,8 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       syncSettingsForItem,
       startAnalyze,
       startRegenerate,
+      saveActiveSceneVideos,
+      deleteSceneStorageAssets,
     ],
   );
 

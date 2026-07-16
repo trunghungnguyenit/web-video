@@ -8,20 +8,20 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
-import type { VideoScene } from '@/lib/scenes';
-import type { PresetTimelineDemo } from '@/lib/preset-scripts';
-import { formatSceneTimeRange, findSceneAtPlayhead, scenesTimingSignature } from '@/lib/scenes';
+import type { VideoScene } from '@/lib/scene/scenes';
+import type { PresetTimelineDemo } from '@/lib/preset/preset-scripts';
+import { formatSceneTimeRange, findSceneAtPlayhead, scenesTimingSignature } from '@/lib/scene/scenes';
 import {
   SCENE_TRANSITION_OPTIONS,
   crossfadeAudio,
   crossfadeVideo,
   transitionMs,
-} from '@/lib/scene-transition';
-import { composeVideo, downloadBlob } from '@/lib/video-composer';
+} from '@/lib/scene/scene-transition';
+import { composeVideo, downloadBlob } from '@/lib/video-library/video-composer';
 import { toUserMessage } from '@/lib/error-messages';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
-import { insertRenderHistory } from '@/lib/supabase/render-history-remote';
+import { insertRenderHistory } from '@/lib/render-history/render-history-remote';
 
 const PRESET_TRACKS = [
   { id: 1, name: 'Ambient Calm',     duration: '3:24', mood: 'Thư giãn' },

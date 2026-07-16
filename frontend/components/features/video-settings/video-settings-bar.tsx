@@ -5,9 +5,12 @@ import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 import { SelectVeo } from '@/components/ui/veomodel';
 import {
   ASPECT_RATIO_OPTIONS,
+  KIE_MODE_OPTIONS,
+  KIE_VIDEO_QUALITY_OPTIONS,
   LANGUAGE_OPTIONS,
   SCENE_COUNT_OPTIONS,
   useProjectSettings,
+  VIDEO_PROVIDER_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
   VIDEO_TYPE_OPTIONS,
 } from '@/contexts/project-settings-context';
@@ -57,7 +60,20 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
   return (
     <div className={cn('space-y-1.5', className)}>
       <div className="flex gap-2 overflow-x-auto scrollbar-none pb-0.5 -mx-0.5 px-0.5">
-        {hasVeoKey && (
+        <Field label="Nhà cung cấp" htmlFor="header-video-provider" className="min-w-[10rem]">
+          <select
+            id="header-video-provider"
+            value={settings.videoProvider}
+            onChange={(e) => patchSettings({ videoProvider: e.target.value as 'veo' | 'kie' })}
+            className={selectClass}
+          >
+            {VIDEO_PROVIDER_OPTIONS.map(([v, l]) => (
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+        </Field>
+
+        {settings.videoProvider === 'veo' && hasVeoKey && (
           <Field label="Model Veo" htmlFor="header-veo-model" className="min-w-[9rem]">
             <SelectVeo
               id="header-veo-model"
@@ -68,6 +84,22 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
               loading={veoModelsLoading}
               selectClassName={selectClass}
             />
+          </Field>
+        )}
+
+        {settings.videoProvider === 'kie' && (
+          <Field label="Chế độ" htmlFor="header-kie-mode" className="min-w-[8rem]">
+            <select
+              id="header-kie-mode"
+              value={settings.kieMode}
+              onChange={(e) => patchSettings({ kieMode: e.target.value as 'fun' | 'normal' | 'spicy' })}
+              className={selectClass}
+              title={settings.kieMode === 'spicy' ? 'Spicy có thể tạo nội dung nhạy cảm/gợi dục.' : undefined}
+            >
+              {KIE_MODE_OPTIONS.map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
           </Field>
         )}
 
@@ -145,7 +177,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             onChange={(e) => patchSettings({ videoQuality: e.target.value })}
             className={selectClass}
           >
-            {VIDEO_QUALITY_OPTIONS.map(([v, l]) => (
+            {(settings.videoProvider === 'kie' ? KIE_VIDEO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>

@@ -10,6 +10,8 @@ import {
   Download,
   RotateCw,
   SquareCheck,
+  Save,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +21,8 @@ interface SceneToolbarProps {
   errorCount: number;
   allSelected: boolean;
   isRegenerating: boolean;
+  unsavedCount: number;
+  isSaving: boolean;
   onSceneAction: (action: string) => void;
   onBulkAction: (action: string) => void;
   className?: string;
@@ -30,6 +34,8 @@ export function SceneToolbar({
   errorCount,
   allSelected,
   isRegenerating,
+  unsavedCount,
+  isSaving,
   onSceneAction,
   onBulkAction,
   className,
@@ -118,6 +124,15 @@ export function SceneToolbar({
         >
           <Download className="w-3.5 h-3.5" />
           Tải
+        </button>
+        <button
+          onClick={() => onBulkAction('save-videos')}
+          disabled={unsavedCount === 0 || isSaving}
+          title="Lưu video/audio đã tạo lên cloud — tránh mất khi tải lại trang"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-green-500/30 text-green-500 hover:bg-green-500/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          {isSaving ? 'Đang lưu...' : unsavedCount > 0 ? `Lưu video (${unsavedCount})` : 'Lưu video'}
         </button>
         <button
           onClick={() => onBulkAction('refresh')}
