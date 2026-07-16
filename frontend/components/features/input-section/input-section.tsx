@@ -8,16 +8,16 @@ import {
 } from 'lucide-react';
 import { cn, formatCount } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
-import type { SceneGenerationResult } from '@/lib/scenes';
+import type { SceneGenerationResult } from '@/lib/scene/scenes';
 import type { CharacterMasterHandle } from '@/components/features/character-master';
-import type { PresetInput } from '@/lib/preset-scripts';
-import { getApiKey, API_KEY_IDS } from '@/lib/api-keys-store';
-import { getVeoApiKey } from '@/lib/veo-models';
+import type { PresetInput } from '@/lib/preset/preset-scripts';
+import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { getVeoApiKey } from '@/lib/veo/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
-import { logAnalyzePipeline } from '@/lib/pipeline-debug-log';
+import { logAnalyzePipeline } from '@/lib/gemini/pipeline-debug-log';
 import { useProjectSettings } from '@/contexts/project-settings-context';
 import { useVideoLibrary } from '@/contexts/video-library-context';
-import { SCENE_STYLES } from '@/lib/scene-styles';
+import { SCENE_STYLES } from '@/lib/scene/scene-styles';
 
 // ─── Voice Speed config ───────────────────────────────────────────────────────
 const SPEED_OPTIONS = [
@@ -429,16 +429,19 @@ export function InputSection({
     //   return;
     // }
 
-    const veoKey = getVeoApiKey();
-    if (!veoKey) {
+    const isKieProvider = settings.videoProvider === 'kie';
+    const videoApiKey = isKieProvider ? getApiKey(API_KEY_IDS.kie) : getVeoApiKey();
+    if (!videoApiKey) {
       submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
-        submit: 'Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo) để tạo video Veo 3.',
+        submit: isKieProvider
+          ? 'Chưa có Kie.ai API Key — nhập key riêng tại mục API Keys (ô Kie.ai) để tạo video Grok Imagine.'
+          : 'Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo) để tạo video Veo 3.',
       }));
       return;
     }
-    if (!settings.veoModel?.trim()) {
+    if (!isKieProvider && !settings.veoModel?.trim()) {
       submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
@@ -468,7 +471,7 @@ export function InputSection({
     const pipeline = buildAnalyzePipeline({
       // ── API Keys (đọc từ localStorage, user lưu ở mục API Keys) ──
       geminiApiKey: geminiKey,              // Gemini — dùng ngay để gọi /api/gemini/analyze
-      veoApiKey: veoKey,
+      veoApiKey: videoApiKey,
       ttsApiKey: getApiKey(API_KEY_IDS.elevenlabs), // ElevenLabs — voiceover → audio MP3
 
       // ── Nội dung đầu vào (mục 2 — tab đang chọn) ──
@@ -490,6 +493,9 @@ export function InputSection({
 
       voice: settings.voice,
       voiceSpeed,
+
+      provider: settings.videoProvider,
+      kieMode: settings.kieMode,
     });
 
     logAnalyzePipeline(

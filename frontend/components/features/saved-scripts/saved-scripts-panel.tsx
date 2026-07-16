@@ -8,12 +8,12 @@ import {
 import { cn, formatCount } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
 import { ModalOverlay } from '@/components/ui/modal-overlay';
-import type { SavedScript, SavedScriptMeta } from '@/lib/saved-scripts';
+import type { SavedScript, SavedScriptMeta } from '@/lib/saved-scripts/saved-scripts';
 import {
   VIDEO_TYPE_LABELS, LANGUAGE_LABELS, SCENE_COUNT_LABELS,
   ASPECT_RATIO_LABELS, SCENE_DURATION_LABELS, VIDEO_QUALITY_LABELS,
   formatRelativeDate, formatSceneCount, formatAspectRatio, formatSceneDuration,
-} from '@/lib/saved-scripts';
+} from '@/lib/saved-scripts/saved-scripts';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 
 // ─── Validation ───────────────────────────────────────────────────────────────

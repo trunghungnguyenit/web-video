@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
-import type { PresetCharacter } from '@/lib/preset-scripts';
+import type { PresetCharacter } from '@/lib/preset/preset-scripts';
 import {
   type SavedCharacter,
   STYLE_OPTIONS,
@@ -14,8 +14,8 @@ import {
   createEmptyCharacter,
   characterDisplayName,
   validateCharacterFields,
-} from '@/lib/saved-characters';
-import { presetCharactersToSaved } from '@/lib/preset-demo-builder';
+} from '@/lib/character/saved-characters';
+import { presetCharactersToSaved } from '@/lib/preset/preset-demo-builder';
 
 type CharacterFormField = 'name' | 'role' | 'traits' | 'outfit' | 'description';
 

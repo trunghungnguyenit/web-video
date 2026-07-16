@@ -1,17 +1,19 @@
 'use client';
 
-import { useState, useCallback, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useState, useCallback, useRef, useEffect, type Dispatch, type SetStateAction } from 'react';
 import {
-  ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film, Volume2,
+  ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film, Volume2, Save, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
 import { ModalOverlay } from '@/components/ui/modal-overlay';
-import type { VideoScene } from '@/lib/scenes';
-import { formatSceneTimeRange, recalculateSceneTimings } from '@/lib/scenes';
-import { regenerateSceneAssets } from '@/lib/scene-tts';
+import type { VideoScene } from '@/lib/scene/scenes';
+import { formatSceneTimeRange, recalculateSceneTimings } from '@/lib/scene/scenes';
+import { regenerateSceneAssets } from '@/lib/scene/scene-tts';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { toUserMessage } from '@/lib/error-messages';
+import type { VideoLibraryItem } from '@/lib/video-library/video-library';
+import { markSceneStopped } from '@/lib/veo/veo-generation-lock';
 import { SceneToolbar } from './scene-toolbar';
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
@@ -198,9 +200,26 @@ interface SceneGalleryProps {
   veoInput?: VeoInput | null;
   /** Báo timeline (mục 4) focus đúng cảnh đang sửa */
   onSceneFocus?: (sceneId: string) => void;
+  /** Id project đang xem — phân biệt đúng lượt "vừa sinh xong" khi user đổi project */
+  projectId: string;
+  projectStatus: VideoLibraryItem['status'];
+  /** Upload video/audio cảnh (blob:) lên Storage — trả số lượng đã lưu/lỗi */
+  onSaveVideos: () => Promise<{ saved: number; failed: number }>;
+  /** Xoá file Storage của các cảnh vừa bị xoá — gọi cùng lúc với xoá khỏi state */
+  onDeleteScenes: (scenes: VideoScene[]) => void;
 }
 
-export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSceneFocus }: SceneGalleryProps) {
+export function SceneGallery({
+  scenes,
+  onScenesChange,
+  ttsInput,
+  veoInput,
+  onSceneFocus,
+  projectId,
+  projectStatus,
+  onSaveVideos,
+  onDeleteScenes,
+}: SceneGalleryProps) {
   const scenesRef = useRef(scenes);
   scenesRef.current = scenes;
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -208,11 +227,16 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
   const [regeneratingIds, setRegeneratingIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<VideoScene | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSaveReminder, setShowSaveReminder] = useState(false);
 
   const errorScenes = scenes.filter((s) => s.status === 'error');
   const editedScenes = scenes.filter((s) => s.status === 'edited');
   const generatingCount = scenes.filter((s) => s.status === 'generating').length;
   const doneCount = scenes.filter((s) => s.status === 'success').length;
+  const unsavedCount = scenes.filter(
+    (s) => s.status === 'success' && s.videoUrl?.startsWith('blob:') && !s.videoPath,
+  ).length;
   const allSelected = selectedIds.length === scenes.length && scenes.length > 0;
 
   const showToast = (msg: string) => {
@@ -225,6 +249,44 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
   };
+
+  const handleSaveVideos = useCallback(async () => {
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      const { saved, failed } = await onSaveVideos();
+      if (saved === 0 && failed === 0) {
+        showToast('Không có cảnh nào cần lưu.');
+      } else if (failed > 0) {
+        showToast(`Đã lưu ${saved} video — ${failed} cảnh lỗi, thử lại sau.`);
+      } else {
+        showToast(`Đã lưu ${saved} video lên cloud.`);
+        setShowSaveReminder(false);
+      }
+    } catch (err) {
+      showToast(toUserMessage(err, 'Lưu video thất bại — thử lại.'));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [isSaving, onSaveVideos]);
+
+  /** Vừa sinh xong (đúng project đang xem) và còn cảnh chưa lưu — nhắc user lưu ngay */
+  const prevCompletionRef = useRef<{ id: string; status: VideoLibraryItem['status'] }>({
+    id: projectId,
+    status: projectStatus,
+  });
+  useEffect(() => {
+    const prev = prevCompletionRef.current;
+    if (
+      prev.id === projectId
+      && prev.status !== 'completed'
+      && projectStatus === 'completed'
+      && unsavedCount > 0
+    ) {
+      setShowSaveReminder(true);
+    }
+    prevCompletionRef.current = { id: projectId, status: projectStatus };
+  }, [projectId, projectStatus, unsavedCount]);
 
   const regenerateScenes = useCallback(async (
     ids: string[],
@@ -255,17 +317,25 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
       const working: VideoScene = patch ? { ...scene, ...patch, errorMessage: undefined } : { ...scene, errorMessage: undefined };
       try {
         const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput, {
-          onOperationStarted: (operationName) => {
+          onOperationStarted: (operationId) => {
             onScenesChange((prev) =>
               prev.map((s) =>
                 s.id === id
-                  ? { ...s, veoOperationName: operationName, status: 'generating' as const }
+                  ? veoInput.provider === 'kie'
+                    ? { ...s, kieTaskId: operationId, status: 'generating' as const }
+                    : { ...s, veoOperationName: operationId, status: 'generating' as const }
                   : s,
               ),
             );
           },
         });
-        patches.push({ id, scene: { ...rebuilt, errorMessage: undefined } });
+        // regenerateSceneAssets tự bắt lỗi nội bộ (không throw) — status:'error' vẫn
+        // đi qua nhánh này, phải giữ nguyên errorMessage của nó thay vì xoá sạch.
+        patches.push(
+          rebuilt.status === 'error'
+            ? { id, scene: rebuilt, error: rebuilt.errorMessage }
+            : { id, scene: { ...rebuilt, errorMessage: undefined } },
+        );
       } catch (err) {
         const message = toUserMessage(err, 'Tạo lại cảnh thất bại — thử lại.');
         patches.push({ id, scene: { ...working, status: 'error' as const, errorMessage: message }, error: message });
@@ -316,8 +386,20 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
       return;
     }
 
+    if (action === 'stop') {
+      const targets = scenes.filter((s) => selectedIds.includes(s.id) && s.status === 'generating');
+      if (targets.length === 0) {
+        showToast('Không có cảnh nào đang tạo để dừng.');
+        return;
+      }
+      for (const s of targets) markSceneStopped(s.id);
+      showToast(`Đã gửi yêu cầu dừng cho ${targets.length} cảnh — có thể mất vài giây để dừng hẳn.`);
+      return;
+    }
+
     if (action === 'delete' && selectedIds.length > 0) {
       const count = selectedIds.length;
+      onDeleteScenes(scenes.filter((s) => selectedIds.includes(s.id)));
       onScenesChange((prev) => recalculateSceneTimings(prev.filter((s) => !selectedIds.includes(s.id))));
       setSelectedIds([]);
       showToast(`Đã xóa ${count} cảnh`);
@@ -336,9 +418,13 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
     }
     if (action === 'delete-bulk' && selectedIds.length > 0) {
       const count = selectedIds.length;
+      onDeleteScenes(scenes.filter((s) => selectedIds.includes(s.id)));
       onScenesChange((prev) => recalculateSceneTimings(prev.filter((s) => !selectedIds.includes(s.id))));
       showToast(`Đã xóa ${count} cảnh`);
       setSelectedIds([]);
+    }
+    if (action === 'save-videos') {
+      void handleSaveVideos();
     }
   };
 
@@ -390,12 +476,40 @@ export function SceneGallery({ scenes, onScenesChange, ttsInput, veoInput, onSce
         </div>
       </div>
 
+      {showSaveReminder && unsavedCount > 0 && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-green-500/30 bg-green-500/10">
+          <Save className="w-4 h-4 text-green-500 shrink-0" />
+          <p className="flex-1 text-xs text-foreground">
+            Video đã tạo xong — <strong>lưu ngay</strong> để tránh mất khi tải lại trang hoặc thoát ra.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleSaveVideos()}
+            disabled={isSaving}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-600 hover:bg-green-500 text-white transition-colors disabled:opacity-50 shrink-0"
+          >
+            {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            {isSaving ? 'Đang lưu...' : 'Lưu ngay'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowSaveReminder(false)}
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="Đóng thông báo"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <SceneToolbar
         selectedCount={selectedIds.length}
         totalCount={scenes.length}
         errorCount={errorScenes.length + editedScenes.length}
         allSelected={allSelected}
         isRegenerating={isRegenerating}
+        unsavedCount={unsavedCount}
+        isSaving={isSaving}
         onSceneAction={handleSceneAction}
         onBulkAction={handleBulkAction}
       />

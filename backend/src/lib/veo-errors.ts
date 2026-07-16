@@ -11,6 +11,8 @@ export class VeoApiError extends Error {
   }
 }
 
+// Dùng chung cho cả Veo và Kie.ai (kie.service.ts cũng import isFatalVeoMessage).
+// Đồng bộ thủ công với frontend/lib/veo/fatal-error-patterns.ts khi đổi danh sách này.
 const FATAL_PATTERNS = [
   /billing/i,
   /quota/i,
@@ -23,6 +25,7 @@ const FATAL_PATTERNS = [
   /payment/i,
   /suspended/i,
   /disabled/i,
+  /unauthorized/i,
 ];
 
 /** Billing / Quota / key — dừng ngay, không retry */

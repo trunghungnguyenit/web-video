@@ -1,6 +1,6 @@
 // ─── Gom form → geminiInput / veoInput / ttsInput gửi backend ─────────────────
 
-import type { SavedCharacter } from '@/lib/saved-characters';
+import type { SavedCharacter } from '@/lib/character/saved-characters';
 
 export interface PipelineCharacter {
   name: string;
@@ -31,6 +31,10 @@ export interface VeoInput {
   sceneStyle?: string;
   sceneStyleId?: string;
   characters?: PipelineCharacter[];
+  /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
+  provider?: 'veo' | 'kie';
+  /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
+  kieMode?: 'fun' | 'normal' | 'spicy';
 }
 
 export interface TtsInput {
@@ -77,6 +81,8 @@ export interface BuildPipelineParams {
   sceneStyleId: string;
   inputType: 'text' | 'link' | 'image' | 'file';
   characters: PipelineCharacter[];
+  provider?: 'veo' | 'kie';
+  kieMode?: 'fun' | 'normal' | 'spicy';
 }
 
 /** Gom form → 3 payload riêng cho Gemini / Veo / TTS */
@@ -98,10 +104,14 @@ export function buildAnalyzePipeline(params: BuildPipelineParams): AnalyzePipeli
       aspectRatio: params.aspectRatio,
       sceneDuration: params.sceneDuration,
       videoQuality: params.videoQuality,
-      veoModel: params.veoModel || undefined,
+      // veoModel chỉ có ý nghĩa khi provider = 'veo' — bỏ qua khi dùng Grok Imagine
+      // để tránh model Veo cũ còn sót trong settings gây hiểu lầm khi đọc log/debug.
+      veoModel: params.provider === 'kie' ? undefined : (params.veoModel || undefined),
       sceneStyle: params.sceneStyleLabel,
       sceneStyleId: params.sceneStyleId,
       characters,
+      provider: params.provider,
+      kieMode: params.kieMode,
     },
     ttsInput: {
       apiKey: params.ttsApiKey || undefined,

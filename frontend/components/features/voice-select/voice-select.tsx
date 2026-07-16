@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Loader2, Square, Volume2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { VOICE_OPTIONS } from '@/lib/saved-scripts';
-import { getApiKey, API_KEY_IDS } from '@/lib/api-keys-store';
-import { getVoicePreviewText, voicePreviewCacheKey } from '@/lib/voice-preview';
-import { ttsService } from '@/services/tts.service';
+import { VOICE_OPTIONS } from '@/lib/saved-scripts/saved-scripts';
+import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { getVoicePreviewText, voicePreviewCacheKey } from '@/lib/tts/voice-preview';
+import { ttsService } from '@/services/tts/tts.service';
 import { toUserMessage } from '@/lib/error-messages';
 
 interface VoiceSelectProps {

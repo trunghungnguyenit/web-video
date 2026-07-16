@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { PresetInput } from '@/lib/preset-scripts';
+import type { PresetInput } from '@/lib/preset/preset-scripts';
 import {
   ASPECT_RATIO_OPTIONS,
   LANGUAGE_OPTIONS,
@@ -19,7 +19,7 @@ import {
   VIDEO_TYPE_OPTIONS,
   getSceneDurationOptions,
   normalizeSceneDurationSetting,
-} from '@/lib/saved-scripts';
+} from '@/lib/saved-scripts/saved-scripts';
 import { useDefaultVeoModel } from '@/hooks/use-veo-models';
 import { useVeoModels } from '@/contexts/veo-models-context';
 
@@ -34,6 +34,10 @@ export interface VideoSettings {
   veoModel: string;
   voiceSpeed: number;
   sceneStyle: string;
+  /** Nhà cung cấp sinh video — 'veo' (Google Veo 3) hoặc 'kie' (Grok Imagine) */
+  videoProvider: 'veo' | 'kie';
+  /** Chế độ nội dung Grok Imagine — chỉ áp dụng khi videoProvider = 'kie' */
+  kieMode: 'fun' | 'normal' | 'spicy';
 }
 
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
@@ -47,7 +51,38 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   veoModel: '',
   voiceSpeed: 1,
   sceneStyle: 'cinematic',
+  videoProvider: 'veo',
+  kieMode: 'normal',
 };
+
+export const VIDEO_PROVIDER_OPTIONS: [string, string][] = [
+  ['veo', 'Veo 3 (Google)'],
+  ['kie', 'Grok Imagine (kie.ai)'],
+];
+
+export const KIE_MODE_OPTIONS: [string, string][] = [
+  ['normal', 'Normal'],
+  ['fun', 'Fun'],
+  ['spicy', 'Spicy ⚠️'],
+];
+
+/** Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p — không có 1080p */
+export const KIE_VIDEO_QUALITY_OPTIONS: [string, string][] = [
+  ['480p', '480p – Mặc định'],
+  ['720p', '720p – Cao hơn'],
+];
+
+/**
+ * Clamp videoQuality theo provider — Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p:
+ * sang 'kie' mà quality không hợp lệ → mặc định 480p; quay lại 'veo' mà đang 480p
+ * (không hợp lệ với Veo) → về 720p. Dùng chung cho toolbar chính và modal tạo/sửa video.
+ */
+export function resolveVideoQualityForProvider(quality: string, provider: 'veo' | 'kie'): string {
+  if (provider === 'kie') {
+    return quality === '480p' || quality === '720p' ? quality : '480p';
+  }
+  return quality === '480p' ? '720p' : quality;
+}
 
 interface ProjectSettingsContextValue {
   settings: VideoSettings;
@@ -116,6 +151,14 @@ export function ProjectSettingsProvider({
     });
   }, [settings.videoQuality]);
 
+  // Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p — đổi provider thì clamp lại videoQuality
+  useEffect(() => {
+    setSettings((prev) => {
+      const next = resolveVideoQualityForProvider(prev.videoQuality, prev.videoProvider);
+      return next === prev.videoQuality ? prev : { ...prev, videoQuality: next };
+    });
+  }, [settings.videoProvider]);
+
   const applyFromPreset = useCallback((input: PresetInput) => {
     setSettings((prev) => ({
       ...prev,
@@ -132,6 +175,7 @@ export function ProjectSettingsProvider({
       veoModel: input.veoModel ?? '',
       voiceSpeed: input.voiceSpeed ?? prev.voiceSpeed,
       sceneStyle: input.sceneStyleId ?? prev.sceneStyle,
+      // Preset không mang provider/kieMode — giữ nguyên lựa chọn hiện tại của user
     }));
   }, []);
 

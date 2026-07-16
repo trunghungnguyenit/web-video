@@ -38,6 +38,22 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     test: /invalid login credentials/i,
     message: 'Không đăng nhập được — thử lại hoặc dùng tài khoản Google khác.',
   },
+  {
+    test: /insufficient.*balance/i,
+    message: 'Tài khoản kie.ai đã hết số dư — nạp thêm tại kie.ai/api-key.',
+  },
+  {
+    test: /rate limit|too many requests/i,
+    message: 'kie.ai đang giới hạn tần suất request — chờ một lát rồi thử lại.',
+  },
+  {
+    test: /resource not found/i,
+    message: 'Không tìm thấy tài nguyên trên kie.ai (task hoặc model không hợp lệ).',
+  },
+  {
+    test: /parameter validation failed|invalid request parameters/i,
+    message: 'Tham số gửi lên kie.ai không hợp lệ — thử đổi mô tả cảnh hoặc cài đặt.',
+  },
 ];
 
 /** Message quá dài hoặc chứa dấu hiệu lỗi kỹ thuật (stack, code lạ) — không nên hiện nguyên văn */

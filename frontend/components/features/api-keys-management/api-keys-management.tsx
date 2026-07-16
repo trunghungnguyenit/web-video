@@ -6,10 +6,10 @@ import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
 import { SecretField } from '@/components/ui/secret-field';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
-import { getApiKey, setApiKey } from '@/lib/api-keys-store';
+import { getApiKey, setApiKey } from '@/lib/api-keys/api-keys-store';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
-import { fetchRemoteApiKeys, saveRemoteApiKey } from '@/lib/supabase/api-keys-remote';
+import { fetchRemoteApiKeys, saveRemoteApiKey } from '@/lib/api-keys/api-keys-remote';
 import { toUserMessage } from '@/lib/error-messages';
 
 type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
@@ -17,7 +17,7 @@ type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
 interface ApiKeyEntry {
   id: string;
   name: string;
-  service: 'gemini' | 'veo' | 'tts';
+  service: 'gemini' | 'veo' | 'tts' | 'kie';
   placeholder: string;
   value: string;
   status: KeyStatus;
@@ -62,12 +62,22 @@ const INITIAL_KEYS: ApiKeyEntry[] = [
     status: 'disconnected',
     description: 'Tạo giọng đọc từ voiceover — key cần bật quyền Text to Speech trên elevenlabs.io',
   },
+  {
+    id: 'kie',
+    name: 'Kie.ai API Key (Grok Imagine)',
+    service: 'kie',
+    placeholder: 'Bearer token từ kie.ai/api-key',
+    value: '',
+    status: 'disconnected',
+    description: 'Tạo video cảnh bằng Grok Imagine — chọn "Nhà cung cấp: Grok Imagine" trong cài đặt để dùng',
+  },
 ];
 
 const SERVICE_BADGE: Record<ApiKeyEntry['service'], { label: string; color: string }> = {
   gemini: { label: 'Gemini', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
   veo:    { label: 'Veo',    color: 'text-violet-400 bg-violet-500/10 border-violet-500/30' },
   tts:    { label: 'TTS',    color: 'text-teal-400 bg-teal-500/10 border-teal-500/30' },
+  kie:    { label: 'Kie.ai', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
 };
 
 async function verifyKey(_id: string, value: string): Promise<{ ok: boolean; msg?: string }> {
