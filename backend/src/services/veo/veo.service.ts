@@ -24,8 +24,10 @@ interface LongRunningResponse {
 export interface GenerateSceneVideoParams {
   apiKey: string;
   prompt: string;
-  veoInput: Pick<VeoInput, 'aspectRatio' | 'videoQuality' | 'sceneDuration' | 'veoModel'>;
+  veoInput: Pick<VeoInput, 'aspectRatio' | 'videoQuality' | 'sceneDuration' | 'veoModel' | 'characters'>;
   durationSeconds: number;
+  /** Ảnh nguồn riêng cho đúng cảnh này (tab "Từ hình ảnh") — ưu tiên hơn ảnh nhân vật/master cast */
+  image?: { base64: string; mimeType: string };
 }
 
 export interface PollOperationResult {
@@ -103,6 +105,24 @@ export async function startVideoGeneration(params: GenerateSceneVideoParams): Pr
   const aspectRatio = resolveVeoAspectRatio(params.veoInput.aspectRatio);
   const durationSeconds = resolveVeoDurationSeconds(params.durationSeconds, quality);
 
+  // Ưu tiên ảnh nguồn riêng của cảnh (tab "Từ hình ảnh"). Nếu không có, fallback
+  // sang ảnh nhân vật/master cast đầu tiên tìm thấy — best-effort, Veo dùng ảnh
+  // này làm gợi ý, không đảm bảo giống 100% qua các cảnh có góc máy khác nhau.
+  const characterImage = params.veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
+
+  const instance: { prompt: string; image?: { bytesBase64Encoded: string; mimeType: string } } = { prompt };
+  if (params.image) {
+    instance.image = {
+      bytesBase64Encoded: params.image.base64,
+      mimeType: params.image.mimeType,
+    };
+  } else if (characterImage?.imageBase64 && characterImage.imageMimeType) {
+    instance.image = {
+      bytesBase64Encoded: characterImage.imageBase64,
+      mimeType: characterImage.imageMimeType,
+    };
+  }
+
   return withVeoRetry('Veo start', async () => {
     const startRes = await fetch(`${BASE_URL}/models/${model}:predictLongRunning`, {
       method: 'POST',
@@ -111,7 +131,7 @@ export async function startVideoGeneration(params: GenerateSceneVideoParams): Pr
         'X-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        instances: [{ prompt }],
+        instances: [instance],
         parameters: {
           aspectRatio,
           resolution,

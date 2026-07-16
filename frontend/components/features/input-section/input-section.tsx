@@ -31,7 +31,7 @@ const SPEED_OPTIONS = [
 // ─── Scene Style config — dùng chung frontend/lib/scene-styles.ts ────────────
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type TabId = 'text' | 'link' | 'image' | 'file';
+export type TabId = 'text' | 'link' | 'image' | 'file';
 
 const tabs: { id: TabId; icon: typeof Type; label: string; desc: string }[] = [
   { id: 'text',  icon: Type,  label: 'Tự nhập nội dung', desc: 'Nhập từ bàn phím' },
@@ -43,6 +43,7 @@ const tabs: { id: TabId; icon: typeof Type; label: string; desc: string }[] = [
 // ─── Validation limits ────────────────────────────────────────────────────────
 const MAX_CHARS         = 5000;
 const MIN_CONTENT_CHARS = 20;
+const MIN_LINK_DESCRIPTION_CHARS = 20;
 const MAX_IMAGE_MB      = 10;
 const MAX_IMAGES        = 12;
 const MAX_FILE_MB       = 20;
@@ -63,10 +64,9 @@ const SUPPORTED_HOSTS = ['youtube.com', 'youtu.be', 'tiktok.com', 'vimeo.com', '
 interface FormErrors {
   content?: string;
   linkUrl?: string;
+  linkDescription?: string;
   upload?: string;
   submit?: string;
-  /** Lỗi prompt theo id ảnh */
-  imagePrompts?: Record<string, string>;
   /** Lỗi prompt tổng tab ảnh */
   imageMasterBrief?: string;
 }
@@ -75,6 +75,8 @@ interface FormState {
   activeTab: TabId;
   content: string;
   linkUrl: string;
+  /** Mô tả nội dung/phong cách video — Gemini không tự xem được video qua URL nên cần mô tả này để phân tích */
+  linkDescription: string;
   dragOver: boolean;
   isSubmitting: boolean;
   submitted: boolean;
@@ -102,6 +104,8 @@ export interface InputSectionProps {
   onContentChange?: (content: string) => void;
   /** Ref mục 1 — lấy danh sách nhân vật khi gửi Gemini */
   characterMasterRef?: RefObject<CharacterMasterHandle | null>;
+  /** Báo tab đang chọn (text/link/image/file) lên component cha — dùng để ẩn/hiện Character Master */
+  onActiveTabChange?: (tab: TabId) => void;
 }
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
@@ -138,6 +142,19 @@ function validateUrl(raw: string): string | undefined {
   return undefined;
 }
 
+/** Gemini không tự xem được video qua URL — mô tả này là nguồn nội dung chính để phân tích kịch bản */
+function validateLinkDescription(raw: string): string | undefined {
+  const s = raw.trim();
+  if (!s) return 'Vui lòng mô tả nội dung & phong cách video để AI phân tích (Gemini không tự xem được video qua link).';
+  if (s.length < MIN_LINK_DESCRIPTION_CHARS) {
+    return `Mô tả quá ngắn — cần ít nhất ${MIN_LINK_DESCRIPTION_CHARS} ký tự (hiện tại: ${s.length}).`;
+  }
+  if (s.length > MAX_CHARS) {
+    return `Mô tả quá dài — tối đa ${formatCount(MAX_CHARS)} ký tự (hiện tại: ${formatCount(s.length)}).`;
+  }
+  return undefined;
+}
+
 const MIN_IMAGE_PROMPT_CHARS = 10;
 
 interface UploadedImageItem {
@@ -159,33 +176,18 @@ function revokeImagePreview(url: string | null) {
   if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
 }
 
-function validateImagePrompt(raw: string, optional = false): string | undefined {
-  const s = raw.trim();
-  if (!s) return optional ? undefined : 'Nhập prompt mô tả cảnh muốn tạo từ ảnh này.';
-  if (s.length < MIN_IMAGE_PROMPT_CHARS) {
-    return `Prompt quá ngắn — cần ít nhất ${MIN_IMAGE_PROMPT_CHARS} ký tự (hiện tại: ${s.length}).`;
-  }
-  return undefined;
-}
-
-/** Prompt tổng — bắt buộc đủ dài nếu người dùng nhập; rỗng thì hợp lệ (dùng prompt từng ảnh) */
+/** Prompt tổng — áp dụng chung cho mọi ảnh đã tải lên, bắt buộc phải nhập */
 function validateImageMasterBrief(raw: string): string | undefined {
   const s = raw.trim();
-  if (!s) return undefined;
+  if (!s) return 'Vui lòng nhập Prompt tổng — mô tả chung áp dụng cho mọi ảnh.';
   if (s.length < MIN_IMAGE_PROMPT_CHARS) {
     return `Prompt tổng quá ngắn — cần ít nhất ${MIN_IMAGE_PROMPT_CHARS} ký tự (hiện tại: ${s.length}).`;
   }
   return undefined;
 }
 
-function hasValidImageMasterBrief(raw: string): boolean {
-  return raw.trim().length >= MIN_IMAGE_PROMPT_CHARS;
-}
-
-function buildImagePipelineContent(images: UploadedImageItem[], masterBrief?: string): string {
-  const header = masterBrief?.trim()
-    || `Tạo video từ ${images.length} hình ảnh. Mỗi ảnh tương ứng một cảnh — dùng VIDEO PROMPT làm hướng dẫn visual.`;
-  const lines = [header, ''];
+function buildImagePipelineContent(images: UploadedImageItem[], masterBrief: string): string {
+  const lines = [masterBrief.trim(), ''];
 
   images.forEach((img, i) => {
     const heading = img.label || `CẢNH ${i + 1}`;
@@ -194,13 +196,10 @@ function buildImagePipelineContent(images: UploadedImageItem[], masterBrief?: st
     lines.push('');
     lines.push('VIDEO PROMPT:');
     const scenePrompt = img.prompt.trim();
-    if (scenePrompt) {
-      lines.push(scenePrompt);
-    } else if (masterBrief?.trim()) {
-      lines.push(
-        'Áp dụng PROMPT TỔNG ở đầu kịch bản cho cảnh này — phân tích ảnh đính kèm và tạo mô tả visual phù hợp, đồng nhất phong cách với các cảnh khác.',
-      );
-    }
+    lines.push(
+      scenePrompt
+        || 'Áp dụng PROMPT TỔNG ở đầu kịch bản cho cảnh này — phân tích ảnh đính kèm và tạo mô tả visual phù hợp, đồng nhất phong cách với các cảnh khác.',
+    );
     if (img.voiceHint?.trim()) {
       lines.push('');
       lines.push('VOICE (TTS):');
@@ -220,6 +219,22 @@ function validateImageFile(file: File): string | undefined {
     return `File "${file.name}" quá lớn (${sizeMB.toFixed(1)} MB) — tối đa ${MAX_IMAGE_MB} MB.`;
   }
   return undefined;
+}
+
+/** Đọc file ảnh thành base64 thuần (không kèm prefix data URL) — gửi Veo làm ảnh mồi cho đúng cảnh */
+function fileToBase64(file: File): Promise<{ base64: string; mimeType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      if (typeof dataUrl !== 'string') { reject(new Error('Không đọc được file ảnh.')); return; }
+      const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+      if (!match) { reject(new Error('Không đọc được file ảnh.')); return; }
+      resolve({ mimeType: match[1], base64: match[2] });
+    };
+    reader.onerror = () => reject(new Error('Không đọc được file ảnh.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function validateDocumentFile(file: File | null): string | undefined {
@@ -242,6 +257,7 @@ export function InputSection({
   presetData, presetKey, onSaveScript,
   focusContentKey, focusVoiceSpeedKey, focusSceneStyleKey, onScenesGenerated,
   characterMasterRef, projectId, initialContent = '', onContentChange,
+  onActiveTabChange,
 }: InputSectionProps = {}) {
   const fileInputRef  = useRef<HTMLInputElement>(null);
   const textareaRef   = useRef<HTMLTextAreaElement>(null);
@@ -249,7 +265,7 @@ export function InputSection({
   const sceneStyleRef = useRef<HTMLDivElement>(null);
 
   const [form, setForm] = useState<FormState>({
-    activeTab: 'text', content: initialContent, linkUrl: '',
+    activeTab: 'text', content: initialContent, linkUrl: '', linkDescription: '',
     dragOver: false, isSubmitting: false, submitted: false,
   });
   const [errors, setErrors] = useState<FormErrors>({});
@@ -276,8 +292,16 @@ export function InputSection({
     }
   }, [isItemBusy]);
 
+  useEffect(() => {
+    onActiveTabChange?.(form.activeTab);
+  }, [form.activeTab, onActiveTabChange]);
+
   const [showVoiceSpeed, setShowVoiceSpeed] = useState(false);
   const [showSceneStyle, setShowSceneStyle] = useState(false);
+  /** Đang ở chế độ tự nhập phong cách (không khớp preset nào có sẵn) */
+  const [customStyleMode, setCustomStyleMode] = useState(
+    () => Boolean(settings.sceneStyle) && !SCENE_STYLES.some((s) => s.id === settings.sceneStyle),
+  );
 
   // ── Preset apply ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -363,6 +387,8 @@ export function InputSection({
     if (form.activeTab === 'link') {
       const msg = validateUrl(form.linkUrl);
       if (msg) e.linkUrl = msg;
+      const descMsg = validateLinkDescription(form.linkDescription);
+      if (descMsg) e.linkDescription = descMsg;
     }
     if (form.activeTab === 'image') {
       const masterMsg = validateImageMasterBrief(imageMasterBrief);
@@ -371,11 +397,9 @@ export function InputSection({
       if (uploadedImages.length === 0) {
         e.upload = 'Vui lòng tải lên ít nhất một hình ảnh.';
       } else {
-        const useMasterOnly = hasValidImageMasterBrief(imageMasterBrief);
-        const promptErrors: Record<string, string> = {};
         for (const img of uploadedImages) {
           if (!img.file) {
-            e.upload = `${img.label ?? 'Một cảnh'} chưa có ảnh — hãy tải hình minh họa cho cảnh này.`;
+            e.upload = `${img.label ?? 'Một ảnh'} chưa có ảnh — hãy tải hình lên.`;
             break;
           }
           const fileMsg = validateImageFile(img.file);
@@ -383,19 +407,6 @@ export function InputSection({
             e.upload = fileMsg;
             break;
           }
-          const promptMsg = validateImagePrompt(img.prompt, useMasterOnly);
-          if (promptMsg) promptErrors[img.id] = promptMsg;
-        }
-        if (!e.upload && Object.keys(promptErrors).length > 0) {
-          e.imagePrompts = promptErrors;
-        }
-        if (
-          !e.upload
-          && !useMasterOnly
-          && uploadedImages.every((img) => !img.prompt.trim())
-          && !imageMasterBrief.trim()
-        ) {
-          e.imageMasterBrief = 'Nhập Prompt tổng hoặc prompt cho từng ảnh.';
         }
       }
     }
@@ -452,12 +463,15 @@ export function InputSection({
 
     setErrors((p) => ({ ...p, submit: undefined }));
     const submitProjectId = projectId ?? 'default';
+    const isImageTab = form.activeTab === 'image';
+    // Mỗi ảnh = đúng 1 cảnh — ép Gemini sinh đúng số cảnh bằng số ảnh đã tải lên
+    const effectiveSceneCount = isImageTab ? String(uploadedImages.length) : settings.sceneCount;
 
     const contentForScenes =
       form.activeTab === 'text'
         ? form.content
         : form.activeTab === 'link'
-          ? `Nội dung phân tích từ video: ${form.linkUrl.trim()}`
+          ? `Video tham khảo: ${form.linkUrl.trim()}\n\nMô tả nội dung & phong cách video (do người dùng cung cấp — dùng làm nguồn chính để phân tích):\n${form.linkDescription.trim()}`
           : form.activeTab === 'image' && uploadedImages.length > 0
             ? buildImagePipelineContent(uploadedImages, imageMasterBrief)
             : uploadedFile
@@ -480,7 +494,7 @@ export function InputSection({
 
       // ── Cài đặt kịch bản → geminiInput ──
       language: settings.language,
-      sceneCount: settings.sceneCount,
+      sceneCount: effectiveSceneCount,
       videoType: settings.videoType,
       characters,
 
@@ -511,12 +525,18 @@ export function InputSection({
         : undefined,
     );
 
+    // Tab ảnh — đọc từng file thành base64 để gắn đúng ảnh[i] vào cảnh[i] khi gửi Veo
+    const sceneImages = isImageTab
+      ? await Promise.all(uploadedImages.map((img) => (img.file ? fileToBase64(img.file) : null)))
+      : undefined;
+
     const started = startAnalyze(submitProjectId, {
       pipeline,
       sourceContent: contentForScenes,
-      sceneCount: settings.sceneCount,
+      sceneCount: effectiveSceneCount,
       videoType: settings.videoType,
       language: settings.language,
+      sceneImages,
     });
 
     if (!started) {
@@ -665,15 +685,7 @@ export function InputSection({
       if (target) revokeImagePreview(target.previewUrl);
       return prev.filter((img) => img.id !== id);
     });
-    setErrors((p) => {
-      const nextPrompts = p.imagePrompts ? { ...p.imagePrompts } : undefined;
-      if (nextPrompts) delete nextPrompts[id];
-      return {
-        ...p,
-        upload: undefined,
-        imagePrompts: nextPrompts && Object.keys(nextPrompts).length > 0 ? nextPrompts : undefined,
-      };
-    });
+    setErrors((p) => ({ ...p, upload: undefined }));
   };
 
   const updateImageMasterBrief = (value: string) => {
@@ -681,21 +693,6 @@ export function InputSection({
     if (errors.imageMasterBrief) {
       setErrors((p) => ({ ...p, imageMasterBrief: undefined }));
     }
-  };
-
-  const updateImagePrompt = (id: string, prompt: string) => {
-    setUploadedImages((prev) =>
-      prev.map((img) => (img.id === id ? { ...img, prompt } : img)),
-    );
-    setErrors((p) => {
-      if (!p.imagePrompts?.[id]) return p;
-      const next = { ...p.imagePrompts };
-      delete next[id];
-      return {
-        ...p,
-        imagePrompts: Object.keys(next).length > 0 ? next : undefined,
-      };
-    });
   };
 
   const acceptFile = (file: File) => {
@@ -745,7 +742,6 @@ export function InputSection({
   const currentStyle = SCENE_STYLES.find((s) => s.id === sceneStyle);
   const currentSpeed = SPEED_OPTIONS.find((o) => o.value === voiceSpeed);
   const speedPercent = ((voiceSpeed - 0.75) / (2 - 0.75)) * 100;
-  const imageMasterReady = hasValidImageMasterBrief(imageMasterBrief);
 
   return (
     <section
@@ -881,25 +877,49 @@ export function InputSection({
                 Hỗ trợ: YouTube, TikTok, Vimeo, Facebook.
               </p>
             )}
+
+            <div className="mt-3">
+              <label className="field-label block mb-1.5">Mô tả nội dung & phong cách video</label>
+              <textarea
+                value={form.linkDescription}
+                aria-invalid={!!errors.linkDescription}
+                aria-describedby={errors.linkDescription ? 'link-description-error' : 'link-description-hint'}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, linkDescription: e.target.value }));
+                  if (errors.linkDescription) setErrors((p) => ({ ...p, linkDescription: undefined }));
+                }}
+                rows={5}
+                maxLength={MAX_CHARS}
+                placeholder="Video kể về... Phong cách hình ảnh (VD: anime, hoạt hình 2D...). Nhân vật chính là..."
+                className={cn(
+                  'w-full px-4 py-3 bg-card border rounded-lg text-foreground placeholder-muted-foreground resize-y min-h-[110px] focus:outline-none transition-colors',
+                  errors.linkDescription
+                    ? 'border-destructive focus:border-destructive focus:ring-1 focus:ring-destructive/30'
+                    : 'border-border focus:border-primary/50 focus:ring-1 focus:ring-primary/20',
+                )}
+              />
+              {errors.linkDescription ? (
+                <FieldError id="link-description-error" className="gap-1 mt-1.5">{errors.linkDescription}</FieldError>
+              ) : (
+                <p id="link-description-hint" className="text-xs text-muted-foreground mt-2">
+                  Gemini không tự xem được video qua link — mô tả càng chi tiết, kịch bản sinh ra càng sát với video gốc.
+                </p>
+              )}
+            </div>
           </div>
         )}
 
         {form.activeTab === 'image' && (
           <div className="space-y-3">
             <div className="rounded-xl border border-border bg-card/40 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <label htmlFor="image-master-brief" className="text-xs font-semibold text-foreground">
-                  Prompt tổng
-                </label>
-                <span className="text-[10px] text-muted-foreground">
-                  {imageMasterReady ? 'Đã đủ — có thể bỏ qua prompt từng ảnh' : 'Tuỳ chọn'}
-                </span>
-              </div>
+              <label htmlFor="image-master-brief" className="text-xs font-semibold text-foreground">
+                Prompt tổng
+              </label>
               <textarea
                 id="image-master-brief"
                 value={imageMasterBrief}
                 onChange={(e) => updateImageMasterBrief(e.target.value)}
-                placeholder="Mô tả chung cho cả video: phong cách, bối cảnh, nhân vật, tone màu, lời kể... Nếu điền đủ, bạn không cần nhập prompt riêng cho từng ảnh."
+                placeholder="Mô tả chung áp dụng cho mọi ảnh: phong cách, bối cảnh, nhân vật, tone màu, lời kể..."
                 rows={4}
                 className={cn(
                   'w-full resize-y min-h-[88px] px-3 py-2 text-xs rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
@@ -915,7 +935,7 @@ export function InputSection({
                 </p>
               ) : (
                 <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  Dùng khi nhiều ảnh cùng một chủ đề. Prompt riêng từng ảnh vẫn có thể thêm để tinh chỉnh từng cảnh.
+                  Mỗi ảnh tương ứng 1 cảnh — Gemini áp dụng đúng prompt này để phân tích & tạo mô tả visual cho từng ảnh.
                 </p>
               )}
             </div>
@@ -983,34 +1003,10 @@ export function InputSection({
                         </button>
                       </div>
 
-                      <textarea
-                        value={img.prompt}
-                        onChange={(e) => updateImagePrompt(img.id, e.target.value)}
-                        placeholder={
-                          imageMasterReady
-                            ? 'VIDEO PROMPT riêng (tuỳ chọn) — bỏ trống để dùng Prompt tổng'
-                            : 'VIDEO PROMPT — mô tả cảnh, chuyển động, góc quay...'
-                        }
-                        rows={3}
-                        className={cn(
-                          'w-full resize-y min-h-[72px] px-3 py-2 text-xs rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
-                          errors.imagePrompts?.[img.id]
-                            ? 'border-destructive/60 focus:ring-destructive/30'
-                            : 'border-border focus:ring-primary/30',
-                        )}
-                      />
-
                       {img.voiceHint && (
                         <p className="text-[10px] text-muted-foreground leading-relaxed border-l-2 border-primary/30 pl-2">
                           <span className="font-semibold text-primary/90">VOICE (TTS): </span>
                           {img.voiceHint}
-                        </p>
-                      )}
-
-                      {errors.imagePrompts?.[img.id] && (
-                        <p className="flex items-start gap-1 text-[11px] text-destructive leading-relaxed">
-                          <AlertCircle className="w-3 h-3 shrink-0 mt-0.5" />
-                          <span>{errors.imagePrompts[img.id]}</span>
                         </p>
                       )}
                     </div>
@@ -1183,8 +1179,17 @@ export function InputSection({
               <div className="text-left min-w-0">
                 <span className="block text-xs font-semibold text-foreground">Phong cách cảnh (Visual Style)</span>
                 <span className="block text-[10px] text-muted-foreground mt-0.5 truncate">
-                  Hiện tại: <span className="text-primary font-medium">{currentStyle?.emoji} {currentStyle?.label}</span>
-                  {' '}— {currentStyle?.desc}
+                  {currentStyle ? (
+                    <>
+                      Hiện tại: <span className="text-primary font-medium">{currentStyle.emoji} {currentStyle.label}</span>
+                      {' '}— {currentStyle.desc}
+                    </>
+                  ) : (
+                    <>
+                      Hiện tại: <span className="text-primary font-medium">✍️ {sceneStyle || 'Tự nhập'}</span>
+                      {' '}— Phong cách tùy chỉnh
+                    </>
+                  )}
                 </span>
               </div>
             </div>
@@ -1197,12 +1202,12 @@ export function InputSection({
             <div id="scene-style-panel" className="px-4 py-4 border-t border-border/60 bg-background/20">
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                 {SCENE_STYLES.map((style) => {
-                  const isActive = sceneStyle === style.id;
+                  const isActive = !customStyleMode && sceneStyle === style.id;
                   return (
                     <button
                       key={style.id}
                       type="button"
-                      onClick={() => patchSettings({ sceneStyle: style.id })}
+                      onClick={() => { setCustomStyleMode(false); patchSettings({ sceneStyle: style.id }); }}
                       aria-pressed={isActive}
                       className={cn(
                         'flex flex-col items-start gap-1 p-3 rounded-xl border text-left transition-all',
@@ -1219,7 +1224,41 @@ export function InputSection({
                     </button>
                   );
                 })}
+
+                {/* Phong cách tùy chỉnh — khi không có preset nào phù hợp */}
+                <button
+                  type="button"
+                  onClick={() => { setCustomStyleMode(true); patchSettings({ sceneStyle: '' }); }}
+                  aria-pressed={customStyleMode}
+                  className={cn(
+                    'flex flex-col items-start gap-1 p-3 rounded-xl border text-left transition-all',
+                    customStyleMode
+                      ? 'bg-primary/10 border-primary/50 ring-1 ring-primary/25'
+                      : 'bg-background border-border hover:border-primary/30 hover:bg-muted/20',
+                  )}
+                >
+                  <Plus className={cn('w-4 h-4', customStyleMode ? 'text-primary' : 'text-muted-foreground')} />
+                  <span className={cn('text-xs font-semibold leading-tight', customStyleMode ? 'text-primary' : 'text-foreground')}>
+                    Khác — tự nhập
+                  </span>
+                  <span className="text-[10px] text-muted-foreground leading-tight">Mô tả phong cách riêng</span>
+                </button>
               </div>
+
+              {customStyleMode && (
+                <div className="mt-3">
+                  <label className="field-label block mb-1.5">Mô tả phong cách hình ảnh</label>
+                  <input
+                    type="text"
+                    value={sceneStyle}
+                    onChange={(e) => patchSettings({ sceneStyle: e.target.value })}
+                    placeholder="VD: Stop-motion clay, ánh sáng neon..."
+                    maxLength={100}
+                    autoFocus
+                    className="input-base"
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -4,9 +4,9 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { Sidebar, MobileNav, type AppView, type CreativeToolId } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
-import { InputSection } from '@/components/features/input-section';
+import { InputSection, type TabId } from '@/components/features/input-section';
 import { CharacterMaster, type CharacterMasterHandle } from '@/components/features/character-master';
-import { SceneGallery } from '@/components/features/scene-gallery';
+import { SceneGallery, MasterCastPanel } from '@/components/features/scene-gallery';
 import { TimelineEditor } from '@/components/features/timeline-editor';
 import { ApiKeysManagement } from '@/components/features/api-keys-management';
 import { SettingsPanel } from '@/components/features/settings/settings-panel';
@@ -94,11 +94,14 @@ function VideoDetailView({
     applyPresetToActive,
     applyPresetAsDemo,
     updateActiveItem,
+    confirmLinkGeneration,
     saveActiveSceneVideos,
     deleteSceneStorageAssets,
   } = useVideoLibrary();
 
   const [applyKey, setApplyKey] = useState(0);
+  /** Chỉ hiện khung Character Master khi tạo video từ tab "Tự nhập nội dung" (text) */
+  const [activeInputTab, setActiveInputTab] = useState<TabId>('text');
 
   const handleContentChange = useCallback((inputContent: string) => {
     updateActiveItem({ inputContent });
@@ -173,14 +176,16 @@ function VideoDetailView({
               </div>
             )}
 
-            <div ref={characterSectionRef}>
-              <CharacterMaster
-                key={activeItem.id}
-                ref={characterMasterRef}
-                initialCharacters={activeItem.characters}
-                onCharactersChange={handleCharactersChange}
-              />
-            </div>
+            {activeInputTab === 'text' && (
+              <div ref={characterSectionRef}>
+                <CharacterMaster
+                  key={activeItem.id}
+                  ref={characterMasterRef}
+                  initialCharacters={activeItem.characters}
+                  onCharactersChange={handleCharactersChange}
+                />
+              </div>
+            )}
 
             <div ref={inputSectionRef}>
               <InputSection
@@ -195,6 +200,7 @@ function VideoDetailView({
                 focusSceneStyleKey={focusSceneStyleKey}
                 focusContentKey={focusContentKey}
                 characterMasterRef={characterMasterRef}
+                onActiveTabChange={setActiveInputTab}
               />
             </div>
 
@@ -219,7 +225,16 @@ function VideoDetailView({
               </div>
             )}
 
-            <div ref={sceneSectionRef}>
+            <div ref={sceneSectionRef} className="space-y-4">
+              {activeItem.inputType === 'link' && (
+                <MasterCastPanel
+                  prompt={activeItem.masterCastPrompt ?? ''}
+                  onPromptChange={(masterCastPrompt) => updateActiveItem({ masterCastPrompt })}
+                  imageDataUrl={activeItem.masterCastImageDataUrl}
+                  onImageChange={(masterCastImageDataUrl) => updateActiveItem({ masterCastImageDataUrl })}
+                  onConfirm={activeItem.pendingLinkReview ? () => confirmLinkGeneration(activeItem.id) : undefined}
+                />
+              )}
               <SceneGallery
                 scenes={activeItem.scenes}
                 onScenesChange={setActiveScenes}
@@ -230,6 +245,7 @@ function VideoDetailView({
                 onSaveVideos={saveActiveSceneVideos}
                 onDeleteScenes={deleteSceneStorageAssets}
                 onSceneFocus={setActiveTimelineFocus}
+                layout={activeItem.inputType === 'link' ? 'rows' : 'grid'}
               />
             </div>
 

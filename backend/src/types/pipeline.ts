@@ -6,6 +6,9 @@ export interface PipelineCharacter {
   outfit: string;
   description: string;
   style: string;
+  /** Ảnh tham chiếu (base64, không kèm prefix data URL) — gửi làm ảnh mồi cho Veo giữ nhất quán ngoại hình qua các cảnh */
+  imageBase64?: string;
+  imageMimeType?: string;
 }
 
 /** Bước 1 — Gemini: phân tích nội dung → kịch bản JSON */
@@ -61,6 +64,8 @@ export interface GeminiScene {
 export interface GeminiVideoScript {
   title: string;
   scenes: GeminiScene[];
+  /** Prompt mô tả toàn bộ dàn nhân vật — chỉ có khi geminiInput.inputType === 'link' */
+  masterCastPrompt?: string;
 }
 
 export interface AnalyzePipelineResponse {

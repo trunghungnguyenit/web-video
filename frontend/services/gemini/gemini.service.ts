@@ -13,6 +13,8 @@ export interface GeminiScene {
 export interface VideoScript {
   title: string;
   scenes: GeminiScene[];
+  /** Prompt mô tả toàn bộ dàn nhân vật — chỉ có khi inputType gửi lên là 'link' */
+  masterCastPrompt?: string;
 }
 
 export interface AnalyzeScriptResponse {

@@ -103,6 +103,7 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
     geminiInput.characters ?? veoInput.characters,
   );
 
+  const isLinkInput = geminiInput.inputType === 'link';
   const isKieProvider = veoInput.provider === 'kie';
 
   const durationRule = isKieProvider
@@ -151,7 +152,8 @@ Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích) th
       "visual": "Prompt cho Veo — mô tả khung hình (tiếng Anh hoặc ${lang})",
       "voiceover": "Lời thoại cho ElevenLabs TTS bằng ${lang}"
     }
-  ]
+  ]${isLinkInput ? `,
+  "masterCastPrompt": "Đoạn mô tả DUY NHẤT, chi tiết, gộp toàn bộ nhân vật xuất hiện trong video thành 1 'character reference sheet' — dùng làm ảnh tham chiếu giữ nhân vật nhất quán qua mọi cảnh"` : ''}
 }
 
 Quy tắc:
@@ -161,7 +163,8 @@ Quy tắc:
 - visual: prompt Veo — tỷ lệ ${ratio}, chất lượng ${quality}${veoInput.sceneStyle ? `, phong cách ${veoInput.sceneStyle}` : ''}
 - voiceover: CHỈ lời thoại đọc to (thuần ${lang}), KHÔNG mô tả hình ảnh, KHÔNG copy từ visual, KHÔNG dùng tiếng Anh nếu ngôn ngữ là ${lang}
 - voiceover: ngắn gọn, tự nhiên như lời dẫn video — giọng ${voice}, kiểu ${videoType}
-- Nếu có nhân vật: visual phải giữ ngoại hình/trang phục nhất quán`;
+- Nếu có nhân vật: visual phải giữ ngoại hình/trang phục nhất quán${isLinkInput ? `
+- "masterCastPrompt": viết bằng tiếng Anh (chuẩn prompt tạo ảnh), mô tả ngoại hình/trang phục từng nhân vật chính xuất hiện trong các cảnh — để dùng làm ảnh tham chiếu chung cho toàn bộ video` : ''}`;
 }
 
 function parseScript(raw: string): GeminiVideoScript {
@@ -186,6 +189,9 @@ function parseScript(raw: string): GeminiVideoScript {
       visual: String(s.visual ?? '').trim() || `Visual scene ${i + 1}`,
       voiceover: String(s.voiceover ?? '').trim() || `Voiceover scene ${i + 1}`,
     })),
+    masterCastPrompt: typeof parsed.masterCastPrompt === 'string' && parsed.masterCastPrompt.trim()
+      ? parsed.masterCastPrompt.trim()
+      : undefined,
   };
 }
 

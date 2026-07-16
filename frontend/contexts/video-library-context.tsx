@@ -17,7 +17,8 @@ import type { SceneGenerationResult, VideoScene } from '@/lib/scene/scenes';
 import { scenesFromGeminiScript } from '@/lib/scene/scenes';
 import type { VideoSettings } from '@/contexts/project-settings-context';
 import { DEFAULT_VIDEO_SETTINGS } from '@/contexts/project-settings-context';
-import type { AnalyzePipelineRequest, TtsInput, VeoInput } from '@/lib/pipeline-payload';
+import type { AnalyzePipelineRequest, PipelineCharacter, TtsInput, VeoInput } from '@/lib/pipeline-payload';
+import { parseDataUrl } from '@/lib/pipeline-payload';
 import { runSceneGenerationQueue, scenesNeedingVeoResume } from '@/lib/scene/scene-generation-queue';
 import { normalizeSceneDurationSetting } from '@/lib/saved-scripts/saved-scripts';
 import { buildDemoScenesFromPreset } from '@/lib/preset/preset-demo-builder';
@@ -54,6 +55,8 @@ interface AnalyzeInput {
   sceneCount: string;
   videoType: string;
   language: string;
+  /** Tab "Từ hình ảnh" — ảnh theo đúng thứ tự cảnh, ảnh[i] gắn vào scenes[i] để gửi Veo */
+  sceneImages?: Array<{ base64: string; mimeType: string } | null>;
 }
 
 type GenerationMode = 'live' | 'regenerate';
@@ -86,6 +89,8 @@ interface VideoLibraryContextValue {
   startAnalyze: (itemId: string, input: AnalyzeInput) => boolean;
   /** Sửa nội dung/settings 1 video đã có & tạo lại cảnh — giữ cảnh cũ tới khi xong */
   startRegenerate: (itemId: string, input: AnalyzeInput) => boolean;
+  /** Xác nhận preview tab link (sau khi xem/sửa Master Cast) — thật sự bắt đầu gọi TTS/Veo */
+  confirmLinkGeneration: (itemId: string) => boolean;
   /** Upload video/audio cảnh (blob:) của project active lên Supabase Storage */
   saveActiveSceneVideos: () => Promise<{ saved: number; failed: number }>;
   /** Xoá file Storage của các cảnh vừa bị xoá khỏi mục 3 */
@@ -441,6 +446,8 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           status: 'generating',
           errorMessage: undefined,
           inputContent: result.sourceContent,
+          inputType: result.inputType,
+          masterCastPrompt: result.masterCastPrompt,
           ttsInput: result.ttsInput,
           veoInput: result.veoInput,
           scenes: pendingScenes,
@@ -699,19 +706,29 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       try {
         const { script, veoInput, ttsInput } = await geminiService.analyzeScript(input.pipeline);
         if (generationEpochRef.current.get(itemId) !== epoch) return;
+
         //đoạn này là chia kịch bản thành các cảnh
         // script là kịch bản từ Gemini
         // sceneDurationSetting là độ dài của cảnh
         // videoQuality là chất lượng video
         // trả về mảng các cảnh
-        const scenes = scenesFromGeminiScript(
+        let scenes = scenesFromGeminiScript(
           script,
           veoInput.sceneDuration,
           veoInput.videoQuality,
           veoInput.provider,
         );
 
-        runSceneGeneration(itemId, {
+        // Tab "Từ hình ảnh" — gắn đúng ảnh[i] vào scenes[i] theo thứ tự, để Veo
+        // dùng ảnh đó làm ảnh mồi tạo video cho đúng cảnh tương ứng.
+        if (input.sceneImages) {
+          scenes = scenes.map((s, i) => {
+            const img = input.sceneImages?.[i];
+            return img ? { ...s, sourceImageBase64: img.base64, sourceImageMimeType: img.mimeType } : s;
+          });
+        }
+
+        const result: SceneGenerationResult = {
           scenes,
           sourceContent: input.sourceContent,
           sceneCount: input.sceneCount,
@@ -721,7 +738,29 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           sceneDuration: veoInput.sceneDuration,
           veoInput,
           ttsInput,
-        }, epoch);
+          inputType: input.pipeline.geminiInput.inputType,
+          masterCastPrompt: script.masterCastPrompt,
+        };
+
+        if (input.pipeline.geminiInput.inputType === 'link') {
+          // Tab link: dừng lại chờ xác nhận — hiện Master Cast + preview cảnh để
+          // user xem/sửa prompt và upload ảnh tham chiếu TRƯỚC khi thật sự gọi TTS/Veo.
+          updateItem(itemId, {
+            status: 'draft',
+            errorMessage: undefined,
+            inputContent: result.sourceContent,
+            inputType: result.inputType,
+            masterCastPrompt: result.masterCastPrompt,
+            scenes: scenes.map((s) => ({ ...s, status: 'edited' as const })),
+            scenesDone: 0,
+            scenesTotal: scenes.length,
+            pendingLinkReview: result,
+          });
+          analyzeInFlightRef.current.delete(itemId);
+          return;
+        }
+
+        runSceneGeneration(itemId, result, epoch);
       } catch (err) {
         if (generationEpochRef.current.get(itemId) !== epoch) return;
         const message = toUserMessage(err, 'Phân tích kịch bản thất bại — kiểm tra lại Gemini API Key và thử lại.');
@@ -802,6 +841,45 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     return true;
   }, [updateItem, runSceneGeneration]);
 
+  /** Xác nhận preview tab link — đính kèm ảnh Master Cast (nếu có) vào characters rồi mới thật sự chạy TTS/Veo */
+  const confirmLinkGeneration = useCallback((itemId: string): boolean => {
+    const item = itemsRef.current.find((p) => p.id === itemId);
+    if (!item?.pendingLinkReview) return false;
+    if (item.status === 'analyzing' || item.status === 'generating') return false;
+    if (analyzeInFlightRef.current.has(itemId)) return false;
+
+    analyzeInFlightRef.current.add(itemId);
+
+    const epoch = (generationEpochRef.current.get(itemId) ?? 0) + 1;
+    generationEpochRef.current.set(itemId, epoch);
+
+    const result = item.pendingLinkReview;
+    const image = parseDataUrl(item.masterCastImageDataUrl);
+
+    const veoInput: VeoInput = image
+      ? {
+          ...result.veoInput,
+          characters: [
+            ...(result.veoInput.characters ?? []),
+            {
+              name: 'Master Cast',
+              role: '',
+              traits: '',
+              outfit: '',
+              description: item.masterCastPrompt ?? '',
+              style: 'Realistic',
+              imageBase64: image.base64,
+              imageMimeType: image.mimeType,
+            } satisfies PipelineCharacter,
+          ],
+        }
+      : result.veoInput;
+
+    updateItem(itemId, { pendingLinkReview: null });
+    runSceneGeneration(itemId, { ...result, veoInput }, epoch);
+    return true;
+  }, [updateItem, runSceneGeneration]);
+
   // Resume poll Veo sau refresh — chỉ chạy 1 lần khi load persist, không gọi predictLongRunning lại
   useEffect(() => {
     if (!persistReady) return;
@@ -851,6 +929,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       syncSettingsForItem,
       startAnalyze,
       startRegenerate,
+      confirmLinkGeneration,
       saveActiveSceneVideos,
       deleteSceneStorageAssets,
     }),
@@ -872,6 +951,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       syncSettingsForItem,
       startAnalyze,
       startRegenerate,
+      confirmLinkGeneration,
       saveActiveSceneVideos,
       deleteSceneStorageAssets,
     ],
