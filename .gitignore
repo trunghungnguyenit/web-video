@@ -24,3 +24,4 @@ frontend/.env
 supabase-data/*
 !supabase-data/migrations/
 RequestAPI-KieAi
+docs
