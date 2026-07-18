@@ -53,6 +53,7 @@ async function pollUntilDone(apiKey: string, taskId: string, sceneId: string): P
  * - Đã có videoUrl → bỏ qua
  * - Có kieTaskId → chỉ poll (resume sau refresh)
  * - Chưa có → tạo task 1 lần rồi poll
+ * - Có ảnh Master Cast / ảnh nguồn → image-to-video (đồng nhất nhân vật)
  */
 export async function generateSceneVideoAssetKie(
   scene: VideoScene,
@@ -77,6 +78,34 @@ export async function generateSceneVideoAssetKie(
     if (!taskId) {
       if (isSceneStopped(scene.id)) throw new SceneStoppedError();
 
+      // Ưu tiên: ảnh nguồn cảnh → referenceImage (Master Cast) → character có ảnh
+      const referenceImage = veoInput.referenceImage?.base64 && veoInput.referenceImage?.mimeType
+        ? veoInput.referenceImage
+        : undefined;
+      const characterImage = veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
+      const image =
+        scene.sourceImageBase64 && scene.sourceImageMimeType
+          ? { base64: scene.sourceImageBase64, mimeType: scene.sourceImageMimeType }
+          : referenceImage
+            ? { base64: referenceImage.base64, mimeType: referenceImage.mimeType }
+            : characterImage?.imageBase64 && characterImage.imageMimeType
+              ? { base64: characterImage.imageBase64, mimeType: characterImage.imageMimeType }
+              : undefined;
+
+      console.log('[kie/generate] Master Cast check:', {
+        sceneId: scene.id,
+        hasSceneSourceImage: Boolean(scene.sourceImageBase64),
+        hasReferenceImage: Boolean(referenceImage),
+        hasCharacterImage: Boolean(characterImage?.imageBase64),
+        willSendImage: Boolean(image),
+        characterNames: veoInput.characters?.map((c) => c.name) ?? [],
+        imageBytesApprox: image ? Math.round((image.base64.length * 3) / 4) : 0,
+      });
+
+      if (!image) {
+        console.warn('[kie/generate] KHÔNG gửi ảnh — payload chỉ text-to-video.');
+      }
+
       const started = await withKieConcurrency(() =>
         kieService.startGeneration({
           apiKey,
@@ -85,6 +114,7 @@ export async function generateSceneVideoAssetKie(
           durationSeconds: scene.durationSeconds,
           mode: veoInput.kieMode,
           resolution: veoInput.videoQuality,
+          image,
         }),
       );
       taskId = started.taskId;

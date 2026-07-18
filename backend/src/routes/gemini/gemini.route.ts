@@ -17,7 +17,9 @@ geminiRoute.post('/analyze', async (c) => {
     // if (!body.geminiInput?.apiKey?.trim()) {
     //   return fail(c, 'Thiếu Gemini API Key — nhập tại mục API Keys.');
     // }
-    if (!body.geminiInput?.content?.trim()) {
+    if (!body.geminiInput?.content?.trim()
+      && !body.geminiInput?.videoFileBase64?.trim()
+      && !body.geminiInput?.sourceVideoUrl?.trim()) {
       return fail(c, 'Nội dung không được để trống.');
     }
     if (!body.veoInput || !body.ttsInput) {
@@ -32,6 +34,10 @@ geminiRoute.post('/analyze', async (c) => {
         videoType: body.geminiInput.videoType,
         contentLength: body.geminiInput.content.length,
         characterCount: body.geminiInput.characters?.length ?? 0,
+        sourceVideoUrl: body.geminiInput.sourceVideoUrl?.trim() || undefined,
+        hasVideoFile: Boolean(body.geminiInput.videoFileBase64?.trim()),
+        videoFileMimeType: body.geminiInput.videoFileMimeType,
+        videoFileName: body.geminiInput.videoFileName,
         veo: {
           aspectRatio: body.veoInput.aspectRatio,
           sceneDuration: body.veoInput.sceneDuration,

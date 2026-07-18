@@ -17,7 +17,7 @@ export interface PipelineCharacter {
 /** Tách data URL (`data:image/png;base64,xxx`) thành base64 thuần + mimeType — undefined nếu không parse được */
 export function parseDataUrl(dataUrl: string | undefined): { base64: string; mimeType: string } | undefined {
   if (!dataUrl) return undefined;
-  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
+  const match = /^data:([^;,]+)(?:;charset=[^;,]+)?;base64,([\s\S]+)$/.exec(dataUrl.trim());
   if (!match) return undefined;
   return { mimeType: match[1], base64: match[2] };
 }
@@ -30,6 +30,12 @@ export interface GeminiInput {
   videoType: string;
   inputType: 'text' | 'link' | 'image' | 'file';
   characters?: PipelineCharacter[];
+  /** Tab link — URL video gốc */
+  sourceVideoUrl?: string;
+  /** Video file (base64) — BE upload Gemini Files API */
+  videoFileBase64?: string;
+  videoFileMimeType?: string;
+  videoFileName?: string;
 }
 
 export interface VeoInput {
@@ -42,6 +48,11 @@ export interface VeoInput {
   sceneStyle?: string;
   sceneStyleId?: string;
   characters?: PipelineCharacter[];
+  /**
+   * Ảnh Master Cast / tham chiếu đồng nhất nhân vật (tab link).
+   * Gửi kèm mọi cảnh — Veo: instance.image; Kie: image-to-video.
+   */
+  referenceImage?: { base64: string; mimeType: string };
   /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
   provider?: 'veo' | 'kie';
   /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
@@ -99,6 +110,10 @@ export interface BuildPipelineParams {
   characters: PipelineCharacter[];
   provider?: 'veo' | 'kie';
   kieMode?: 'fun' | 'normal' | 'spicy';
+  sourceVideoUrl?: string;
+  videoFileBase64?: string;
+  videoFileMimeType?: string;
+  videoFileName?: string;
 }
 
 /** Gom form → 3 payload riêng cho Gemini / Veo / TTS */
@@ -114,6 +129,10 @@ export function buildAnalyzePipeline(params: BuildPipelineParams): AnalyzePipeli
       videoType: params.videoType,
       inputType: params.inputType,
       characters,
+      sourceVideoUrl: params.sourceVideoUrl?.trim() || undefined,
+      videoFileBase64: params.videoFileBase64 || undefined,
+      videoFileMimeType: params.videoFileMimeType || undefined,
+      videoFileName: params.videoFileName || undefined,
     },
     veoInput: {
       apiKey: params.veoApiKey || undefined,

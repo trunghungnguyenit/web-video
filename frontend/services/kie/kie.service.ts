@@ -7,6 +7,8 @@ export interface StartGrokVideoPayload {
   durationSeconds: number;
   mode?: string;
   resolution?: string;
+  /** Master Cast / ảnh nguồn — BE upload Files Kie → image-to-video */
+  image?: { base64: string; mimeType: string };
 }
 
 export interface PollGrokTaskPayload {

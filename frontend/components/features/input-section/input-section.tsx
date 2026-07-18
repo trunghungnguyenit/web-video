@@ -46,6 +46,9 @@ const MIN_CONTENT_CHARS = 20;
 const MIN_LINK_DESCRIPTION_CHARS = 20;
 const MAX_IMAGE_MB      = 10;
 const MAX_IMAGES        = 12;
+/** Giới hạn video gửi base64 → Files API (tránh payload JSON quá lớn) */
+const MAX_LINK_VIDEO_MB = 40;
+const LINK_VIDEO_MIME = ['video/mp4', 'video/webm', 'video/quicktime', 'video/mpeg', 'video/x-m4v'];
 const MAX_FILE_MB       = 20;
 const IMAGE_MIME        = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const FILE_MIME         = [
@@ -65,6 +68,7 @@ interface FormErrors {
   content?: string;
   linkUrl?: string;
   linkDescription?: string;
+  linkVideo?: string;
   upload?: string;
   submit?: string;
   /** Lỗi prompt tổng tab ảnh */
@@ -142,15 +146,42 @@ function validateUrl(raw: string): string | undefined {
   return undefined;
 }
 
-/** Gemini không tự xem được video qua URL — mô tả này là nguồn nội dung chính để phân tích kịch bản */
-function validateLinkDescription(raw: string): string | undefined {
+/** YouTube public — Gemini đọc trực tiếp qua file_uri, không cần Files API upload */
+function isYouTubeUrl(raw: string): boolean {
+  try {
+    const u = new URL(raw.trim());
+    const host = u.hostname.replace(/^www\./, '').toLowerCase();
+    return host === 'youtube.com' || host === 'youtu.be' || host.endsWith('.youtube.com');
+  } catch {
+    return false;
+  }
+}
+
+/** Gemini không tự xem được video qua URL (trừ YouTube) — mô tả hoặc file video để phân tích */
+function validateLinkDescription(raw: string, optional = false): string | undefined {
   const s = raw.trim();
-  if (!s) return 'Vui lòng mô tả nội dung & phong cách video để AI phân tích (Gemini không tự xem được video qua link).';
+  if (!s) {
+    return optional
+      ? undefined
+      : 'Vui lòng mô tả nội dung video hoặc tải file video lên (Gemini Files API).';
+  }
   if (s.length < MIN_LINK_DESCRIPTION_CHARS) {
     return `Mô tả quá ngắn — cần ít nhất ${MIN_LINK_DESCRIPTION_CHARS} ký tự (hiện tại: ${s.length}).`;
   }
   if (s.length > MAX_CHARS) {
     return `Mô tả quá dài — tối đa ${formatCount(MAX_CHARS)} ký tự (hiện tại: ${formatCount(s.length)}).`;
+  }
+  return undefined;
+}
+
+function validateLinkVideoFile(file: File | null): string | undefined {
+  if (!file) return undefined;
+  const sizeMB = file.size / 1024 / 1024;
+  if (!LINK_VIDEO_MIME.includes(file.type) && !file.type.startsWith('video/')) {
+    return `File "${file.name}" không phải video hợp lệ. Chấp nhận: MP4, WebM, MOV, MPEG.`;
+  }
+  if (sizeMB > MAX_LINK_VIDEO_MB) {
+    return `Video quá lớn (${sizeMB.toFixed(1)} MB) — tối đa ${MAX_LINK_VIDEO_MB} MB khi upload qua Files API.`;
   }
   return undefined;
 }
@@ -270,6 +301,9 @@ export function InputSection({
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  /** Tab link — file video upload lên Gemini Files API (bắt buộc với non-YouTube nếu không có mô tả đủ) */
+  const [linkVideoFile, setLinkVideoFile] = useState<File | null>(null);
+  const linkVideoInputRef = useRef<HTMLInputElement>(null);
   const [uploadedImages, setUploadedImages] = useState<UploadedImageItem[]>([]);
   const uploadedImagesRef = useRef<UploadedImageItem[]>([]);
   uploadedImagesRef.current = uploadedImages;
@@ -387,8 +421,17 @@ export function InputSection({
     if (form.activeTab === 'link') {
       const msg = validateUrl(form.linkUrl);
       if (msg) e.linkUrl = msg;
-      const descMsg = validateLinkDescription(form.linkDescription);
+      const youtube = !msg && isYouTubeUrl(form.linkUrl);
+      const videoMsg = validateLinkVideoFile(linkVideoFile);
+      if (videoMsg) e.linkVideo = videoMsg;
+      // YouTube: Gemini đọc video qua file_uri — mô tả tuỳ chọn
+      // Khác YouTube: cần mô tả HOẶC file video (Files API)
+      const descOptional = youtube || Boolean(linkVideoFile);
+      const descMsg = validateLinkDescription(form.linkDescription, descOptional);
       if (descMsg) e.linkDescription = descMsg;
+      if (!youtube && !linkVideoFile && !form.linkDescription.trim()) {
+        e.linkDescription = 'Với link không phải YouTube: hãy mô tả nội dung hoặc tải file video (Gemini Files API).';
+      }
     }
     if (form.activeTab === 'image') {
       const masterMsg = validateImageMasterBrief(imageMasterBrief);
@@ -471,7 +514,14 @@ export function InputSection({
       form.activeTab === 'text'
         ? form.content
         : form.activeTab === 'link'
-          ? `Video tham khảo: ${form.linkUrl.trim()}\n\nMô tả nội dung & phong cách video (do người dùng cung cấp — dùng làm nguồn chính để phân tích):\n${form.linkDescription.trim()}`
+          ? [
+              form.linkUrl.trim() ? `URL video: ${form.linkUrl.trim()}` : '',
+              form.linkDescription.trim()
+                ? `Gợi ý / mô tả bổ sung từ người dùng:\n${form.linkDescription.trim()}`
+                : '',
+            ]
+              .filter(Boolean)
+              .join('\n\n') || 'Phân tích video đính kèm.'
           : form.activeTab === 'image' && uploadedImages.length > 0
             ? buildImagePipelineContent(uploadedImages, imageMasterBrief)
             : uploadedFile
@@ -481,71 +531,91 @@ export function InputSection({
     const styleLabel = SCENE_STYLES.find((s) => s.id === sceneStyle)?.label ?? sceneStyle;
     const characters = toPipelineCharacters(characterMasterRef?.current?.getCharacters() ?? []);
 
-    // Gom form → geminiInput / veoInput / ttsInput (pipeline-payload.ts)
-    const pipeline = buildAnalyzePipeline({
-      // ── API Keys (đọc từ localStorage, user lưu ở mục API Keys) ──
-      geminiApiKey: geminiKey,              // Gemini — dùng ngay để gọi /api/gemini/analyze
-      veoApiKey: videoApiKey,
-      ttsApiKey: getApiKey(API_KEY_IDS.elevenlabs), // ElevenLabs — voiceover → audio MP3
+    try {
+      // Tab link: nếu user upload video → base64 → BE upload Gemini Files API
+      const linkVideoPayload =
+        form.activeTab === 'link' && linkVideoFile
+          ? await fileToBase64(linkVideoFile)
+          : null;
 
-      // ── Nội dung đầu vào (mục 2 — tab đang chọn) ──
-      content: contentForScenes,            // Text / link / tên file upload
-      inputType: form.activeTab,            // 'text' | 'link' | 'image' | 'file'
+      // Gom form → geminiInput / veoInput / ttsInput (pipeline-payload.ts)
+      const pipeline = buildAnalyzePipeline({
+        // ── API Keys (đọc từ localStorage, user lưu ở mục API Keys) ──
+        geminiApiKey: geminiKey,              // Gemini — dùng ngay để gọi /api/gemini/analyze
+        veoApiKey: videoApiKey,
+        ttsApiKey: getApiKey(API_KEY_IDS.elevenlabs), // ElevenLabs — voiceover → audio MP3
 
-      // ── Cài đặt kịch bản → geminiInput ──
-      language: settings.language,
-      sceneCount: effectiveSceneCount,
-      videoType: settings.videoType,
-      characters,
+        // ── Nội dung đầu vào (mục 2 — tab đang chọn) ──
+        content: contentForScenes,            // Text / link / tên file upload
+        inputType: form.activeTab,            // 'text' | 'link' | 'image' | 'file'
 
-      aspectRatio: settings.aspectRatio,
-      sceneDuration: settings.sceneDuration,
-      videoQuality: settings.videoQuality,
-      veoModel: settings.veoModel,
-      sceneStyleLabel: styleLabel,
-      sceneStyleId: sceneStyle,
+        // ── Cài đặt kịch bản → geminiInput ──
+        language: settings.language,
+        sceneCount: effectiveSceneCount,
+        videoType: settings.videoType,
+        characters,
 
-      voice: settings.voice,
-      voiceSpeed,
+        aspectRatio: settings.aspectRatio,
+        sceneDuration: settings.sceneDuration,
+        videoQuality: settings.videoQuality,
+        veoModel: settings.veoModel,
+        sceneStyleLabel: styleLabel,
+        sceneStyleId: sceneStyle,
 
-      provider: settings.videoProvider,
-      kieMode: settings.kieMode,
-    });
+        voice: settings.voice,
+        voiceSpeed,
 
-    logAnalyzePipeline(
-      pipeline,
-      form.activeTab === 'image'
-        ? {
-            images: uploadedImages.map((img) => ({
-              fileName: img.file?.name ?? '(chưa có file)',
-              sizeMB: img.file ? (img.file.size / 1024 / 1024).toFixed(2) : '—',
-              prompt: img.prompt.trim(),
-            })),
-          }
-        : undefined,
-    );
+        provider: settings.videoProvider,
+        kieMode: settings.kieMode,
 
-    // Tab ảnh — đọc từng file thành base64 để gắn đúng ảnh[i] vào cảnh[i] khi gửi Veo
-    const sceneImages = isImageTab
-      ? await Promise.all(uploadedImages.map((img) => (img.file ? fileToBase64(img.file) : null)))
-      : undefined;
+        // Tab link — Gemini Files API / YouTube file_uri
+        sourceVideoUrl: form.activeTab === 'link' ? form.linkUrl.trim() || undefined : undefined,
+        videoFileBase64: linkVideoPayload?.base64,
+        videoFileMimeType: linkVideoPayload?.mimeType,
+        videoFileName: linkVideoFile?.name,
+      });
 
-    const started = startAnalyze(submitProjectId, {
-      pipeline,
-      sourceContent: contentForScenes,
-      sceneCount: effectiveSceneCount,
-      videoType: settings.videoType,
-      language: settings.language,
-      sceneImages,
-    });
+      logAnalyzePipeline(
+        pipeline,
+        form.activeTab === 'image'
+          ? {
+              images: uploadedImages.map((img) => ({
+                fileName: img.file?.name ?? '(chưa có file)',
+                sizeMB: img.file ? (img.file.size / 1024 / 1024).toFixed(2) : '—',
+                prompt: img.prompt.trim(),
+              })),
+            }
+          : undefined,
+      );
 
-    if (!started) {
+      // Tab ảnh — đọc từng file thành base64 để gắn đúng ảnh[i] vào cảnh[i] khi gửi Veo
+      const sceneImages = isImageTab
+        ? await Promise.all(uploadedImages.map((img) => (img.file ? fileToBase64(img.file) : null)))
+        : undefined;
+
+      const started = startAnalyze(submitProjectId, {
+        pipeline,
+        sourceContent: contentForScenes,
+        sceneCount: effectiveSceneCount,
+        videoType: settings.videoType,
+        language: settings.language,
+        sceneImages,
+      });
+
+      if (!started) {
+        submitLockRef.current = false;
+        return;
+      }
+
+      setForm((f) => ({ ...f, submitted: true }));
+      setTimeout(() => setForm((f) => ({ ...f, submitted: false })), 3000);
+    } catch (err) {
       submitLockRef.current = false;
-      return;
+      setErrors((p) => ({
+        ...p,
+        submit: err instanceof Error ? err.message : 'Không đọc được video để gửi Files API.',
+      }));
     }
-
-    setForm((f) => ({ ...f, submitted: true }));
-    setTimeout(() => setForm((f) => ({ ...f, submitted: false })), 3000);
   };
 
   const handleSaveScript = () => {
@@ -859,7 +929,10 @@ export function InputSection({
               aria-invalid={!!errors.linkUrl}
               aria-describedby={errors.linkUrl ? 'link-error' : 'link-hint'}
               onChange={(e) => {
-                setForm((f) => ({ ...f, linkUrl: e.target.value }));
+                const next = e.target.value;
+                setForm((f) => ({ ...f, linkUrl: next }));
+                // YouTube không cần file — clear nếu user đổi sang YouTube
+                if (isYouTubeUrl(next) && linkVideoFile) setLinkVideoFile(null);
                 if (errors.linkUrl) setErrors((p) => ({ ...p, linkUrl: undefined }));
               }}
               placeholder="https://www.youtube.com/watch?v=..."
@@ -874,12 +947,18 @@ export function InputSection({
               <FieldError id="link-error" className="gap-1 mt-1.5">{errors.linkUrl}</FieldError>
             ) : (
               <p id="link-hint" className="text-xs text-muted-foreground mt-2">
-                Hỗ trợ: YouTube, TikTok, Vimeo, Facebook.
+                {isYouTubeUrl(form.linkUrl)
+                  ? 'YouTube: chỉ cần dán link — Gemini xem video trực tiếp, không cần tải file.'
+                  : 'Hỗ trợ: YouTube, TikTok, Vimeo, Facebook. YouTube chỉ cần dán link.'}
               </p>
             )}
 
             <div className="mt-3">
-              <label className="field-label block mb-1.5">Mô tả nội dung & phong cách video</label>
+              <label className="field-label block mb-1.5">
+                {isYouTubeUrl(form.linkUrl)
+                  ? 'Mô tả / yêu cầu thêm (tuỳ chọn)'
+                  : 'Mô tả / yêu cầu thêm'}
+              </label>
               <textarea
                 value={form.linkDescription}
                 aria-invalid={!!errors.linkDescription}
@@ -888,11 +967,11 @@ export function InputSection({
                   setForm((f) => ({ ...f, linkDescription: e.target.value }));
                   if (errors.linkDescription) setErrors((p) => ({ ...p, linkDescription: undefined }));
                 }}
-                rows={5}
+                rows={4}
                 maxLength={MAX_CHARS}
-                placeholder="Video kể về... Phong cách hình ảnh (VD: anime, hoạt hình 2D...). Nhân vật chính là..."
+                placeholder="VD: Đổi nhân vật thành màu đỏ; giữ nguyên cốt truyện; phong cách anime..."
                 className={cn(
-                  'w-full px-4 py-3 bg-card border rounded-lg text-foreground placeholder-muted-foreground resize-y min-h-[110px] focus:outline-none transition-colors',
+                  'w-full px-4 py-3 bg-card border rounded-lg text-foreground placeholder-muted-foreground resize-y min-h-[96px] focus:outline-none transition-colors',
                   errors.linkDescription
                     ? 'border-destructive focus:border-destructive focus:ring-1 focus:ring-destructive/30'
                     : 'border-border focus:border-primary/50 focus:ring-1 focus:ring-primary/20',
@@ -902,10 +981,85 @@ export function InputSection({
                 <FieldError id="link-description-error" className="gap-1 mt-1.5">{errors.linkDescription}</FieldError>
               ) : (
                 <p id="link-description-hint" className="text-xs text-muted-foreground mt-2">
-                  Gemini không tự xem được video qua link — mô tả càng chi tiết, kịch bản sinh ra càng sát với video gốc.
+                  {isYouTubeUrl(form.linkUrl)
+                    ? 'Tuỳ chọn — ví dụ yêu cầu đổi màu nhân vật, phong cách, số cảnh…'
+                    : 'Link không phải YouTube: Gemini không tự xem được — cần mô tả chi tiết hoặc tải file video bên dưới.'}
                 </p>
               )}
             </div>
+
+            {/* Chỉ hiện upload khi KHÔNG phải YouTube — YouTube dùng file_uri trực tiếp */}
+            {!isYouTubeUrl(form.linkUrl) && (
+              <div className="mt-3">
+                <label className="field-label block mb-1.5">File video (tuỳ chọn — Gemini Files API)</label>
+                <input
+                  ref={linkVideoInputRef}
+                  type="file"
+                  accept="video/mp4,video/webm,video/quicktime,video/mpeg,.mp4,.webm,.mov,.mpeg,.mpg"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0] ?? null;
+                    e.target.value = '';
+                    const msg = validateLinkVideoFile(file);
+                    if (msg) {
+                      setErrors((p) => ({ ...p, linkVideo: msg }));
+                      return;
+                    }
+                    setLinkVideoFile(file);
+                    setErrors((p) => ({ ...p, linkVideo: undefined, linkDescription: undefined }));
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => linkVideoInputRef.current?.click()}
+                  className={cn(
+                    'w-full border-2 border-dashed rounded-xl px-4 py-4 text-left transition-colors',
+                    errors.linkVideo
+                      ? 'border-destructive/60 bg-destructive/5'
+                      : 'border-border hover:border-primary/40 hover:bg-card',
+                  )}
+                >
+                  {linkVideoFile ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{linkVideoFile.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {(linkVideoFile.size / 1024 / 1024).toFixed(2)} MB — upload Files API rồi phân tích
+                        </p>
+                      </div>
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          setLinkVideoFile(null);
+                        }}
+                        onKeyDown={(ev) => {
+                          if (ev.key === 'Enter' || ev.key === ' ') {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            setLinkVideoFile(null);
+                          }
+                        }}
+                        className="text-xs text-muted-foreground hover:text-destructive shrink-0"
+                      >
+                        Xóa
+                      </span>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm text-muted-foreground">Tải MP4 / WebM / MOV (tối đa {MAX_LINK_VIDEO_MB} MB)</p>
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Chỉ cần khi link không phải YouTube công khai.
+                      </p>
+                    </div>
+                  )}
+                </button>
+                {errors.linkVideo && (
+                  <FieldError id="link-video-error" className="gap-1 mt-1.5">{errors.linkVideo}</FieldError>
+                )}
+              </div>
+            )}
           </div>
         )}
 

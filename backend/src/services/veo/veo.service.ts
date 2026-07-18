@@ -24,7 +24,7 @@ interface LongRunningResponse {
 export interface GenerateSceneVideoParams {
   apiKey: string;
   prompt: string;
-  veoInput: Pick<VeoInput, 'aspectRatio' | 'videoQuality' | 'sceneDuration' | 'veoModel' | 'characters'>;
+  veoInput: Pick<VeoInput, 'aspectRatio' | 'videoQuality' | 'sceneDuration' | 'veoModel' | 'characters' | 'referenceImage'>;
   durationSeconds: number;
   /** Ảnh nguồn riêng cho đúng cảnh này (tab "Từ hình ảnh") — ưu tiên hơn ảnh nhân vật/master cast */
   image?: { base64: string; mimeType: string };
@@ -105,9 +105,10 @@ export async function startVideoGeneration(params: GenerateSceneVideoParams): Pr
   const aspectRatio = resolveVeoAspectRatio(params.veoInput.aspectRatio);
   const durationSeconds = resolveVeoDurationSeconds(params.durationSeconds, quality);
 
-  // Ưu tiên ảnh nguồn riêng của cảnh (tab "Từ hình ảnh"). Nếu không có, fallback
-  // sang ảnh nhân vật/master cast đầu tiên tìm thấy — best-effort, Veo dùng ảnh
-  // này làm gợi ý, không đảm bảo giống 100% qua các cảnh có góc máy khác nhau.
+  // Ưu tiên: ảnh nguồn cảnh → referenceImage (Master Cast) → ảnh nhân vật
+  const referenceImage = params.veoInput.referenceImage?.base64 && params.veoInput.referenceImage?.mimeType
+    ? params.veoInput.referenceImage
+    : undefined;
   const characterImage = params.veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
 
   const instance: { prompt: string; image?: { bytesBase64Encoded: string; mimeType: string } } = { prompt };
@@ -116,12 +117,29 @@ export async function startVideoGeneration(params: GenerateSceneVideoParams): Pr
       bytesBase64Encoded: params.image.base64,
       mimeType: params.image.mimeType,
     };
+  } else if (referenceImage) {
+    instance.image = {
+      bytesBase64Encoded: referenceImage.base64,
+      mimeType: referenceImage.mimeType,
+    };
   } else if (characterImage?.imageBase64 && characterImage.imageMimeType) {
     instance.image = {
       bytesBase64Encoded: characterImage.imageBase64,
       mimeType: characterImage.imageMimeType,
     };
   }
+
+  console.log('[veo/start] Master Cast / ref image:', {
+    model,
+    hasSceneImage: Boolean(params.image),
+    hasReferenceImage: Boolean(referenceImage),
+    hasCharacterImage: Boolean(characterImage?.imageBase64),
+    willSendImage: Boolean(instance.image),
+    characterNames: params.veoInput.characters?.map((c) => c.name) ?? [],
+    imageBytesApprox: instance.image
+      ? Math.round((instance.image.bytesBase64Encoded.length * 3) / 4)
+      : 0,
+  });
 
   return withVeoRetry('Veo start', async () => {
     const startRes = await fetch(`${BASE_URL}/models/${model}:predictLongRunning`, {

@@ -82,6 +82,18 @@ export async function generateSceneVideoAsset(
     if (!operationName) {
       if (isSceneStopped(scene.id)) throw new SceneStoppedError();
 
+      const referenceImage = veoInput.referenceImage?.base64 && veoInput.referenceImage?.mimeType
+        ? veoInput.referenceImage
+        : undefined;
+      const characterImage = veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
+      console.log('[veo/generate] Master Cast check:', {
+        sceneId: scene.id,
+        hasSceneSourceImage: Boolean(scene.sourceImageBase64),
+        hasReferenceImage: Boolean(referenceImage),
+        hasCharacterImage: Boolean(characterImage?.imageBase64),
+        characterNames: veoInput.characters?.map((c) => c.name) ?? [],
+      });
+
       const started = await withVeoConcurrency(() =>
         veoService.startGeneration({
           apiKey,

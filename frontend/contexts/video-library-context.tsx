@@ -90,7 +90,7 @@ interface VideoLibraryContextValue {
   /** Sửa nội dung/settings 1 video đã có & tạo lại cảnh — giữ cảnh cũ tới khi xong */
   startRegenerate: (itemId: string, input: AnalyzeInput) => boolean;
   /** Xác nhận preview tab link (sau khi xem/sửa Master Cast) — thật sự bắt đầu gọi TTS/Veo */
-  confirmLinkGeneration: (itemId: string) => boolean;
+  confirmLinkGeneration: (itemId: string, imageDataUrl?: string) => boolean;
   /** Upload video/audio cảnh (blob:) của project active lên Supabase Storage */
   saveActiveSceneVideos: () => Promise<{ saved: number; failed: number }>;
   /** Xoá file Storage của các cảnh vừa bị xoá khỏi mục 3 */
@@ -251,7 +251,12 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     id: string,
     patch: Partial<VideoLibraryItem> | ((p: VideoLibraryItem) => Partial<VideoLibraryItem>),
   ) => {
-    setItems((prev) => patchItem(prev, id, patch));
+    setItems((prev) => {
+      const next = patchItem(prev, id, patch);
+      // Đồng bộ ref ngay — confirm/Master Cast không phụ thuộc chờ re-render
+      itemsRef.current = next;
+      return next;
+    });
   }, []);
 
   const renameItem = useCallback((id: string, title: string) => {
@@ -843,12 +848,31 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     return true;
   }, [updateItem, runSceneGeneration]);
 
-  /** Xác nhận preview tab link — đính kèm ảnh Master Cast (nếu có) vào characters rồi mới thật sự chạy TTS/Veo */
-  const confirmLinkGeneration = useCallback((itemId: string): boolean => {
+  /** Xác nhận preview tab link — đính kèm ảnh Master Cast rồi mới chạy TTS/Veo/Kie */
+  const confirmLinkGeneration = useCallback((itemId: string, imageDataUrl?: string): boolean => {
     const item = itemsRef.current.find((p) => p.id === itemId);
     if (!item?.pendingLinkReview) return false;
     if (item.status === 'analyzing' || item.status === 'generating') return false;
     if (analyzeInFlightRef.current.has(itemId)) return false;
+
+    // Ưu tiên ảnh truyền trực tiếp từ panel (tránh race state); fallback item đã lưu
+    const rawImage = imageDataUrl?.trim() || item.masterCastImageDataUrl;
+    const image = parseDataUrl(rawImage);
+
+    console.log('[master-cast/confirm]', {
+      itemId,
+      provider: item.pendingLinkReview.veoInput.provider ?? 'veo',
+      hasImageArg: Boolean(imageDataUrl?.trim()),
+      hasItemImage: Boolean(item.masterCastImageDataUrl),
+      hasParsedImage: Boolean(image),
+      imageMime: image?.mimeType ?? null,
+      imageBytesApprox: image ? Math.round((image.base64.length * 3) / 4) : 0,
+    });
+
+    if (!image) {
+      console.warn('[master-cast/confirm] CHẶN — chưa có ảnh Master Cast, không gửi tạo video.');
+      return false;
+    }
 
     analyzeInFlightRef.current.add(itemId);
 
@@ -856,28 +880,38 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     generationEpochRef.current.set(itemId, epoch);
 
     const result = item.pendingLinkReview;
-    const image = parseDataUrl(item.masterCastImageDataUrl);
+    const veoInput: VeoInput = {
+      ...result.veoInput,
+      // Field rõ ràng — mọi cảnh đọc referenceImage trước
+      referenceImage: { base64: image.base64, mimeType: image.mimeType },
+      characters: [
+        ...(result.veoInput.characters ?? []).filter((c) => c.name !== 'Master Cast'),
+        {
+          name: 'Master Cast',
+          role: '',
+          traits: '',
+          outfit: '',
+          description: item.masterCastPrompt ?? '',
+          style: 'Realistic',
+          imageBase64: image.base64,
+          imageMimeType: image.mimeType,
+        } satisfies PipelineCharacter,
+      ],
+    };
 
-    const veoInput: VeoInput = image
-      ? {
-          ...result.veoInput,
-          characters: [
-            ...(result.veoInput.characters ?? []),
-            {
-              name: 'Master Cast',
-              role: '',
-              traits: '',
-              outfit: '',
-              description: item.masterCastPrompt ?? '',
-              style: 'Realistic',
-              imageBase64: image.base64,
-              imageMimeType: image.mimeType,
-            } satisfies PipelineCharacter,
-          ],
-        }
-      : result.veoInput;
+    console.log('[master-cast/confirm] Gắn referenceImage + Master Cast character — sẽ gửi kèm mỗi cảnh.', {
+      characters: (veoInput.characters ?? []).map((c) => ({
+        name: c.name,
+        hasImage: Boolean(c.imageBase64),
+      })),
+      hasReferenceImage: Boolean(veoInput.referenceImage?.base64),
+    });
 
-    updateItem(itemId, { pendingLinkReview: null });
+    // Một lần update: lưu ảnh + xoá pending + giữ prompt
+    updateItem(itemId, {
+      pendingLinkReview: null,
+      masterCastImageDataUrl: rawImage,
+    });
     runSceneGeneration(itemId, { ...result, veoInput }, epoch);
     return true;
   }, [updateItem, runSceneGeneration]);
