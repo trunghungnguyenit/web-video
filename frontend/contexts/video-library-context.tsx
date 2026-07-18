@@ -440,6 +440,8 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       ? existing.scenes
       : result.scenes.map((s) => ({ ...s, status: 'generating' as const }));
 
+    console.log(`[video-library] runSceneGeneration cho ${itemId} — mode=${mode}, resumeOnly=${options?.resumeOnly}, pendingScenes:`, pendingScenes.map((s) => ({ id: s.id, status: s.status, hasVideoUrl: Boolean(s.videoUrl) })));
+
     if (mode === 'live') {
       if (!options?.resumeOnly) {
         updateItem(itemId, {
@@ -883,12 +885,38 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
   // Resume poll Veo sau refresh — chỉ chạy 1 lần khi load persist, không gọi predictLongRunning lại
   useEffect(() => {
     if (!persistReady) return;
+    // Có tài khoản đăng nhập thì Supabase mới là nguồn dữ liệu đúng — localStorage
+    // (persistReady bật ngay khi mount, trước cả khi fetch Supabase xong) có thể còn
+    // giữ bản ghi CŨ (vd. cảnh chụp lúc còn "generating", trong khi thực tế đã
+    // "success" và đã lưu video từ lâu). Nếu xét resume ngay lúc này sẽ tự gọi lại
+    // API dựa trên dữ liệu lỗi thời — đợi remoteReady để chắc chắn itemsRef.current
+    // đã là dữ liệu Supabase mới nhất trước khi quyết định cảnh nào cần resume.
+    if (user && !remoteReady) return;
+
+    console.log('[video-library] resume-check chạy — items:', itemsRef.current.map((it) => ({
+      id: it.id,
+      title: it.title,
+      itemStatus: it.status,
+      hasTtsInput: Boolean(it.ttsInput),
+      hasVeoInput: Boolean(it.veoInput),
+      scenes: it.scenes.map((s) => ({
+        id: s.id,
+        status: s.status,
+        hasVideoUrl: Boolean(s.videoUrl),
+        hasVideoPath: Boolean(s.videoPath),
+        veoOperationName: s.veoOperationName,
+        kieTaskId: s.kieTaskId,
+      })),
+    })));
 
     for (const item of itemsRef.current) {
       if (resumedItemsRef.current.has(item.id)) continue;
       if (analyzeInFlightRef.current.has(item.id)) continue;
       if (!item.ttsInput || !item.veoInput) continue;
-      if (scenesNeedingVeoResume(item.scenes).length === 0) continue;
+      const needResume = scenesNeedingVeoResume(item.scenes);
+      if (needResume.length === 0) continue;
+
+      console.log(`[video-library] RESUME TRIGGERED cho project "${item.title}" (${item.id}) — cảnh cần resume:`, needResume.map((s) => ({ id: s.id, status: s.status, veoOperationName: s.veoOperationName, kieTaskId: s.kieTaskId })));
 
       resumedItemsRef.current.add(item.id);
 
@@ -908,7 +936,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
         ttsInput: item.ttsInput,
       }, epoch, { resumeOnly: true });
     }
-  }, [persistReady, runSceneGeneration]);
+  }, [persistReady, remoteReady, user, runSceneGeneration]);
 
   const value = useMemo(
     () => ({
