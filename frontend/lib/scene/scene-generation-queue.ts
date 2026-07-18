@@ -56,9 +56,19 @@ export async function runSceneGenerationQueue(
   const queueItems = buildQueueItems(initialScenes);
   // Đánh dấu 'generating' cho mọi cảnh chưa xong ngay từ đầu — UI hiện spinner
   // "Đang tạo..." cho cả loạt cảnh cùng lúc, dù thực tế xử lý tuần tự bên dưới.
+  //
+  // QUAN TRỌNG: tin vào `status` — KHÔNG đòi thêm `videoUrl` — vì videoUrl chỉ là
+  // link hiển thị tạm (blob: hoặc signed URL), phải đợi resolveSceneSignedUrls chạy
+  // xong (bất đồng bộ, sau khi load trang) mới có. Nếu queue này chạy trước khi
+  // videoUrl kịp resolve, đòi thêm điều kiện videoUrl sẽ khiến 1 cảnh ĐÃ 'success'
+  // (đã lưu video thật trong Supabase) bị hiểu nhầm là "chưa có video" và bị tạo
+  // lại từ đầu — tốn phí API oan VÀ xoá mất videoPath/audioPath cũ đang đúng.
+  console.log('[video-library] runSceneGenerationQueue nhận initialScenes:', initialScenes.map((s) => ({ id: s.id, status: s.status, hasVideoUrl: Boolean(s.videoUrl) })));
+
   let scenes: VideoScene[] = initialScenes.map((s) => {
-    if (s.status === 'success' && s.videoUrl) return s;
+    if (s.status === 'success') return s;
     if (sceneNeedsVeoResume(s) || sceneNeedsKieResume(s)) return s;
+    console.log(`[video-library] Cảnh ${s.id} (status=${s.status}) bị đánh dấu 'generating' trong queue init.`);
     return { ...s, status: 'generating' as const };
   });
 
@@ -72,8 +82,9 @@ export async function runSceneGenerationQueue(
     const scene = scenes[i];
 
     // Cảnh đã có video thành công từ trước (resume/regenerate 1 phần) — bỏ qua,
-    // giữ nguyên video cũ hiển thị, không tạo lại.
-    if (scene.status === 'success' && scene.videoUrl) {
+    // giữ nguyên video cũ hiển thị, không tạo lại. Tin vào status, không đòi
+    // videoUrl (xem giải thích ở trên) — tránh tạo lại + xoá videoPath oan.
+    if (scene.status === 'success') {
       queueItems[i] = { ...queueItems[i], step: 'done' };
       callbacks.onQueueUpdate?.([...queueItems]);
       continue;
