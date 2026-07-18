@@ -10,6 +10,8 @@ interface StartBody {
   durationSeconds: number;
   mode?: string;
   resolution?: string;
+  /** Ảnh Master Cast / nguồn cảnh (base64) — BE upload rồi gọi image-to-video */
+  image?: { base64: string; mimeType: string };
 }
 
 interface PollBody {
@@ -44,6 +46,15 @@ kieRoute.post('/generate/start', async (c) => {
       return fail(c, 'Prompt video không được để trống.', 400);
     }
 
+    console.log('[kie/route] generate/start nhận:', {
+      hasImage: Boolean(body.image?.base64 && body.image?.mimeType),
+      imageMime: body.image?.mimeType ?? null,
+      imageBytesApprox: body.image?.base64
+        ? Math.round((body.image.base64.length * 3) / 4)
+        : 0,
+      promptPreview: body.prompt.slice(0, 80),
+    });
+
     const taskId = await startGrokVideoGeneration({
       apiKey: body.apiKey,
       prompt: body.prompt,
@@ -51,6 +62,9 @@ kieRoute.post('/generate/start', async (c) => {
       durationSeconds: body.durationSeconds ?? 6,
       mode: body.mode,
       resolution: body.resolution,
+      image: body.image?.base64 && body.image?.mimeType
+        ? { base64: body.image.base64, mimeType: body.image.mimeType }
+        : undefined,
     });
 
     return ok(c, { taskId });

@@ -5,9 +5,11 @@ import {
   resolveKieMode,
   resolveKieResolution,
 } from '../../lib/kie-config';
+import { uploadKieImageBase64 } from './kie-files.service';
 
 const BASE_URL = 'https://api.kie.ai/api/v1';
-const MODEL = 'grok-imagine/text-to-video';
+const MODEL_T2V = 'grok-imagine/text-to-video';
+const MODEL_I2V = 'grok-imagine/image-to-video';
 
 interface CreateTaskResponse {
   code?: number;
@@ -34,6 +36,8 @@ export interface GenerateGrokVideoParams {
   mode?: string;
   /** 480p (mặc định) | 720p — Grok Imagine không hỗ trợ 1080p */
   resolution?: string;
+  /** Ảnh Master Cast / nguồn cảnh — bật image-to-video để đồng nhất nhân vật */
+  image?: { base64: string; mimeType: string };
 }
 
 export interface PollGrokTaskResult {
@@ -47,13 +51,56 @@ function parseKieError(msg: string | undefined, status: number, fallback: string
   return new VeoApiError(message, { status, fatal: isFatalVeoMessage(message) || status === 401 });
 }
 
-/** POST /jobs/createTask — tạo task Grok Imagine text-to-video, trả taskId */
+/** POST /jobs/createTask — T2V hoặc I2V (khi có ảnh Master Cast / ảnh nguồn) */
 export async function startGrokVideoGeneration(params: GenerateGrokVideoParams): Promise<string> {
   const apiKey = params.apiKey.trim();
   if (!apiKey) throw new VeoApiError('Thiếu Kie.ai API Key.', { fatal: true });
 
   const prompt = params.prompt.trim();
   if (!prompt) throw new VeoApiError('Prompt video không được để trống.');
+
+  const hasImage = Boolean(params.image?.base64?.trim() && params.image?.mimeType?.trim());
+
+  // Có ảnh → upload temp → image-to-video; spicy không hỗ trợ external image
+  let imageUrl: string | undefined;
+  if (hasImage && params.image) {
+    imageUrl = await uploadKieImageBase64({
+      apiKey,
+      base64: params.image.base64,
+      mimeType: params.image.mimeType,
+    });
+  }
+
+  const useI2V = Boolean(imageUrl);
+  const model = useI2V ? MODEL_I2V : MODEL_T2V;
+  const mode = useI2V && resolveKieMode(params.mode) === 'spicy'
+    ? 'normal'
+    : resolveKieMode(params.mode);
+  // Docs: tham chiếu ảnh bằng @image1 trong prompt
+  const finalPrompt = useI2V && !prompt.includes('@image')
+    ? `@image1 ${prompt}`
+    : prompt;
+
+  const input: Record<string, unknown> = {
+    prompt: finalPrompt,
+    aspect_ratio: resolveKieAspectRatio(params.aspectRatio),
+    mode,
+    duration: resolveKieDurationSeconds(params.durationSeconds),
+    resolution: resolveKieResolution(params.resolution),
+    nsfw_checker: true,
+  };
+  if (imageUrl) {
+    input.image_urls = [imageUrl];
+  }
+
+  console.log('[kie/start] Master Cast / ref image:', {
+    model,
+    hasImage,
+    imageUploaded: Boolean(imageUrl),
+    imageUrl: imageUrl ? `${imageUrl.slice(0, 80)}…` : null,
+    promptPreview: finalPrompt.slice(0, 120),
+    mode,
+  });
 
   return withVeoRetry('Kie start', async () => {
     const res = await fetch(`${BASE_URL}/jobs/createTask`, {
@@ -62,17 +109,7 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: MODEL,
-        input: {
-          prompt,
-          aspect_ratio: resolveKieAspectRatio(params.aspectRatio),
-          mode: resolveKieMode(params.mode),
-          duration: resolveKieDurationSeconds(params.durationSeconds),
-          resolution: resolveKieResolution(params.resolution),
-          nsfw_checker: true,
-        },
-      }),
+      body: JSON.stringify({ model, input }),
     });
 
     const data = (await res.json()) as CreateTaskResponse;

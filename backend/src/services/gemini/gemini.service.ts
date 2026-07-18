@@ -5,6 +5,12 @@ import type {
 } from '../../types/pipeline';
 import { VEO_QUALITY_LABELS } from '../../lib/veo-config';
 import { hasPoolKeys, poolKeysInOrder, advancePoolCursor } from '../../lib/gemini-key-pool';
+import {
+  deleteGeminiFile,
+  isYouTubeUrl,
+  uploadVideoAndWaitActive,
+  type GeminiUploadedFile,
+} from './gemini-files.service';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -18,6 +24,10 @@ interface GeminiResponse {
   }>;
   error?: { message?: string };
 }
+
+type GeminiPart =
+  | { text: string }
+  | { file_data: { file_uri: string; mime_type?: string } };
 
 const LANGUAGE_LABELS: Record<string, string> = {
   vi: 'Tiếng Việt',
@@ -104,6 +114,10 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
   );
 
   const isLinkInput = geminiInput.inputType === 'link';
+  const hasVideoPart = Boolean(
+    geminiInput.videoFileBase64?.trim()
+    || (geminiInput.sourceVideoUrl?.trim() && isYouTubeUrl(geminiInput.sourceVideoUrl)),
+  );
   const isKieProvider = veoInput.provider === 'kie';
 
   const durationRule = isKieProvider
@@ -118,6 +132,20 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
       ? '\n- Lưu ý Veo: 1080p bắt buộc mỗi cảnh 8 giây.'
       : '\n- Lưu ý Veo: thời lượng video mỗi cảnh chỉ 4, 6 hoặc 8 giây.';
 
+  const videoRules = hasVideoPart
+    ? `
+## Video đính kèm (bắt buộc bám sát)
+- Bạn ĐÃ được gửi kèm VIDEO thật (file_uri). Hãy XEM video đó.
+- Kịch bản phải phản ánh đúng nội dung, nhân vật, hành động, lời thoại, trình tự trong video.
+- Không bịa cảnh không có trong video. Có thể rút gọn / tái cấu trúc thành đúng ${count} cảnh.
+- Phần "Nội dung" bên dưới chỉ là gợi ý bổ sung (prompt người dùng), KHÔNG thay thế video.`
+    : isLinkInput
+      ? `
+## Lưu ý tab link (không có video bytes)
+- Không có file video đính kèm — chỉ có URL/mô tả text.
+- Ưu tiên mô tả người dùng; URL chỉ là tham chiếu.`
+      : '';
+
   return `Bạn là biên kịch video AI. Phân tích nội dung và tạo kịch bản video.
 
 ## Cài đặt Gemini (kịch bản)
@@ -125,6 +153,8 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 - Số cảnh: đúng ${count} cảnh
 - Kiểu video: ${videoType}
 - Loại đầu vào: ${geminiInput.inputType}
+${geminiInput.sourceVideoUrl?.trim() ? `- Source video URL: ${geminiInput.sourceVideoUrl.trim()}` : ''}
+${videoRules}
 
 ## Cài đặt Veo (video — dùng cho trường visual)
 - Tỷ lệ khung hình: ${ratio}
@@ -138,7 +168,7 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 ## Nhân vật (xuất hiện đồng nhất trong mọi cảnh — Veo)
 ${charactersBlock}
 
-## Nội dung
+## Nội dung / yêu cầu người dùng
 ${geminiInput.content.trim()}
 
 ## Yêu cầu output
@@ -195,7 +225,7 @@ function parseScript(raw: string): GeminiVideoScript {
   };
 }
 
-async function callGemini(apiKey: string, prompt: string): Promise<string> {
+async function callGemini(apiKey: string, parts: GeminiPart[]): Promise<string> {
   const model = getModel();
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
@@ -206,7 +236,7 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
       'X-goog-api-key': apiKey,
     },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
+      contents: [{ parts }],
     }),
   });
 
@@ -223,13 +253,13 @@ async function callGemini(apiKey: string, prompt: string): Promise<string> {
 }
 
 /** Gọi Gemini bằng key pool của server — hết quota key này thì tự xoay sang key kế tiếp */
-async function callGeminiWithPool(prompt: string): Promise<string> {
+async function callGeminiWithPool(parts: GeminiPart[]): Promise<string> {
   const keys = poolKeysInOrder();
   let lastError: Error | null = null;
 
   for (const key of keys) {
     try {
-      return await callGemini(key, prompt);
+      return await callGemini(key, parts);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error('Gemini API lỗi.');
       advancePoolCursor(key);
@@ -241,13 +271,55 @@ async function callGeminiWithPool(prompt: string): Promise<string> {
   );
 }
 
+/**
+ * Chuẩn bị phần video cho generateContent:
+ * 1) Có videoFileBase64 → upload Files API → fileUri
+ * 2) YouTube public URL → file_uri = URL (Gemini hỗ trợ sẵn, không cần upload)
+ */
+async function resolveVideoFilePart(
+  apiKey: string,
+  geminiInput: AnalyzePipelineRequest['geminiInput'],
+): Promise<{ part: GeminiPart | null; uploaded?: GeminiUploadedFile }> {
+  const base64 = geminiInput.videoFileBase64?.trim();
+  if (base64) {
+    const mimeType = geminiInput.videoFileMimeType?.trim() || 'video/mp4';
+    const bytes = Buffer.from(base64, 'base64');
+    const uploaded = await uploadVideoAndWaitActive({
+      apiKey,
+      bytes,
+      mimeType,
+      displayName: geminiInput.videoFileName?.trim() || `link-video-${Date.now()}`,
+    });
+    return {
+      part: {
+        file_data: {
+          file_uri: uploaded.uri,
+          mime_type: uploaded.mimeType || mimeType,
+        },
+      },
+      uploaded,
+    };
+  }
+
+  const url = geminiInput.sourceVideoUrl?.trim();
+  if (url && isYouTubeUrl(url)) {
+    return {
+      part: {
+        file_data: {
+          file_uri: url,
+          mime_type: 'video/*',
+        },
+      },
+    };
+  }
+
+  return { part: null };
+}
+
 export async function analyzeContent(request: AnalyzePipelineRequest): Promise<GeminiVideoScript> {
   const { geminiInput } = request;
 
-  // if (!geminiInput.apiKey?.trim()) {
-  //   throw new Error('Thiếu Gemini API Key.');
-  // }
-  if (!geminiInput.content?.trim()) {
+  if (!geminiInput.content?.trim() && !geminiInput.videoFileBase64?.trim() && !geminiInput.sourceVideoUrl?.trim()) {
     throw new Error('Nội dung không được để trống.');
   }
 
@@ -256,12 +328,38 @@ export async function analyzeContent(request: AnalyzePipelineRequest): Promise<G
     throw new Error('Thiếu Gemini API Key — nhập tại mục API Keys.');
   }
 
+  // Key dùng upload Files API phải cùng key gọi generateContent
+  const filesKey = userKey || poolKeysInOrder()[0];
+  if (!filesKey) {
+    throw new Error('Thiếu Gemini API Key — nhập tại mục API Keys.');
+  }
+
   const prompt = buildPrompt(request);
-  const raw = userKey ? await callGemini(userKey, prompt) : await callGeminiWithPool(prompt);
+  let uploaded: GeminiUploadedFile | undefined;
 
   try {
-    return parseScript(raw);
-  } catch {
-    throw new Error('Không parse được kịch bản JSON từ Gemini. Thử lại.');
+    const resolved = await resolveVideoFilePart(filesKey, geminiInput);
+    uploaded = resolved.uploaded;
+
+    const parts: GeminiPart[] = [{ text: prompt }];
+    if (resolved.part) parts.unshift(resolved.part);
+
+    // File Files API gắn với key đã upload — generateContent phải cùng key đó.
+    // YouTube file_uri / không có upload → dùng user key hoặc pool như cũ.
+    const raw = uploaded
+      ? await callGemini(filesKey, parts)
+      : userKey
+        ? await callGemini(userKey, parts)
+        : await callGeminiWithPool(parts);
+
+    try {
+      return parseScript(raw);
+    } catch {
+      throw new Error('Không parse được kịch bản JSON từ Gemini. Thử lại.');
+    }
+  } finally {
+    if (uploaded?.name) {
+      await deleteGeminiFile(filesKey, uploaded.name);
+    }
   }
 }

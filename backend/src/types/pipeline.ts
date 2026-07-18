@@ -20,6 +20,15 @@ export interface GeminiInput {
   videoType: string;
   inputType: 'text' | 'link' | 'image' | 'file';
   characters?: PipelineCharacter[];
+  /** Tab link — URL video (YouTube public → file_uri trực tiếp) */
+  sourceVideoUrl?: string;
+  /**
+   * Video đã upload (base64 thuần, không data-URL prefix) — BE upload lên Files API
+   * rồi gắn fileUri vào generateContent.
+   */
+  videoFileBase64?: string;
+  videoFileMimeType?: string;
+  videoFileName?: string;
 }
 
 /** Bước 2 — sinh video từ scene.visual — Veo 3 (mặc định) hoặc Grok Imagine (kie.ai) */
@@ -34,6 +43,11 @@ export interface VeoInput {
   sceneStyle?: string;
   sceneStyleId?: string;
   characters?: PipelineCharacter[];
+  /**
+   * Ảnh Master Cast / tham chiếu đồng nhất nhân vật (tab link).
+   * Gửi kèm mọi cảnh — Veo: instance.image; Kie: image-to-video.
+   */
+  referenceImage?: { base64: string; mimeType: string };
   /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
   provider?: 'veo' | 'kie';
   /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
