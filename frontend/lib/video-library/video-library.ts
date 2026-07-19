@@ -57,6 +57,8 @@ export interface VideoLibraryItem {
   masterCastPrompt?: string;
   /** Ảnh tham chiếu dàn nhân vật — user tự upload (data URL base64) */
   masterCastImageDataUrl?: string;
+  /** Mô tả nhân vật do Gemini Vision phân tích trực tiếp từ ảnh trên — chèn vào prompt mọi cảnh lúc gửi Veo/Kie */
+  masterCastImageDescription?: string;
   /** Kết quả phân tích tab link đang chờ xác nhận — chưa gọi TTS/Veo, chỉ hiện preview để xem/upload ảnh */
   pendingLinkReview?: SceneGenerationResult | null;
   appliedInput: PresetInput | null;

@@ -51,6 +51,29 @@ function parseKieError(msg: string | undefined, status: number, fallback: string
   return new VeoApiError(message, { status, fatal: isFatalVeoMessage(message) || status === 401 });
 }
 
+/** Đọc JSON an toàn — Kie đôi khi trả HTML (404/502) thay vì JSON */
+async function readKieJson<T>(res: Response, label: string): Promise<T> {
+  const text = await res.text();
+  const trimmed = text.trim();
+  if (!trimmed) {
+    throw new VeoApiError(`${label}: phản hồi trống (${res.status}).`, { status: res.status });
+  }
+  if (trimmed.startsWith('<')) {
+    throw new VeoApiError(
+      `${label}: server trả HTML thay vì JSON (${res.status}) — kiểm tra API / endpoint.`,
+      { status: res.status },
+    );
+  }
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    throw new VeoApiError(
+      `${label}: không parse được JSON (${res.status}): ${trimmed.slice(0, 120)}`,
+      { status: res.status },
+    );
+  }
+}
+
 /** POST /jobs/createTask — T2V hoặc I2V (khi có ảnh Master Cast / ảnh nguồn) */
 export async function startGrokVideoGeneration(params: GenerateGrokVideoParams): Promise<string> {
   const apiKey = params.apiKey.trim();
@@ -76,9 +99,17 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
   const mode = useI2V && resolveKieMode(params.mode) === 'spicy'
     ? 'normal'
     : resolveKieMode(params.mode);
-  // Docs: tham chiếu ảnh bằng @image1 trong prompt
+
+  // Master Cast / ref: @image1 = ngoại hình nhân vật, KHÔNG copy pose/composition của sheet.
+  // Prompt cảnh phải mô tả hành động + bối cảnh MỚI.
   const finalPrompt = useI2V && !prompt.includes('@image')
-    ? `@image1 ${prompt}`
+    ? [
+        '@image1',
+        'Use @image1 ONLY as a character appearance reference sheet (faces, outfits, body design).',
+        'Do NOT recreate the same pose, framing, or group composition from the reference.',
+        'Generate a completely NEW scene matching this description:',
+        prompt,
+      ].join(' ')
     : prompt;
 
   const input: Record<string, unknown> = {
@@ -98,7 +129,7 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
     hasImage,
     imageUploaded: Boolean(imageUrl),
     imageUrl: imageUrl ? `${imageUrl.slice(0, 80)}…` : null,
-    promptPreview: finalPrompt.slice(0, 120),
+    promptPreview: finalPrompt.slice(0, 160),
     mode,
   });
 
@@ -112,7 +143,7 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
       body: JSON.stringify({ model, input }),
     });
 
-    const data = (await res.json()) as CreateTaskResponse;
+    const data = await readKieJson<CreateTaskResponse>(res, 'Kie createTask');
 
     if (!res.ok || data.code !== 200 || !data.data?.taskId) {
       throw parseKieError(data.msg, res.status, `Kie.ai API lỗi (${res.status})`);
@@ -132,7 +163,7 @@ export async function pollGrokVideoTask(apiKey: string, taskId: string): Promise
       headers: { Authorization: `Bearer ${key}` },
     });
 
-    const data = (await res.json()) as RecordInfoResponse;
+    const data = await readKieJson<RecordInfoResponse>(res, 'Kie poll');
 
     if (!res.ok || data.code !== 200 || !data.data) {
       throw parseKieError(data.msg, res.status, `Kie.ai API lỗi (${res.status})`);

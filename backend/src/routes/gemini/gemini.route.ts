@@ -1,7 +1,13 @@
 import { Hono } from 'hono';
 import { ok, fail } from '../../utils/api-response';
-import { analyzeContent } from '../../services/gemini/gemini.service';
+import { analyzeContent, describeCharacterSheet } from '../../services/gemini/gemini.service';
 import type { AnalyzePipelineRequest } from '../../types/pipeline';
+
+interface DescribeCharacterSheetBody {
+  apiKey?: string;
+  imageBase64: string;
+  imageMimeType: string;
+}
 
 export const geminiRoute = new Hono();
 
@@ -55,6 +61,32 @@ geminiRoute.post('/analyze', async (c) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Lỗi khi gọi Gemini';
+    return fail(c, message, 500);
+  }
+});
+
+/**
+ * POST /api/gemini/describe-character-sheet
+ * Gemini Vision — phân tích ảnh Character Sheet vừa upload, trả mô tả text chi
+ * tiết dùng làm "master character" chèn vào prompt mọi cảnh (giữ nhất quán).
+ */
+geminiRoute.post('/describe-character-sheet', async (c) => {
+  try {
+    const body = await c.req.json<DescribeCharacterSheetBody>();
+
+    if (!body.imageBase64?.trim()) {
+      return fail(c, 'Thiếu ảnh Character Sheet.', 400);
+    }
+
+    const description = await describeCharacterSheet({
+      apiKey: body.apiKey,
+      imageBase64: body.imageBase64,
+      imageMimeType: body.imageMimeType,
+    });
+
+    return ok(c, { description });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Lỗi khi phân tích ảnh Character Sheet';
     return fail(c, message, 500);
   }
 });

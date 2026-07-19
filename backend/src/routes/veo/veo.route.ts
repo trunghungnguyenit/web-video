@@ -15,6 +15,8 @@ interface StartBody {
   veoInput: VeoInput;
   durationSeconds: number;
   image?: { base64: string; mimeType: string };
+  /** Scene Continuity (Video Extension, Veo 3.1) — video thật của cảnh liền trước */
+  previousVideo?: { base64: string; mimeType: string };
 }
 
 interface PollBody {
@@ -83,6 +85,7 @@ veoRoute.post('/generate/start', async (c) => {
       veoInput: body.veoInput,
       durationSeconds: body.durationSeconds ?? 6,
       image: body.image,
+      previousVideo: body.previousVideo,
     });
 
     return ok(c, { operationName });

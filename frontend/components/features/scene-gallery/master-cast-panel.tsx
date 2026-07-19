@@ -1,8 +1,11 @@
 'use client';
 
 import { useRef, useState } from 'react';
-import { Sparkles, Crown, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Crown, CheckCircle2, Loader2 } from 'lucide-react';
 import { FieldError } from '@/components/ui/field-error';
+import { parseDataUrl } from '@/lib/pipeline-payload';
+import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { geminiService } from '@/services/gemini/gemini.service';
 
 const MAX_MASTER_CAST_IMAGE_MB = 5;
 
@@ -11,6 +14,8 @@ interface MasterCastPanelProps {
   onPromptChange: (value: string) => void;
   imageDataUrl?: string;
   onImageChange: (dataUrl: string | undefined) => void;
+  /** Nhận mô tả nhân vật do Gemini Vision phân tích trực tiếp từ ảnh vừa upload — chèn vào prompt mọi cảnh lúc gửi Veo/Kie */
+  onDescriptionChange?: (description: string | undefined) => void;
   /**
    * Có mặt khi đang chờ xác nhận (tab link).
    * Truyền kèm imageDataUrl hiện tại (không phụ thuộc state async của parent).
@@ -31,12 +36,32 @@ function readImageFile(file: File): Promise<string> {
 }
 
 /** Khối "Master Cast" — prompt mô tả toàn bộ dàn nhân vật (Gemini sinh) + ảnh tham chiếu user tự upload/dán. Chỉ hiện cho video tạo từ tab "Từ link video". */
-export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageChange, onConfirm }: MasterCastPanelProps) {
+export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageChange, onDescriptionChange, onConfirm }: MasterCastPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Ref đồng bộ ngay khi chọn ảnh — tránh race khi bấm xác nhận trước khi parent re-render */
   const imageRef = useRef<string | undefined>(imageDataUrl);
   imageRef.current = imageDataUrl;
   const [error, setError] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const analyzeCharacterSheet = async (dataUrl: string) => {
+    const parsed = parseDataUrl(dataUrl);
+    if (!parsed) return;
+    setAnalyzing(true);
+    try {
+      const description = await geminiService.describeCharacterSheet({
+        apiKey: getApiKey(API_KEY_IDS.gemini) || undefined,
+        imageBase64: parsed.base64,
+        imageMimeType: parsed.mimeType,
+      });
+      onDescriptionChange?.(description);
+    } catch {
+      // Best-effort — ảnh tham chiếu vẫn gửi kèm Veo/Kie như bình thường dù phân tích thất bại
+      onDescriptionChange?.(undefined);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   const applyImageFile = async (file: File | null | undefined) => {
     if (!file) return;
@@ -53,6 +78,7 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
       imageRef.current = dataUrl;
       onImageChange(dataUrl);
       setError(null);
+      void analyzeCharacterSheet(dataUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không đọc được file ảnh — thử lại.');
     }
@@ -115,6 +141,12 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
               <span className="text-[10px] font-normal opacity-80">Click tải lên hoặc Ctrl+V dán</span>
             </span>
           )}
+          {analyzing && (
+            <span className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/70 text-[11px] font-medium text-white">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Gemini đang phân tích nhân vật...
+            </span>
+          )}
         </button>
 
         <div className="flex-1 min-w-0 space-y-1.5">
@@ -129,11 +161,9 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
             className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs text-foreground resize-y focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors"
           />
           {error && <FieldError className="items-center gap-1">{error}</FieldError>}
-          {!error && (
-            <p className="text-[11px] text-muted-foreground">
-              Ảnh này sẽ được gửi kèm mỗi cảnh (Veo / Grok Imagine) để giữ nhân vật đồng nhất.
-            </p>
-          )}
+          <p className="text-[11px] text-muted-foreground">
+            Ảnh sheet dùng để giữ ngoại hình nhân vật — mỗi cảnh vẫn theo prompt riêng (hành động/bối cảnh mới), không copy nguyên ảnh này.
+          </p>
         </div>
       </div>
 

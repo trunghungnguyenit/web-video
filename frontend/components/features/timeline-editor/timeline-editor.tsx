@@ -73,6 +73,9 @@ export function TimelineEditor({
   const playRafRef = useRef<number | null>(null);
   const playLastTickRef = useRef(0);
 
+  /** Bật = nghe tiếng video + lời dẫn TTS; Tắt = chỉ tiếng trong video */
+  const [playNarration, setPlayNarration] = useState(true);
+
   const readyScenes = useMemo(
     () => scenes.filter((s) =>
       s.status === 'success' || s.status === 'edited' || s.status === 'generating',
@@ -145,7 +148,22 @@ export function TimelineEditor({
     const alt = ttsAudioBRef.current;
     if (main && activeTtsIsMain.current) main.volume = vol;
     if (alt && !activeTtsIsMain.current) alt.volume = vol;
-  }, [volume]);
+    const va = previewARef.current;
+    const vb = previewBRef.current;
+    // Luôn mở tiếng video (SFX / lời trong clip). Lời dẫn TTS bật/tắt riêng.
+    if (va) {
+      va.muted = false;
+      va.volume = vol;
+    }
+    if (vb) {
+      vb.muted = false;
+      vb.volume = vol;
+    }
+    if (!playNarration) {
+      main?.pause();
+      alt?.pause();
+    }
+  }, [volume, playNarration]);
 
   const applySceneMedia = useCallback(async (
     scene: VideoScene,
@@ -171,7 +189,7 @@ export function TimelineEditor({
         tasks.push(crossfadeVideo(outgoingVideo, incomingVideo, scene.videoUrl, ms, opts.playing, offset));
       }
 
-      if (scene.audioUrl && incomingAudio) {
+      if (playNarration && scene.audioUrl && incomingAudio) {
         tasks.push(
           crossfadeAudio(
             opts.animate && ms > 0 ? outgoingAudio : null,
@@ -194,7 +212,7 @@ export function TimelineEditor({
         setFrontIsA(frontVideoIsA.current);
       }
 
-      if (scene.audioUrl && incomingAudio) {
+      if (playNarration && scene.audioUrl && incomingAudio) {
         activeTtsIsMain.current = !activeTtsIsMain.current;
       }
 
@@ -221,7 +239,7 @@ export function TimelineEditor({
         }
       }
     }
-  }, [transitionSec, volume, readyScenes]);
+  }, [transitionSec, volume, readyScenes, playNarration]);
 
   const activeSceneForPreview = useMemo(
     () => findSceneAtPlayhead(readyScenes, playhead),
@@ -430,6 +448,7 @@ export function TimelineEditor({
         bgmFile: uploadedFile,
         bgmVolume,
         includeSubtitles,
+        includeTts: playNarration,
         onProgress: (pct, msg) => {
           setRenderProgress(pct);
           setRenderMessage(msg);
@@ -464,7 +483,7 @@ export function TimelineEditor({
     } finally {
       setIsRendering(false);
     }
-  }, [readyScenes, uploadedFile, bgmVolume, includeSubtitles]);
+  }, [readyScenes, uploadedFile, bgmVolume, includeSubtitles, playNarration]);
 
   if (scenes.length === 0) {
     return (
@@ -514,7 +533,7 @@ export function TimelineEditor({
                     'absolute inset-0 w-full h-full object-cover',
                     frontIsA ? 'z-10' : 'z-0',
                   )}
-                  muted
+                  muted={false}
                   playsInline
                   onEnded={handlePreviewVideoLoop}
                 />
@@ -524,7 +543,7 @@ export function TimelineEditor({
                     'absolute inset-0 w-full h-full object-cover',
                     frontIsA ? 'z-0' : 'z-10',
                   )}
-                  muted
+                  muted={false}
                   playsInline
                   onEnded={handlePreviewVideoLoop}
                 />
@@ -634,61 +653,65 @@ export function TimelineEditor({
             </div>
           </div>
 
-          {/* Voice / TTS track */}
-          <div className="flex border-b border-border min-w-[600px]">
-            <div className="w-28 flex-shrink-0 px-4 py-3 border-r border-border bg-background/30">
-              <span className="block text-xs font-semibold text-foreground">Voice (TTS)</span>
-              <span className="block text-[10px] text-muted-foreground">
-                {ttsReadyCount}/{readyScenes.length} có audio
-              </span>
+          {/* Voice / TTS track — chỉ hiện khi bật Lời dẫn riêng */}
+          {playNarration && (
+            <div className="flex border-b border-border min-w-[600px]">
+              <div className="w-28 flex-shrink-0 px-4 py-3 border-r border-border bg-background/30">
+                <span className="block text-xs font-semibold text-foreground">Voice (TTS)</span>
+                <span className="block text-[10px] text-muted-foreground">
+                  {ttsReadyCount}/{readyScenes.length} có audio
+                </span>
+              </div>
+              <div className="flex-1 px-3 py-2.5 flex items-center gap-1.5 overflow-x-auto min-h-[44px]">
+                {readyScenes.map((scene) => (
+                  <div
+                    key={scene.id}
+                    style={{ flex: `${scene.durationSeconds} 0 60px` }}
+                    className={cn(
+                      'h-9 min-w-[48px] rounded-lg px-2 flex items-center gap-1',
+                      scene.audioUrl
+                        ? 'bg-primary/10 border border-primary/20'
+                        : 'bg-orange-500/10 border border-orange-500/20',
+                    )}
+                    title={scene.audioUrl ? scene.voice : `${scene.voice} (chưa có audio TTS)`}
+                  >
+                    {scene.audioUrl ? (
+                      <Volume2 className="w-3 h-3 text-primary shrink-0" />
+                    ) : (
+                      <AlertCircle className="w-3 h-3 text-orange-400 shrink-0" />
+                    )}
+                    <span className={cn(
+                      'text-[10px] truncate',
+                      scene.audioUrl ? 'text-primary/80' : 'text-orange-400/80',
+                    )}>
+                      {scene.voice.slice(0, 20)}…
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex-1 px-3 py-2.5 flex items-center gap-1.5 overflow-x-auto min-h-[44px]">
-              {readyScenes.map((scene) => (
-                <div
-                  key={scene.id}
-                  style={{ flex: `${scene.durationSeconds} 0 60px` }}
-                  className={cn(
-                    'h-9 min-w-[48px] rounded-lg px-2 flex items-center gap-1',
-                    scene.audioUrl
-                      ? 'bg-primary/10 border border-primary/20'
-                      : 'bg-orange-500/10 border border-orange-500/20',
-                  )}
-                  title={scene.audioUrl ? scene.voice : `${scene.voice} (chưa có audio TTS)`}
-                >
-                  {scene.audioUrl ? (
-                    <Volume2 className="w-3 h-3 text-primary shrink-0" />
-                  ) : (
-                    <AlertCircle className="w-3 h-3 text-orange-400 shrink-0" />
-                  )}
-                  <span className={cn(
-                    'text-[10px] truncate',
-                    scene.audioUrl ? 'text-primary/80' : 'text-orange-400/80',
-                  )}>
-                    {scene.voice.slice(0, 20)}…
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
 
-          {/* Subtitle track */}
-          <div className="flex border-b border-border min-w-[600px]">
-            <div className="w-28 flex-shrink-0 px-4 py-3 border-r border-border bg-background/30">
-              <span className="block text-xs font-semibold text-foreground">Subtitle</span>
-              <span className="block text-[10px] text-muted-foreground">{includeSubtitles ? 'Bật' : 'Tắt'}</span>
+          {/* Subtitle track — chỉ hiện khi bật Phụ đề */}
+          {includeSubtitles && (
+            <div className="flex border-b border-border min-w-[600px]">
+              <div className="w-28 flex-shrink-0 px-4 py-3 border-r border-border bg-background/30">
+                <span className="block text-xs font-semibold text-foreground">Subtitle</span>
+                <span className="block text-[10px] text-muted-foreground">Bật</span>
+              </div>
+              <div className="flex-1 px-3 py-2.5 flex items-center gap-1.5 overflow-x-auto min-h-[44px]">
+                {readyScenes.map((scene) => (
+                  <div
+                    key={scene.id}
+                    style={{ flex: `${scene.durationSeconds} 0 60px` }}
+                    className="h-9 min-w-[48px] bg-accent/10 border border-accent/20 rounded-lg px-2 flex items-center"
+                  >
+                    <span className="text-[10px] text-accent/80 truncate">Sub {scene.index}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex-1 px-3 py-2.5 flex items-center gap-1.5 overflow-x-auto min-h-[44px]">
-              {includeSubtitles && readyScenes.map((scene) => (
-                <div
-                  key={scene.id}
-                  style={{ flex: `${scene.durationSeconds} 0 60px` }}
-                  className="h-9 min-w-[48px] bg-accent/10 border border-accent/20 rounded-lg px-2 flex items-center"
-                >
-                  <span className="text-[10px] text-accent/80 truncate">Sub {scene.index}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          )}
 
           {/* BGM track */}
           <div ref={bgmSectionRef} className="flex border-b border-border min-w-[600px]">
@@ -801,6 +824,23 @@ export function TimelineEditor({
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
+            </label>
+            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card cursor-pointer hover:border-primary/30">
+              <input
+                type="checkbox"
+                checked={playNarration}
+                onChange={(e) => setPlayNarration(e.target.checked)}
+                className="accent-primary"
+              />
+              <Mic2 className="w-4 h-4 text-primary" />
+              <span className="text-xs font-medium">
+                Lời dẫn riêng
+                <span className="block text-[10px] text-muted-foreground font-normal">
+                  {playNarration
+                    ? 'Bật — nghe tiếng video + lời dẫn TTS'
+                    : 'Tắt — chỉ nghe tiếng trong video'}
+                </span>
+              </span>
             </label>
             <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card cursor-pointer hover:border-primary/30">
               <input type="checkbox" checked={includeSubtitles} onChange={(e) => setIncludeSubtitles(e.target.checked)} className="accent-primary" />

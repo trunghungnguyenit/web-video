@@ -60,6 +60,8 @@ export interface TtsInput {
   voice: string;
   language: string;
   voiceSpeed?: number;
+  /** false = bỏ qua TTS (dùng audio native trong video) */
+  enabled?: boolean;
 }
 
 export interface AnalyzePipelineRequest {

@@ -83,12 +83,18 @@ export async function regenerateSceneAssets(
   ttsInput: TtsInput,
   veoInput: VeoInput,
   callbacks?: SceneVideoCallbacks,
+  /** Scene Continuity (Video Extension, Veo 3.1) — videoUrl cảnh liền trước */
+  previousSceneVideoUrl?: string,
 ): Promise<VideoScene> {
   revokeSceneVideoUrl(scene.videoUrl);
 
   let next: VideoScene;
   try {
-    next = await attachAudioToSingleScene(scene, ttsInput);
+    if (ttsInput.enabled === false) {
+      next = { ...scene, audioUrl: undefined, audioPath: undefined };
+    } else {
+      next = await attachAudioToSingleScene(scene, ttsInput);
+    }
   } catch {
     next = { ...scene, audioUrl: undefined, audioPath: undefined };
   }
@@ -103,6 +109,7 @@ export async function regenerateSceneAssets(
           callbacks?.onOperationStarted?.(operationId);
         },
       },
+      previousSceneVideoUrl,
     );
     return { ...next, videoUrl, veoOperationName: undefined, kieTaskId: undefined, videoPath: undefined, status: 'success' };
   } catch (err) {

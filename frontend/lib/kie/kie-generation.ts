@@ -2,6 +2,7 @@
 
 import type { VideoScene } from '@/lib/scene/scenes';
 import type { VeoInput } from '@/lib/pipeline-payload';
+import { buildScenePrompt } from '@/lib/pipeline-payload';
 import { kieService } from '@/services/kie/kie.service';
 import { withKieConcurrency } from '@/lib/veo/veo-concurrency';
 import {
@@ -78,25 +79,20 @@ export async function generateSceneVideoAssetKie(
     if (!taskId) {
       if (isSceneStopped(scene.id)) throw new SceneStoppedError();
 
-      // Ưu tiên: ảnh nguồn cảnh → referenceImage (Master Cast) → character có ảnh
-      const referenceImage = veoInput.referenceImage?.base64 && veoInput.referenceImage?.mimeType
-        ? veoInput.referenceImage
-        : undefined;
-      const characterImage = veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
+      // CHỈ dùng ảnh nguồn RIÊNG của cảnh (tab "Từ hình ảnh") cho image-to-video. KHÔNG
+      // BAO GIỜ dùng referenceImage/character (Master Cast) làm ảnh I2V: Grok Imagine coi
+      // ảnh gửi vào là khung hình khởi động THẬT SỰ của video xuất ra — không có cách nào
+      // "chỉ dùng để tham chiếu ẩn mà không hiện ra". Ảnh Master Cast là identity reference
+      // ẨN, không được xuất hiện trong bất kỳ video xuất ra nào. Đồng nhất nhân vật cho
+      // Grok Imagine dựa hoàn toàn vào mô tả text (masterCharacterText + characterStates).
       const image =
         scene.sourceImageBase64 && scene.sourceImageMimeType
           ? { base64: scene.sourceImageBase64, mimeType: scene.sourceImageMimeType }
-          : referenceImage
-            ? { base64: referenceImage.base64, mimeType: referenceImage.mimeType }
-            : characterImage?.imageBase64 && characterImage.imageMimeType
-              ? { base64: characterImage.imageBase64, mimeType: characterImage.imageMimeType }
-              : undefined;
+          : undefined;
 
-      console.log('[kie/generate] Master Cast check:', {
+      console.log('[kie/generate] image-to-video check:', {
         sceneId: scene.id,
         hasSceneSourceImage: Boolean(scene.sourceImageBase64),
-        hasReferenceImage: Boolean(referenceImage),
-        hasCharacterImage: Boolean(characterImage?.imageBase64),
         willSendImage: Boolean(image),
         characterNames: veoInput.characters?.map((c) => c.name) ?? [],
         imageBytesApprox: image ? Math.round((image.base64.length * 3) / 4) : 0,
@@ -109,7 +105,7 @@ export async function generateSceneVideoAssetKie(
       const started = await withKieConcurrency(() =>
         kieService.startGeneration({
           apiKey,
-          prompt: scene.prompt,
+          prompt: buildScenePrompt(scene.prompt, veoInput.masterCharacterText),
           aspectRatio: veoInput.aspectRatio,
           durationSeconds: scene.durationSeconds,
           mode: veoInput.kieMode,

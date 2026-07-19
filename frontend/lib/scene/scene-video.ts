@@ -11,6 +11,8 @@ export async function createSceneVideo(
   scene: VideoScene,
   veoInput: VeoInput,
   callbacks?: SceneVideoCallbacks,
+  /** Scene Continuity (Video Extension, Veo 3.1) — videoUrl cảnh liền trước, chỉ áp dụng cho Veo */
+  previousSceneVideoUrl?: string,
 ): Promise<string> {
   const apiKey = veoInput.apiKey?.trim();
   const quality = veoInput.videoQuality ?? '720p';
@@ -21,7 +23,7 @@ export async function createSceneVideo(
   }
 
   if (apiKey) {
-    const { videoUrl } = await generateSceneVideoAsset(scene, veoInput, callbacks);
+    const { videoUrl } = await generateSceneVideoAsset(scene, veoInput, callbacks, previousSceneVideoUrl);
     return videoUrl;
   }
 

@@ -23,10 +23,22 @@ export interface AnalyzeScriptResponse {
   ttsInput: TtsInput;
 }
 
+export interface DescribeCharacterSheetPayload {
+  apiKey?: string;
+  imageBase64: string;
+  imageMimeType: string;
+}
+
 class GeminiService {
   /** POST /api/gemini/analyze — bước 1 pipeline (Gemini), kèm veoInput/ttsInput cho bước sau */
   async analyzeScript(payload: AnalyzePipelineRequest): Promise<AnalyzeScriptResponse> {
     return apiService.post('/api/gemini/analyze', payload) as Promise<AnalyzeScriptResponse>;
+  }
+
+  /** POST /api/gemini/describe-character-sheet — Gemini Vision phân tích ảnh Character Sheet vừa upload */
+  async describeCharacterSheet(payload: DescribeCharacterSheetPayload): Promise<string> {
+    const data = await apiService.post('/api/gemini/describe-character-sheet', payload) as { description: string };
+    return data.description;
   }
 }
 

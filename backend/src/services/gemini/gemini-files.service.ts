@@ -183,3 +183,32 @@ export function isYouTubeUrl(raw: string): boolean {
     return false;
   }
 }
+
+/**
+ * Chuẩn hoá URL YouTube về đúng dạng Gemini file_uri chấp nhận:
+ * "https://www.youtube.com/watch?v=VIDEO_ID" — bỏ các query param khác (vd. "&t=8s"
+ * timestamp, "&list=" playlist...) vì Gemini trả "Request contains an invalid argument"
+ * (400 INVALID_ARGUMENT) khi URL kèm tham số lạ, dù video hoàn toàn public/hợp lệ.
+ */
+export function normalizeYouTubeUrl(raw: string): string {
+  const trimmed = raw.trim();
+  try {
+    const u = new URL(trimmed);
+    const host = u.hostname.replace(/^www\./, '').toLowerCase();
+
+    let videoId: string | null = null;
+    if (host === 'youtu.be') {
+      videoId = u.pathname.split('/').filter(Boolean)[0] ?? null;
+    } else if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+      if (u.pathname === '/watch') {
+        videoId = u.searchParams.get('v');
+      } else if (u.pathname.startsWith('/shorts/') || u.pathname.startsWith('/embed/')) {
+        videoId = u.pathname.split('/').filter(Boolean)[1] ?? null;
+      }
+    }
+
+    return videoId ? `https://www.youtube.com/watch?v=${videoId}` : trimmed;
+  } catch {
+    return trimmed;
+  }
+}

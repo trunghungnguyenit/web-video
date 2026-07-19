@@ -53,10 +53,21 @@ export interface VeoInput {
    * Gửi kèm mọi cảnh — Veo: instance.image; Kie: image-to-video.
    */
   referenceImage?: { base64: string; mimeType: string };
+  /**
+   * Mô tả nhân vật do Gemini Vision phân tích trực tiếp từ ảnh Character Sheet
+   * (tab link) — chèn vào ĐẦU prompt mọi cảnh lúc gửi Veo/Kie để củng cố thêm
+   * cho ảnh tham chiếu (KHÔNG lưu vào scene.prompt, chỉ ghép lúc gửi request).
+   */
+  masterCharacterText?: string;
   /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
   provider?: 'veo' | 'kie';
   /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
   kieMode?: 'fun' | 'normal' | 'spicy';
+  /**
+   * Scene Continuity (Video Extension) — chỉ Veo 3.1/3.1 Fast. Khi bật, cảnh sau (không
+   * phải cảnh 1) nối tiếp từ video THẬT của cảnh liền trước thay vì chỉ ảnh tham chiếu.
+   */
+  sceneContinuity?: boolean;
 }
 
 export interface TtsInput {
@@ -64,6 +75,28 @@ export interface TtsInput {
   voice: string;
   language: string;
   voiceSpeed?: number;
+  /** false = bỏ qua ElevenLabs — dùng audio native trong video (Veo) */
+  enabled?: boolean;
+}
+
+/**
+ * Ghép mô tả nhân vật (Gemini Vision phân tích Character Sheet) vào prompt cảnh —
+ * chỉ dùng lúc gửi request Veo/Kie, KHÔNG lưu ngược vào scene.prompt để giữ UI sửa
+ * cảnh sạch sẽ. Đặt SAU nội dung cảnh, đóng khung như 1 ghi chú tham chiếu nhận dạng
+ * (KHÔNG phải nội dung cảnh) — tránh model "vẽ lại" character sheet như 1 shot riêng.
+ */
+export function buildScenePrompt(scenePrompt: string, masterCharacterText?: string): string {
+  const text = masterCharacterText?.trim();
+  if (!text) return scenePrompt;
+  // Nội dung cảnh (hành động/bối cảnh thật) đặt TRƯỚC — đây mới là thứ cần vẽ ra. Ghi
+  // chú nhận dạng nhân vật đặt SAU, đóng khung rõ là tham chiếu/ràng buộc (KHÔNG phải nội
+  // dung của cảnh) — tránh AI hiểu nhầm thành 1 shot riêng để "vẽ lại" character sheet/portrait.
+  return (
+    `${scenePrompt}\n\n` +
+    `[Character identity reference — NOT part of this shot, do not render as a separate portrait/turnaround: ` +
+    `while performing the action above, the character(s) simply keep this exact existing appearance ` +
+    `(face, hairstyle, outfit, colors, art style) unchanged: ${text}]`
+  );
 }
 
 export interface AnalyzePipelineRequest {
@@ -110,6 +143,7 @@ export interface BuildPipelineParams {
   characters: PipelineCharacter[];
   provider?: 'veo' | 'kie';
   kieMode?: 'fun' | 'normal' | 'spicy';
+  sceneContinuity?: boolean;
   sourceVideoUrl?: string;
   videoFileBase64?: string;
   videoFileMimeType?: string;
@@ -147,12 +181,15 @@ export function buildAnalyzePipeline(params: BuildPipelineParams): AnalyzePipeli
       characters,
       provider: params.provider,
       kieMode: params.kieMode,
+      // Chỉ có ý nghĩa với Veo 3.1 — ignore khi dùng Grok Imagine (kie.ai không hỗ trợ)
+      sceneContinuity: params.provider === 'kie' ? undefined : params.sceneContinuity,
     },
     ttsInput: {
       apiKey: params.ttsApiKey || undefined,
       voice: params.voice,
       language: params.language,
       voiceSpeed: params.voiceSpeed,
+      enabled: true,
     },
   };
 }

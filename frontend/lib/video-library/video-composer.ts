@@ -11,6 +11,8 @@ export interface VideoRenderOptions {
   bgmFile?: File | null;
   bgmVolume?: number;
   includeSubtitles?: boolean;
+  /** false = không trộn ElevenLabs TTS — chỉ giữ audio trong file video */
+  includeTts?: boolean;
   onProgress?: (percent: number, message: string) => void;
 }
 
@@ -27,7 +29,7 @@ function readyScenes(scenes: VideoScene[]): VideoScene[] {
   );
 }
 
-/** Chuẩn hóa clip cảnh → MP4 H.264 qua FFmpeg (placeholder nếu thiếu videoUrl) */
+/** Chuẩn hóa clip cảnh → MP4 H.264 qua FFmpeg (placeholder nếu thiếu videoUrl). Giữ audio native (Veo SFX) nếu có. */
 async function ensureSceneClip(
   ffmpeg: Awaited<ReturnType<typeof getFFmpeg>>,
   scene: VideoScene,
@@ -43,8 +45,7 @@ async function ensureSceneClip(
 
   await ffmpeg.writeFile(inName, await fetchFile(sourceUrl));
 
-  // Loop nếu clip nguồn ngắn hơn durationSeconds — giữ đủ độ dài từng cảnh
-  await ffmpeg.exec([
+  const commonVideo = [
     '-stream_loop', '-1',
     '-i', inName,
     '-c:v', 'libx264',
@@ -53,9 +54,26 @@ async function ensureSceneClip(
     '-s', '1280x720',
     '-r', '30',
     '-t', String(scene.durationSeconds),
-    '-an',
-    outName,
-  ]);
+  ];
+
+  // Ưu tiên giữ audio gốc (SFX Veo). Không có track audio → thêm silent.
+  try {
+    await ffmpeg.exec([
+      ...commonVideo,
+      '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+      outName,
+    ]);
+  } catch {
+    await ffmpeg.exec([
+      ...commonVideo,
+      '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+      '-map', '0:v:0',
+      '-map', '1:a:0',
+      '-c:a', 'aac', '-b:a', '128k',
+      '-shortest',
+      outName,
+    ]);
+  }
 
   await ffmpeg.deleteFile(inName);
   return outName;
@@ -120,6 +138,7 @@ export async function composeVideo(options: VideoRenderOptions): Promise<VideoRe
     bgmFile,
     bgmVolume = 30,
     includeSubtitles = true,
+    includeTts = true,
     onProgress,
   } = options;
 
@@ -179,8 +198,8 @@ export async function composeVideo(options: VideoRenderOptions): Promise<VideoRe
     }
   }
 
-  onProgress?.(72, 'Tạo track lời thoại TTS...');
-  const voiceTrack = await buildVoiceTrack(ffmpeg, timeline);
+  onProgress?.(72, includeTts ? 'Tạo track lời thoại TTS...' : 'Bỏ qua TTS — dùng audio trong video...');
+  const voiceTrack = includeTts ? await buildVoiceTrack(ffmpeg, timeline) : null;
 
   if (!voiceTrack) {
     onProgress?.(74, 'Không có TTS — tạo track im lặng...');
@@ -194,17 +213,44 @@ export async function composeVideo(options: VideoRenderOptions): Promise<VideoRe
 
   const audioTrack = voiceTrack ?? 'silent.aac';
 
-  onProgress?.(78, 'Ghép âm thanh vào video...');
-  await ffmpeg.exec([
-    '-i', currentVideo,
-    '-i', audioTrack,
-    '-map', '0:v:0',
-    '-map', '1:a:0',
-    '-c:v', 'copy',
-    '-c:a', 'aac',
-    '-t', String(totalDuration),
-    'video_with_audio.mp4',
-  ]);
+  onProgress?.(78, 'Ghép âm thanh (SFX video + lời thoại TTS)...');
+  // Trộn SFX/ambient trong file Veo (0:a) với TTS ElevenLabs (1:a). Không có TTS → giữ audio video.
+  try {
+    if (voiceTrack) {
+      await ffmpeg.exec([
+        '-i', currentVideo,
+        '-i', audioTrack,
+        '-filter_complex',
+        '[0:a]volume=0.75[sfx];[1:a]volume=1.0[voice];[sfx][voice]amix=inputs=2:duration=first:dropout_transition=2[aout]',
+        '-map', '0:v:0',
+        '-map', '[aout]',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-t', String(totalDuration),
+        'video_with_audio.mp4',
+      ]);
+    } else {
+      await ffmpeg.exec([
+        '-i', currentVideo,
+        '-c', 'copy',
+        '-t', String(totalDuration),
+        'video_with_audio.mp4',
+      ]);
+    }
+  } catch {
+    // Video không có audio track — chỉ gắn TTS / silent như trước
+    await ffmpeg.exec([
+      '-i', currentVideo,
+      '-i', audioTrack,
+      '-map', '0:v:0',
+      '-map', '1:a:0',
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-t', String(totalDuration),
+      'video_with_audio.mp4',
+    ]);
+  }
 
   if (!voiceTrack) await ffmpeg.deleteFile('silent.aac');
   else await ffmpeg.deleteFile(voiceTrack);
