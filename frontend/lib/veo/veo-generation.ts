@@ -2,6 +2,7 @@
 
 import type { VideoScene } from '@/lib/scene/scenes';
 import type { VeoInput } from '@/lib/pipeline-payload';
+import { buildScenePrompt } from '@/lib/pipeline-payload';
 import { veoService } from '@/services/veo/veo.service';
 import { withVeoConcurrency } from '@/lib/veo/veo-concurrency';
 import {
@@ -12,6 +13,7 @@ import {
   SceneStoppedError,
 } from '@/lib/veo/veo-generation-lock';
 import { isFatalErrorMessage } from '@/lib/veo/fatal-error-patterns';
+import { fetchVideoAsBase64, trimToLastSeconds } from '@/lib/veo/scene-continuity';
 
 export const VEO_POLL_INTERVAL_MS = 10_000;
 export const VEO_MAX_POLL_MS = 10 * 60 * 1000;
@@ -63,6 +65,12 @@ export async function generateSceneVideoAsset(
   scene: VideoScene,
   veoInput: VeoInput,
   callbacks?: SceneVideoCallbacks,
+  /**
+   * Scene Continuity (Video Extension, Veo 3.1) — videoUrl của cảnh liền TRƯỚC (không
+   * phải cảnh 1). Chỉ dùng khi veoInput.sceneContinuity bật; provider khác Veo (Kie) hoặc
+   * cảnh 1 thì bỏ qua tham số này (undefined).
+   */
+  previousSceneVideoUrl?: string,
 ): Promise<{ videoUrl: string; veoOperationName?: string }> {
   const apiKey = veoInput.apiKey?.trim();
   if (!apiKey) {
@@ -78,6 +86,10 @@ export async function generateSceneVideoAsset(
 
   return withSceneVideoLock(scene.id, async () => {
     let operationName = !callbacks?.forceNew ? scene.veoOperationName?.trim() : undefined;
+    // Google trả về file GỘP (video cảnh trước + đoạn mới) khi dùng Video Extension — phải
+    // cắt lại chỉ giữ đoạn mới sau khi tải xong. Tính theo tham số truyền vào (không phụ
+    // thuộc nhánh start-mới hay resume) để đúng cả khi resume poll sau khi refresh trang.
+    const usedContinuity = Boolean(veoInput.sceneContinuity && previousSceneVideoUrl);
 
     if (!operationName) {
       if (isSceneStopped(scene.id)) throw new SceneStoppedError();
@@ -86,23 +98,29 @@ export async function generateSceneVideoAsset(
         ? veoInput.referenceImage
         : undefined;
       const characterImage = veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
-      console.log('[veo/generate] Master Cast check:', {
+      const previousVideo = usedContinuity && previousSceneVideoUrl
+        ? await fetchVideoAsBase64(previousSceneVideoUrl)
+        : undefined;
+      console.log('[veo/generate] Master Cast / continuity check:', {
         sceneId: scene.id,
         hasSceneSourceImage: Boolean(scene.sourceImageBase64),
         hasReferenceImage: Boolean(referenceImage),
         hasCharacterImage: Boolean(characterImage?.imageBase64),
+        sceneContinuityEnabled: Boolean(veoInput.sceneContinuity),
+        usedContinuity,
         characterNames: veoInput.characters?.map((c) => c.name) ?? [],
       });
 
       const started = await withVeoConcurrency(() =>
         veoService.startGeneration({
           apiKey,
-          prompt: scene.prompt,
+          prompt: buildScenePrompt(scene.prompt, veoInput.masterCharacterText),
           veoInput,
           durationSeconds: scene.durationSeconds,
           image: scene.sourceImageBase64 && scene.sourceImageMimeType
             ? { base64: scene.sourceImageBase64, mimeType: scene.sourceImageMimeType }
             : undefined,
+          previousVideo,
         }),
       );
       operationName = started.operationName;
@@ -113,7 +131,10 @@ export async function generateSceneVideoAsset(
     // vậy propagate lên caller (scene-generation-queue.ts tự phân loại fatal/stop/retry).
     const videoUri = await pollUntilDone(apiKey, operationName, scene.id);
     const blob = await veoService.downloadVideo({ apiKey, videoUri });
-    const videoUrl = URL.createObjectURL(blob);
+    // Video Extension trả file gộp (cảnh trước + cảnh mới) — cắt lại đúng 8s cuối để
+    // lưu trữ đúng 1 clip riêng cho cảnh này, không lặp lại nội dung cảnh trước.
+    const finalBlob = usedContinuity ? await trimToLastSeconds(blob, 8) : blob;
+    const videoUrl = URL.createObjectURL(finalBlob);
     return { videoUrl, veoOperationName: undefined };
   });
 }

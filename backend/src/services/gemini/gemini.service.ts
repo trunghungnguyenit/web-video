@@ -8,9 +8,18 @@ import { hasPoolKeys, poolKeysInOrder, advancePoolCursor } from '../../lib/gemin
 import {
   deleteGeminiFile,
   isYouTubeUrl,
+  normalizeYouTubeUrl,
   uploadVideoAndWaitActive,
   type GeminiUploadedFile,
 } from './gemini-files.service';
+import {
+  buildStoryPipelineSchema,
+  buildCinematicContinuityRules,
+  parseSceneStates,
+  parseStoryTimeline,
+  propagateSceneStates,
+} from './story-timeline';
+import { buildSceneVisualPrompt } from './scene-prompt-builder';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -22,12 +31,13 @@ interface GeminiResponse {
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
   }>;
-  error?: { message?: string };
+  error?: { message?: string; status?: string; details?: unknown };
 }
 
 type GeminiPart =
   | { text: string }
-  | { file_data: { file_uri: string; mime_type?: string } };
+  | { file_data: { file_uri: string; mime_type?: string } }
+  | { inline_data: { mime_type: string; data: string } };
 
 const LANGUAGE_LABELS: Record<string, string> = {
   vi: 'Tiếng Việt',
@@ -146,78 +156,81 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 - Ưu tiên mô tả người dùng; URL chỉ là tham chiếu.`
       : '';
 
-  return `Bạn là biên kịch video AI. Phân tích nội dung và tạo kịch bản video.
+  return `Bạn là award-winning Hollywood film director, screenwriter, storyboard artist, và cinematic AI prompt engineer.
+
+Nhiệm vụ: tạo MỘT bộ phim liên tục đã chia thành các cảnh — KHÔNG tạo các cảnh độc lập. Mỗi cảnh chỉ là segment của cùng một movie; khi ghép video phải seamless, không discontinuity.
+
+Pipeline: Nội dung/Video → hiểu TOÀN BỘ phim (storyTimeline) → tách ${count} segments kế thừa liên tục (scenes[] state đầy đủ) → hệ thống ghép state thành Video Prompt (bạn KHÔNG tự viết prompt Veo trực tiếp).
+
+${buildCinematicContinuityRules()}
 
 ## Cài đặt Gemini (kịch bản)
-- Ngôn ngữ: ${lang}
+- Ngôn ngữ voiceover: ${lang}
 - Số cảnh: đúng ${count} cảnh
 - Kiểu video: ${videoType}
 - Loại đầu vào: ${geminiInput.inputType}
 ${geminiInput.sourceVideoUrl?.trim() ? `- Source video URL: ${geminiInput.sourceVideoUrl.trim()}` : ''}
 ${videoRules}
 
-## Cài đặt Veo (video — dùng cho trường visual)
+## Cài đặt Veo/Kie (video)
 - Tỷ lệ khung hình: ${ratio}
 - Thời lượng cảnh: ${duration}
 - Chất lượng video: ${quality}${style}${styleId}
+- Video có audio native — MỌI environment.ambientSound phải mô tả âm thanh môi trường/chuyển động bằng tiếng Anh. Nếu có video đính kèm: nghe/xem video để mô tả ĐÚNG âm thanh/chuyển động THẬT xảy ra trong đúng đoạn đó (va chạm, bước chân, động cơ, tiếng đám đông, SFX hành động...) — không bịa âm thanh chung chung không liên quan. Nếu không có video, tự suy luận âm thanh hợp lý theo cảnh (vd: "tractor engine rumbling, birds chirping, soft wind").
 
 ## Cài đặt ElevenLabs (giọng đọc — dùng cho trường voiceover)
 - Giọng đọc: ${voice}
 - Tốc độ: ${speed}
 
-## Nhân vật (xuất hiện đồng nhất trong mọi cảnh — Veo)
+## Nhân vật cố định (ngoại hình KHÔNG được đổi qua mọi cảnh)
 ${charactersBlock}
 
 ## Nội dung / yêu cầu người dùng
 ${geminiInput.content.trim()}
 
-## Yêu cầu output
-Trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích) theo schema:
-{
-  "title": "tiêu đề ngắn",
-  "scenes": [
-    {
-      "id": 1,
-      "durationSeconds": 6,
-      "visual": "Prompt cho Veo — mô tả khung hình (tiếng Anh hoặc ${lang})",
-      "voiceover": "Lời thoại cho ElevenLabs TTS bằng ${lang}"
-    }
-  ]${isLinkInput ? `,
-  "masterCastPrompt": "Đoạn mô tả DUY NHẤT, chi tiết, gộp toàn bộ nhân vật xuất hiện trong video thành 1 'character reference sheet' — dùng làm ảnh tham chiếu giữ nhân vật nhất quán qua mọi cảnh"` : ''}
-}
+## Yêu cầu output — trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích) theo schema:
+${buildStoryPipelineSchema(count, lang)}
+${isLinkInput ? `
+Thêm field "masterCastPrompt" (ngang cấp "scenes") — đoạn mô tả DUY NHẤT bằng tiếng Anh, chi tiết, gộp toàn bộ nhân vật xuất hiện thành 1 "character reference sheet" — dùng làm ảnh tham chiếu giữ nhân vật nhất quán qua mọi cảnh.` : ''}
 
-Quy tắc:
-- scenes.length phải đúng ${count}
-- id: 1..${count}
+Quy tắc bổ sung:
 - ${durationRule}${veoDurationNote}
-- visual: prompt Veo — tỷ lệ ${ratio}, chất lượng ${quality}${veoInput.sceneStyle ? `, phong cách ${veoInput.sceneStyle}` : ''}
-- voiceover: CHỈ lời thoại đọc to (thuần ${lang}), KHÔNG mô tả hình ảnh, KHÔNG copy từ visual, KHÔNG dùng tiếng Anh nếu ngôn ngữ là ${lang}
-- voiceover: ngắn gọn, tự nhiên như lời dẫn video — giọng ${voice}, kiểu ${videoType}
-- Nếu có nhân vật: visual phải giữ ngoại hình/trang phục nhất quán${isLinkInput ? `
-- "masterCastPrompt": viết bằng tiếng Anh (chuẩn prompt tạo ảnh), mô tả ngoại hình/trang phục từng nhân vật chính xuất hiện trong các cảnh — để dùng làm ảnh tham chiếu chung cho toàn bộ video` : ''}`;
+- Video Prompt fields = English, TRỪ "voiceover" (luôn ${lang} — TTS ElevenLabs đọc đè lên, KHÔNG mô tả hình ảnh) và "dialogueCue" (lời nói THẬT do Veo/Kie tự tạo giọng ngay trong video — generateAudio). dialogueCue: nếu có video đính kèm, PHẢI theo đúng ngôn ngữ nhân vật đang nói trong chính video đó (xem/nghe để xác định) — KHÔNG tự ép sang ${lang} hay tiếng Anh; nếu không có video (tab text/ảnh/file) thì dùng ${lang}
+- voiceover: ngắn gọn, tự nhiên như lời dẫn phim — giọng ${voice}, kiểu ${videoType}
+- characterStates[].name: dùng ĐÚNG cùng 1 cách gọi tên xuyên suốt mọi cảnh, PHẢI viết bằng tiếng Anh (vd "Bald Prisoner", "Shin") — TRỪ KHI nội dung/video có sẵn tên riêng cụ thể thì giữ nguyên. TUYỆT ĐỐI không tự đặt nhãn mô tả bằng tiếng Việt (vd "Tù nhân đầu trọc") vì field này bị chèn thẳng vào giữa Video Prompt tiếng Anh, gây lẫn ngôn ngữ
+- Nếu có nhân vật cố định ở mục trên: KHÔNG đổi ngoại hình/trang phục — chỉ emotion/pose/action/eye direction
+- ƯU TIÊN giữ nguyên ngoại hình nhân vật hơn sáng tạo đổi thiết kế${isLinkInput ? `
+- "masterCastPrompt": viết bằng tiếng Anh (chuẩn prompt tạo ảnh), mô tả ngoại hình/trang phục từng nhân vật chính — ảnh tham chiếu chung cho toàn bộ video` : ''}`;
 }
 
-function parseScript(raw: string): GeminiVideoScript {
+function parseScript(raw: string, characters: PipelineCharacter[]): GeminiVideoScript {
   let jsonStr = raw.trim();
   const fence = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
   if (fence) jsonStr = fence[1].trim();
 
-  const parsed = JSON.parse(jsonStr) as GeminiVideoScript;
+  const parsed = JSON.parse(jsonStr) as {
+    title?: unknown;
+    storyTimeline?: unknown;
+    scenes?: unknown;
+    masterCastPrompt?: unknown;
+  };
 
-  if (!parsed?.scenes || !Array.isArray(parsed.scenes) || parsed.scenes.length === 0) {
-    throw new Error('Gemini trả về JSON không hợp lệ — thiếu danh sách scenes.');
-  }
+  // StoryAnalysisService/StoryTimelineBuilder — hiểu toàn bộ câu chuyện trước khi tách cảnh
+  const storyTimeline = parseStoryTimeline(parsed.storyTimeline);
+  // SceneTimelineBuilder — parse cảnh có state đầy đủ (không phải "visual" rời rạc)
+  let scenes = parseSceneStates(parsed.scenes);
+  // StateManager — Ending State của cảnh N-1 BẮT BUỘC thành Starting State cảnh N
+  scenes = propagateSceneStates(scenes, storyTimeline);
 
   return {
-    title: typeof parsed.title === 'string' ? parsed.title : 'Kịch bản video',
-    scenes: parsed.scenes.map((s, i) => ({
-      id: typeof s.id === 'number' ? s.id : i + 1,
-      durationSeconds:
-        typeof s.durationSeconds === 'number' && s.durationSeconds > 0
-          ? s.durationSeconds
-          : 6,
-      visual: String(s.visual ?? '').trim() || `Visual scene ${i + 1}`,
-      voiceover: String(s.voiceover ?? '').trim() || `Voiceover scene ${i + 1}`,
+    title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : 'Kịch bản video',
+    scenes: scenes.map((s) => ({
+      id: s.id,
+      durationSeconds: s.durationSeconds,
+      // CharacterResolver + ObjectStateManager + PromptBuilder — ghép state liên tục hoá
+      // thành 1 prompt Veo/Kie hoàn chỉnh cho từng cảnh
+      visual: buildSceneVisualPrompt(s, characters),
+      voiceover: s.voiceover,
     })),
     masterCastPrompt: typeof parsed.masterCastPrompt === 'string' && parsed.masterCastPrompt.trim()
       ? parsed.masterCastPrompt.trim()
@@ -243,6 +256,20 @@ async function callGemini(apiKey: string, parts: GeminiPart[]): Promise<string> 
   const data = (await res.json()) as GeminiResponse;
 
   if (!res.ok) {
+    // Log đầy đủ error.details (Google trả field-level violation ở đây, vd BadRequest
+    // fieldViolations) — chỉ .message thường quá chung chung để biết đúng tham số nào sai.
+    console.error('[gemini] generateContent lỗi:', {
+      status: res.status,
+      model,
+      partsSummary: parts.map((p) =>
+        'text' in p
+          ? { type: 'text', length: p.text.length }
+          : 'file_data' in p
+            ? { type: 'file_data', file_uri: p.file_data.file_uri, mime_type: p.file_data.mime_type }
+            : { type: 'inline_data', mime_type: p.inline_data.mime_type, bytes: p.inline_data.data.length },
+      ),
+      error: data.error,
+    });
     throw new Error(data.error?.message ?? `Gemini API lỗi (${res.status})`);
   }
 
@@ -306,7 +333,9 @@ async function resolveVideoFilePart(
     return {
       part: {
         file_data: {
-          file_uri: url,
+          // Bỏ query param thừa (vd. "&t=8s" timestamp dán từ YouTube) — Gemini trả
+          // "Request contains an invalid argument" nếu file_uri không đúng dạng chuẩn.
+          file_uri: normalizeYouTubeUrl(url),
           mime_type: 'video/*',
         },
       },
@@ -353,7 +382,7 @@ export async function analyzeContent(request: AnalyzePipelineRequest): Promise<G
         : await callGeminiWithPool(parts);
 
     try {
-      return parseScript(raw);
+      return parseScript(raw, geminiInput.characters ?? request.veoInput.characters ?? []);
     } catch {
       throw new Error('Không parse được kịch bản JSON từ Gemini. Thử lại.');
     }
@@ -362,4 +391,36 @@ export async function analyzeContent(request: AnalyzePipelineRequest): Promise<G
       await deleteGeminiFile(filesKey, uploaded.name);
     }
   }
+}
+
+const CHARACTER_SHEET_VISION_PROMPT = `Bạn đang xem một "character reference sheet" (ảnh tham chiếu nhân vật) dùng để giữ nhân vật NHẤT QUÁN TUYỆT ĐỐI khi tạo video AI text-to-video/image-to-video qua nhiều cảnh riêng biệt (mỗi cảnh là 1 lần gọi API độc lập, model KHÔNG nhớ cảnh trước — nên mô tả này là tín hiệu DUY NHẤT giữ đúng ngoại hình).
+
+Viết bằng tiếng Anh, dạng "character sheet" súc tích, CÔ ĐỌNG TỪ KHÓA (không viết văn hoa mỹ, không câu chuyện) — để khi chèn nguyên văn vào đầu MỌI prompt cảnh, model dễ bám đúng chi tiết thay vì diễn giải lại. Với mỗi nhân vật xuất hiện trong ảnh, theo đúng format 1 dòng:
+"[Tên nếu có, không thì 'Character N']: [giới tính/tuổi ước lượng], [kiểu tóc + màu tóc chính xác], [khuôn mặt/đặc điểm nhận diện], [trang phục — từng món + màu sắc chính xác], [vóc dáng], [phong cách hình ảnh: vd 2D cartoon flat color / anime / realistic 3D...]."
+
+Nếu nhiều nhân vật, mỗi người 1 dòng riêng. Không thêm tiêu đề, không markdown, không giải thích gì thêm ngoài các dòng mô tả — trả về TRỰC TIẾP nội dung đó.`;
+
+/** Gemini Vision — phân tích ảnh Character Sheet, trả về mô tả text chi tiết dùng làm "master character" cho mọi cảnh */
+export async function describeCharacterSheet(params: {
+  apiKey?: string;
+  imageBase64: string;
+  imageMimeType: string;
+}): Promise<string> {
+  const imageBase64 = params.imageBase64?.trim();
+  if (!imageBase64) throw new Error('Thiếu ảnh Character Sheet.');
+
+  const userKey = params.apiKey?.trim();
+  if (!userKey && !hasPoolKeys()) {
+    throw new Error('Thiếu Gemini API Key — nhập tại mục API Keys.');
+  }
+
+  const parts: GeminiPart[] = [
+    { inline_data: { mime_type: params.imageMimeType || 'image/png', data: imageBase64 } },
+    { text: CHARACTER_SHEET_VISION_PROMPT },
+  ];
+
+  const raw = userKey ? await callGemini(userKey, parts) : await callGeminiWithPool(parts);
+  const description = raw.trim();
+  if (!description) throw new Error('Gemini không mô tả được ảnh Character Sheet.');
+  return description;
 }

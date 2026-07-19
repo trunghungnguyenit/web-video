@@ -3,6 +3,7 @@
 import { cn } from '@/lib/utils';
 import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 import { SelectVeo } from '@/components/ui/veomodel';
+import { supportsVideoExtension } from '@/lib/veo/veo-models';
 import {
   ASPECT_RATIO_OPTIONS,
   KIE_MODE_OPTIONS,
@@ -87,6 +88,39 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
           </Field>
         )}
 
+        {settings.videoProvider === 'veo' && hasVeoKey && supportsVideoExtension(settings.veoModel) && (
+          <Field label="Tiếp nối cảnh trước" className="min-w-[9rem]">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.sceneContinuity}
+              onClick={() => patchSettings({ sceneContinuity: !settings.sceneContinuity })}
+              title="Dùng đoạn cuối video cảnh trước làm bối cảnh khởi đầu cho cảnh sau — tăng đồng nhất nhân vật, camera, chuyển động, ánh sáng và mạch phim. Chỉ Veo 3.1 hỗ trợ, khoá cứng 8s/720p khi bật."
+              className={cn(
+                'w-full h-[30px] px-2 flex items-center gap-1.5 rounded-lg border transition-colors text-[11px] font-medium',
+                settings.sceneContinuity
+                  ? 'bg-primary/15 border-primary/40 text-primary'
+                  : 'bg-card/80 border-border text-muted-foreground',
+              )}
+            >
+              <span
+                className={cn(
+                  'relative inline-flex h-4 w-7 items-center rounded-full transition-colors shrink-0',
+                  settings.sceneContinuity ? 'bg-primary' : 'bg-muted',
+                )}
+              >
+                <span
+                  className={cn(
+                    'inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform',
+                    settings.sceneContinuity ? 'translate-x-3.5' : 'translate-x-0.5',
+                  )}
+                />
+              </span>
+              {settings.sceneContinuity ? 'Bật' : 'Tắt'}
+            </button>
+          </Field>
+        )}
+
         {settings.videoProvider === 'kie' && (
           <Field label="Chế độ" htmlFor="header-kie-mode" className="min-w-[8rem]">
             <select
@@ -160,9 +194,15 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             id="header-scene-duration"
             value={settings.sceneDuration}
             onChange={(e) => patchSettings({ sceneDuration: e.target.value })}
-            disabled={settings.videoQuality === '1080p'}
+            disabled={settings.videoQuality === '1080p' || settings.sceneContinuity}
             className={selectClass}
-            title={settings.videoQuality === '1080p' ? '1080p bắt buộc 8 giây/cảnh' : undefined}
+            title={
+              settings.sceneContinuity
+                ? 'Liên tục cảnh bắt buộc 8 giây/cảnh'
+                : settings.videoQuality === '1080p'
+                  ? '1080p bắt buộc 8 giây/cảnh'
+                  : undefined
+            }
           >
             {sceneDurationOptions.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
@@ -175,7 +215,9 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             id="header-video-quality"
             value={settings.videoQuality}
             onChange={(e) => patchSettings({ videoQuality: e.target.value })}
+            disabled={settings.sceneContinuity}
             className={selectClass}
+            title={settings.sceneContinuity ? 'Liên tục cảnh bắt buộc 720p' : undefined}
           >
             {(settings.videoProvider === 'kie' ? KIE_VIDEO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>

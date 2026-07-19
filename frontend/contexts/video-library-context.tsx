@@ -884,6 +884,9 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       ...result.veoInput,
       // Field rõ ràng — mọi cảnh đọc referenceImage trước
       referenceImage: { base64: image.base64, mimeType: image.mimeType },
+      // Mô tả Gemini Vision phân tích trực tiếp từ ảnh Character Sheet — chèn vào
+      // đầu prompt mọi cảnh lúc gửi Veo/Kie để củng cố thêm cho ảnh tham chiếu
+      masterCharacterText: item.masterCastImageDescription?.trim() || undefined,
       characters: [
         ...(result.veoInput.characters ?? []).filter((c) => c.name !== 'Master Cast'),
         {

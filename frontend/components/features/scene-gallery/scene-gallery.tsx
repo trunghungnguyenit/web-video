@@ -9,12 +9,65 @@ import { FieldError } from '@/components/ui/field-error';
 import { ModalOverlay } from '@/components/ui/modal-overlay';
 import type { VideoScene } from '@/lib/scene/scenes';
 import { formatSceneTimeRange, recalculateSceneTimings } from '@/lib/scene/scenes';
+import { captureSceneThumbnail } from '@/lib/scene/scene-thumbnail';
 import { regenerateSceneAssets } from '@/lib/scene/scene-tts';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { toUserMessage } from '@/lib/error-messages';
 import type { VideoLibraryItem } from '@/lib/video-library/video-library';
 import { markSceneStopped } from '@/lib/veo/veo-generation-lock';
 import { SceneToolbar } from './scene-toolbar';
+
+// ─── Thumbnail từ giữa clip (tránh frame 0 = Master Cast I2V) ─────────────────
+
+function SceneVideoThumbnail({ videoUrl }: { videoUrl: string }) {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let created: string | null = null;
+    setThumbUrl(null);
+
+    void captureSceneThumbnail(videoUrl)
+      .then((url) => {
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        created = url;
+        setThumbUrl(url);
+      })
+      .catch(() => {
+        /* fallback video bên dưới */
+      });
+
+    return () => {
+      cancelled = true;
+      if (created) URL.revokeObjectURL(created);
+    };
+  }, [videoUrl]);
+
+  if (thumbUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={thumbUrl}
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+      />
+    );
+  }
+
+  // Tạm: #t=… để trình duyệt ưu tiên khung giữa, không flash ảnh Master Cast
+  return (
+    <video
+      src={`${videoUrl}#t=1.5`}
+      className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+      muted
+      playsInline
+      preload="metadata"
+    />
+  );
+}
 
 // ─── Edit Modal ───────────────────────────────────────────────────────────────
 
@@ -318,8 +371,17 @@ export function SceneGallery({
       }
       const patch = overrides?.[id];
       const working: VideoScene = patch ? { ...scene, ...patch, errorMessage: undefined } : { ...scene, errorMessage: undefined };
+      // Scene Continuity (Video Extension, Veo 3.1) — nối tiếp từ video hiện có của
+      // đúng cảnh liền trước (theo index), không phải cảnh đang tạo lại.
+      const previousSceneVideoUrl = veoInput.sceneContinuity
+        ? scenesRef.current.find((s) => s.index === scene.index - 1)?.videoUrl
+        : undefined;
       try {
-        const rebuilt = await regenerateSceneAssets(working, ttsInput, veoInput, {
+        const rebuilt = await regenerateSceneAssets(
+          working,
+          { ...ttsInput, enabled: true },
+          veoInput,
+          {
           onOperationStarted: (operationId) => {
             onScenesChange((prev) =>
               prev.map((s) =>
@@ -331,7 +393,9 @@ export function SceneGallery({
               ),
             );
           },
-        });
+        },
+          previousSceneVideoUrl,
+        );
         // regenerateSceneAssets tự bắt lỗi nội bộ (không throw) — status:'error' vẫn
         // đi qua nhánh này, phải giữ nguyên errorMessage của nó thay vì xoá sạch.
         patches.push(
@@ -555,13 +619,7 @@ export function SceneGallery({
               )}>
                 {scene.videoUrl ? (
                   <>
-                    <video
-                      src={scene.videoUrl}
-                      className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
-                      muted
-                      playsInline
-                      preload="metadata"
-                    />
+                    <SceneVideoThumbnail videoUrl={scene.videoUrl} />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10 z-[1] pointer-events-none" />
                   </>
                 ) : (

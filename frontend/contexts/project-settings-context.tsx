@@ -22,6 +22,7 @@ import {
 } from '@/lib/saved-scripts/saved-scripts';
 import { useDefaultVeoModel } from '@/hooks/use-veo-models';
 import { useVeoModels } from '@/contexts/veo-models-context';
+import { supportsVideoExtension } from '@/lib/veo/veo-models';
 
 export interface VideoSettings {
   language: string;
@@ -38,6 +39,13 @@ export interface VideoSettings {
   videoProvider: 'veo' | 'kie';
   /** Chế độ nội dung Grok Imagine — chỉ áp dụng khi videoProvider = 'kie' */
   kieMode: 'fun' | 'normal' | 'spicy';
+  /**
+   * Scene Continuity (Video Extension) — chỉ Veo 3.1/3.1 Fast hỗ trợ. Khi bật, mỗi cảnh
+   * (trừ cảnh 1) nối tiếp từ video THẬT của cảnh liền trước (không chỉ ảnh tham chiếu),
+   * giữ chuyển động/camera/ánh sáng liên tục hơn. Mặc định TẮT — không phải project nào
+   * cũng cần cảnh liên tục, và tính năng khoá cứng 8s/720p khi bật.
+   */
+  sceneContinuity: boolean;
 }
 
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
@@ -53,6 +61,7 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   sceneStyle: 'cinematic',
   videoProvider: 'veo',
   kieMode: 'normal',
+  sceneContinuity: false,
 };
 
 export const VIDEO_PROVIDER_OPTIONS: [string, string][] = [
@@ -158,6 +167,25 @@ export function ProjectSettingsProvider({
       return next === prev.videoQuality ? prev : { ...prev, videoQuality: next };
     });
   }, [settings.videoProvider]);
+
+  // Scene Continuity chỉ Veo 3.1/3.1 Fast hỗ trợ — đổi sang provider/model khác thì tự tắt
+  useEffect(() => {
+    setSettings((prev) => {
+      if (!prev.sceneContinuity) return prev;
+      const supported = prev.videoProvider === 'veo' && supportsVideoExtension(prev.veoModel);
+      return supported ? prev : { ...prev, sceneContinuity: false };
+    });
+  }, [settings.videoProvider, settings.veoModel]);
+
+  // Google bắt buộc durationSeconds=8 + resolution=720p khi dùng Video Extension — ép
+  // ngay trên UI (không chỉ lúc gọi API) để không gây hiểu lầm chọn 4s/6s/1080p mà vô hiệu.
+  useEffect(() => {
+    setSettings((prev) => {
+      if (!prev.sceneContinuity) return prev;
+      if (prev.sceneDuration === '8' && prev.videoQuality === '720p') return prev;
+      return { ...prev, sceneDuration: '8', videoQuality: '720p' };
+    });
+  }, [settings.sceneContinuity]);
 
   const applyFromPreset = useCallback((input: PresetInput) => {
     setSettings((prev) => ({

@@ -110,7 +110,7 @@ export async function runSceneGenerationQueue(
 
     let working: VideoScene = { ...scene, errorMessage: undefined };
 
-    const skipTts = Boolean(working.audioUrl);
+    const skipTts = Boolean(working.audioUrl) || ttsInput.enabled === false;
 
     if (!skipTts) {
       queueItems[i] = { ...queueItems[i], step: 'tts', errorMessage: undefined };
@@ -160,6 +160,13 @@ export async function runSceneGenerationQueue(
     queueItems[i] = { ...queueItems[i], step: 'video' };
     callbacks.onQueueUpdate?.([...queueItems]);
 
+    // Scene Continuity (Video Extension, Veo 3.1) — cảnh sau (không phải cảnh 1) nối
+    // tiếp từ video THẬT của cảnh liền trước. scenes[i-1].videoUrl lúc này đã là kết quả
+    // mới nhất (loop tuần tự, đã await xong cảnh trước) hoặc video có sẵn từ trước.
+    const previousSceneVideoUrl = veoInput.sceneContinuity && i > 0
+      ? scenes[i - 1]?.videoUrl
+      : undefined;
+
     let finished: VideoScene;
     try {
       const videoUrl = await createSceneVideo(working, veoInput, {
@@ -175,7 +182,7 @@ export async function runSceneGenerationQueue(
           callbacks.onScenesUpdate([...scenes]);
           callbacks.onPersistScenes?.([...scenes]);
         },
-      });
+      }, previousSceneVideoUrl);
 
       // Thành công — hiện video thật đã tạo xong, hết spinner.
       finished = {

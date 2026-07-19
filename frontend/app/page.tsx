@@ -232,6 +232,7 @@ function VideoDetailView({
                   onPromptChange={(masterCastPrompt) => updateActiveItem({ masterCastPrompt })}
                   imageDataUrl={activeItem.masterCastImageDataUrl}
                   onImageChange={(masterCastImageDataUrl) => updateActiveItem({ masterCastImageDataUrl })}
+                  onDescriptionChange={(masterCastImageDescription) => updateActiveItem({ masterCastImageDescription })}
                   onConfirm={activeItem.pendingLinkReview
                     ? (imageDataUrl) => confirmLinkGeneration(activeItem.id, imageDataUrl)
                     : undefined}

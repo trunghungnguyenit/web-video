@@ -9,6 +9,8 @@ export interface GenerateSceneVideoPayload {
   durationSeconds: number;
   operationName?: string;
   image?: { base64: string; mimeType: string };
+  /** Scene Continuity (Video Extension, Veo 3.1) — video thật của cảnh liền trước */
+  previousVideo?: { base64: string; mimeType: string };
 }
 
 export interface PollOperationPayload {
