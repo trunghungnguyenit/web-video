@@ -118,7 +118,10 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
     mode,
     duration: resolveKieDurationSeconds(params.durationSeconds),
     resolution: resolveKieResolution(params.resolution),
-    nsfw_checker: true,
+    // Mặc định của kie.ai là false — bộ lọc phụ này (khác nhau với kiểm duyệt gốc của nền
+    // tảng) từng bị bật cứng true ở đây, gây từ chối nhầm nội dung bạo lực nhẹ không thật
+    // sự nhạy cảm (vd cốt truyện nhà tù, bắt nạt) với lỗi "flagged as sensitive".
+    nsfw_checker: false,
   };
   if (imageUrl) {
     input.image_urls = [imageUrl];

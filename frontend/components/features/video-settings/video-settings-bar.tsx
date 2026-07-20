@@ -13,7 +13,6 @@ import {
   useProjectSettings,
   VIDEO_PROVIDER_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
-  VIDEO_TYPE_OPTIONS,
 } from '@/contexts/project-settings-context';
 
 interface VideoSettingsBarProps {
@@ -158,19 +157,6 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             className={selectClass}
           >
             {SCENE_COUNT_OPTIONS.map(([v, l]) => (
-              <option key={v} value={v}>{l}</option>
-            ))}
-          </select>
-        </Field>
-
-        <Field label="Kiểu video" htmlFor="header-video-type">
-          <select
-            id="header-video-type"
-            value={settings.videoType}
-            onChange={(e) => patchSettings({ videoType: e.target.value })}
-            className={selectClass}
-          >
-            {VIDEO_TYPE_OPTIONS.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>

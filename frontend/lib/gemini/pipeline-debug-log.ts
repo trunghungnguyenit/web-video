@@ -51,7 +51,6 @@ export function logAnalyzePipeline(
   console.log('── cài đặt ──', {
     language: geminiInput.language,
     sceneCount: geminiInput.sceneCount,
-    videoType: geminiInput.videoType,
     aspectRatio: veoInput.aspectRatio,
     sceneDuration: veoInput.sceneDuration,
     videoQuality: veoInput.videoQuality,

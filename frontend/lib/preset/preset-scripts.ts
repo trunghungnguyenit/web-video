@@ -20,7 +20,6 @@ export interface PresetInput {
   content: string;
   language: string;
   sceneCount: string;
-  videoType: string;
   voice: string;
   aspectRatio: string;
   sceneDuration: string;
@@ -99,7 +98,6 @@ export const PRESET_SCRIPTS: PresetScript[] = [
       content: STICKMAN_MASTER_BRIEF,
       language: 'vi',
       sceneCount: '10',
-      videoType: 'storytelling',
       voice: 'male-pro',
       aspectRatio: '16:9',
       sceneDuration: '6',

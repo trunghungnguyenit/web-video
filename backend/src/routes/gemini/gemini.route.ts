@@ -37,7 +37,6 @@ geminiRoute.post('/analyze', async (c) => {
         inputType: body.geminiInput.inputType,
         sceneCount: body.geminiInput.sceneCount,
         language: body.geminiInput.language,
-        videoType: body.geminiInput.videoType,
         contentLength: body.geminiInput.content.length,
         characterCount: body.geminiInput.characters?.length ?? 0,
         sourceVideoUrl: body.geminiInput.sourceVideoUrl?.trim() || undefined,

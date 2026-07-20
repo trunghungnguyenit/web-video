@@ -16,7 +16,6 @@ import {
   LANGUAGE_OPTIONS,
   SCENE_COUNT_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
-  VIDEO_TYPE_OPTIONS,
   getSceneDurationOptions,
   normalizeSceneDurationSetting,
 } from '@/lib/saved-scripts/saved-scripts';
@@ -27,7 +26,6 @@ import { supportsVideoExtension } from '@/lib/veo/veo-models';
 export interface VideoSettings {
   language: string;
   sceneCount: string;
-  videoType: string;
   voice: string;
   aspectRatio: string;
   sceneDuration: string;
@@ -51,7 +49,6 @@ export interface VideoSettings {
 export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   language: 'vi',
   sceneCount: '5',
-  videoType: 'storytelling',
   voice: 'male-natural',
   aspectRatio: '16:9',
   sceneDuration: '6',
@@ -192,7 +189,6 @@ export function ProjectSettingsProvider({
       ...prev,
       language: input.language,
       sceneCount: input.sceneCount,
-      videoType: input.videoType,
       voice: input.voice,
       aspectRatio: input.aspectRatio ?? '16:9',
       sceneDuration: normalizeSceneDurationSetting(
@@ -255,5 +251,4 @@ export {
   LANGUAGE_OPTIONS,
   SCENE_COUNT_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
-  VIDEO_TYPE_OPTIONS,
 };

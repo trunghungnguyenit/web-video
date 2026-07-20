@@ -43,7 +43,6 @@ export interface SceneGenerationResult {
   scenes: VideoScene[];
   sourceContent: string;
   sceneCount: string;
-  videoType: string;
   language: string;
   aspectRatio: string;
   sceneDuration: string;

@@ -27,7 +27,6 @@ export interface GeminiInput {
   content: string;
   language: string;
   sceneCount: string;
-  videoType: string;
   inputType: 'text' | 'link' | 'image' | 'file';
   characters?: PipelineCharacter[];
   /** Tab link — URL video gốc */
@@ -130,7 +129,6 @@ export interface BuildPipelineParams {
   content: string;
   language: string;
   sceneCount: string;
-  videoType: string;
   aspectRatio: string;
   sceneDuration: string;
   videoQuality: string;
@@ -160,7 +158,6 @@ export function buildAnalyzePipeline(params: BuildPipelineParams): AnalyzePipeli
       content: params.content,
       language: params.language,
       sceneCount: params.sceneCount,
-      videoType: params.videoType,
       inputType: params.inputType,
       characters,
       sourceVideoUrl: params.sourceVideoUrl?.trim() || undefined,

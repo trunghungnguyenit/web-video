@@ -87,7 +87,7 @@ export interface InputSectionProps {
   presetKey?: number;
   onSaveScript?: (
     content: string,
-    meta: { language: string; sceneCount: string; videoType: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality: string }
+    meta: { language: string; sceneCount: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality: string }
   ) => void;
   /** Sidebar click "Nhập nội dung" → scroll + focus textarea */
   focusContentKey?: number;
@@ -520,7 +520,6 @@ export function InputSection({
         // ── Cài đặt kịch bản → geminiInput ──
         language: settings.language,
         sceneCount: effectiveSceneCount,
-        videoType: settings.videoType,
         characters,
 
         aspectRatio: settings.aspectRatio,
@@ -563,7 +562,6 @@ export function InputSection({
         pipeline,
         sourceContent: contentForScenes,
         sceneCount: effectiveSceneCount,
-        videoType: settings.videoType,
         language: settings.language,
         sceneImages,
       });
@@ -602,7 +600,6 @@ export function InputSection({
     onSaveScript?.(form.content, {
       language: settings.language,
       sceneCount: settings.sceneCount,
-      videoType: settings.videoType,
       voice: settings.voice,
       aspectRatio: settings.aspectRatio,
       sceneDuration: settings.sceneDuration,

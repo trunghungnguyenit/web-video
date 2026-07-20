@@ -15,11 +15,11 @@ import {
 import {
   buildStoryPipelineSchema,
   buildCinematicContinuityRules,
+  buildSceneVisualPrompt,
   parseSceneStates,
   parseStoryTimeline,
   propagateSceneStates,
-} from './story-timeline';
-import { buildSceneVisualPrompt } from './scene-prompt-builder';
+} from './story-continuity';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -44,13 +44,6 @@ const LANGUAGE_LABELS: Record<string, string> = {
   en: 'English',
   zh: '中文',
   ja: '日本語',
-};
-
-const VIDEO_TYPE_LABELS: Record<string, string> = {
-  storytelling: 'Kể chuyện',
-  tutorial: 'Hướng dẫn',
-  ads: 'Quảng cáo',
-  review: 'Review sản phẩm',
 };
 
 const VOICE_LABELS: Record<string, string> = {
@@ -104,7 +97,6 @@ function formatCharacters(characters: PipelineCharacter[] | undefined): string {
 function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest): string {
   const count = parseInt(geminiInput.sceneCount, 10) || 5;
   const lang = LANGUAGE_LABELS[geminiInput.language] ?? geminiInput.language;
-  const videoType = VIDEO_TYPE_LABELS[geminiInput.videoType] ?? geminiInput.videoType;
   const voice = VOICE_LABELS[ttsInput.voice] ?? ttsInput.voice;
   const ratio = ASPECT_RATIO_LABELS[veoInput.aspectRatio] ?? veoInput.aspectRatio;
   const duration = SCENE_DURATION_LABELS[veoInput.sceneDuration] ?? veoInput.sceneDuration;
@@ -156,18 +148,23 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 - Ưu tiên mô tả người dùng; URL chỉ là tham chiếu.`
       : '';
 
+  const masterCastRule = isLinkInput
+    ? `\n- "masterCastPrompt": viết bằng tiếng Anh (chuẩn prompt tạo ảnh), mô tả ngoại hình/trang phục từng nhân vật chính — ảnh tham chiếu chung cho toàn bộ video`
+    : '';
+
   return `Bạn là award-winning Hollywood film director, screenwriter, storyboard artist, và cinematic AI prompt engineer.
 
 Nhiệm vụ: tạo MỘT bộ phim liên tục đã chia thành các cảnh — KHÔNG tạo các cảnh độc lập. Mỗi cảnh chỉ là segment của cùng một movie; khi ghép video phải seamless, không discontinuity.
 
 Pipeline: Nội dung/Video → hiểu TOÀN BỘ phim (storyTimeline) → tách ${count} segments kế thừa liên tục (scenes[] state đầy đủ) → hệ thống ghép state thành Video Prompt (bạn KHÔNG tự viết prompt Veo trực tiếp).
 
+TỰ SUY LUẬN phong cách/mức độ kịch tính phù hợp TỪ CHÍNH nội dung/prompt người dùng bên dưới (không có lựa chọn "kiểu video" nào được truyền vào) — ví dụ nội dung kể chuyện thì kịch tính, cảm xúc tiến triển rõ; nội dung hướng dẫn/sản phẩm/quảng cáo thì giữ giọng thực tế, rõ ràng, không gượng ép cảm xúc kịch tính không phù hợp. DÙ phong cách nào, quy tắc liên kết cảnh/không lặp hành động ở dưới vẫn LUÔN áp dụng — mọi video đều phải là các đoạn nối tiếp nhau như 1 video liên tục, không phải các clip rời rạc.
+
 ${buildCinematicContinuityRules()}
 
 ## Cài đặt Gemini (kịch bản)
 - Ngôn ngữ voiceover: ${lang}
 - Số cảnh: đúng ${count} cảnh
-- Kiểu video: ${videoType}
 - Loại đầu vào: ${geminiInput.inputType}
 ${geminiInput.sourceVideoUrl?.trim() ? `- Source video URL: ${geminiInput.sourceVideoUrl.trim()}` : ''}
 ${videoRules}
@@ -176,7 +173,7 @@ ${videoRules}
 - Tỷ lệ khung hình: ${ratio}
 - Thời lượng cảnh: ${duration}
 - Chất lượng video: ${quality}${style}${styleId}
-- Video có audio native — MỌI environment.ambientSound phải mô tả âm thanh môi trường/chuyển động bằng tiếng Anh. Nếu có video đính kèm: nghe/xem video để mô tả ĐÚNG âm thanh/chuyển động THẬT xảy ra trong đúng đoạn đó (va chạm, bước chân, động cơ, tiếng đám đông, SFX hành động...) — không bịa âm thanh chung chung không liên quan. Nếu không có video, tự suy luận âm thanh hợp lý theo cảnh (vd: "tractor engine rumbling, birds chirping, soft wind").
+- Video có audio native — MỌI mô tả âm thanh môi trường/chuyển động phải bằng tiếng Anh. Nếu có video đính kèm: nghe/xem video để mô tả ĐÚNG âm thanh/chuyển động THẬT xảy ra trong đúng đoạn đó (va chạm, bước chân, động cơ, tiếng đám đông, SFX hành động...) — không bịa âm thanh chung chung không liên quan. Nếu không có video, tự suy luận âm thanh hợp lý theo cảnh (vd: "tractor engine rumbling, birds chirping, soft wind").
 
 ## Cài đặt ElevenLabs (giọng đọc — dùng cho trường voiceover)
 - Giọng đọc: ${voice}
@@ -196,13 +193,14 @@ Thêm field "masterCastPrompt" (ngang cấp "scenes") — đoạn mô tả DUY N
 Quy tắc bổ sung:
 - ${durationRule}${veoDurationNote}
 - Video Prompt fields = English, TRỪ "voiceover" (luôn ${lang} — TTS ElevenLabs đọc đè lên, KHÔNG mô tả hình ảnh) và "dialogueCue" (lời nói THẬT do Veo/Kie tự tạo giọng ngay trong video — generateAudio). dialogueCue: nếu có video đính kèm, PHẢI theo đúng ngôn ngữ nhân vật đang nói trong chính video đó (xem/nghe để xác định) — KHÔNG tự ép sang ${lang} hay tiếng Anh; nếu không có video (tab text/ảnh/file) thì dùng ${lang}
-- voiceover: ngắn gọn, tự nhiên như lời dẫn phim — giọng ${voice}, kiểu ${videoType}
+- voiceover: ngắn gọn, tự nhiên như lời dẫn phim — giọng ${voice}
 - characterStates[].name: dùng ĐÚNG cùng 1 cách gọi tên xuyên suốt mọi cảnh, PHẢI viết bằng tiếng Anh (vd "Bald Prisoner", "Shin") — TRỪ KHI nội dung/video có sẵn tên riêng cụ thể thì giữ nguyên. TUYỆT ĐỐI không tự đặt nhãn mô tả bằng tiếng Việt (vd "Tù nhân đầu trọc") vì field này bị chèn thẳng vào giữa Video Prompt tiếng Anh, gây lẫn ngôn ngữ
 - Nếu có nhân vật cố định ở mục trên: KHÔNG đổi ngoại hình/trang phục — chỉ emotion/pose/action/eye direction
-- ƯU TIÊN giữ nguyên ngoại hình nhân vật hơn sáng tạo đổi thiết kế${isLinkInput ? `
-- "masterCastPrompt": viết bằng tiếng Anh (chuẩn prompt tạo ảnh), mô tả ngoại hình/trang phục từng nhân vật chính — ảnh tham chiếu chung cho toàn bộ video` : ''}`;
+- ƯU TIÊN giữ nguyên ngoại hình nhân vật hơn sáng tạo đổi thiết kế${masterCastRule}`;
 }
 
+/** Luôn dùng full pipeline StoryTimeline/StateManager/PromptBuilder — mỗi cảnh mang state
+ * đầy đủ, hệ thống tự ghép thành "visual" (Gemini không tự viết prompt trực tiếp). */
 function parseScript(raw: string, characters: PipelineCharacter[]): GeminiVideoScript {
   let jsonStr = raw.trim();
   const fence = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -215,6 +213,11 @@ function parseScript(raw: string, characters: PipelineCharacter[]): GeminiVideoS
     masterCastPrompt?: unknown;
   };
 
+  const title = typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : 'Kịch bản video';
+  const masterCastPrompt = typeof parsed.masterCastPrompt === 'string' && parsed.masterCastPrompt.trim()
+    ? parsed.masterCastPrompt.trim()
+    : undefined;
+
   // StoryAnalysisService/StoryTimelineBuilder — hiểu toàn bộ câu chuyện trước khi tách cảnh
   const storyTimeline = parseStoryTimeline(parsed.storyTimeline);
   // SceneTimelineBuilder — parse cảnh có state đầy đủ (không phải "visual" rời rạc)
@@ -223,7 +226,7 @@ function parseScript(raw: string, characters: PipelineCharacter[]): GeminiVideoS
   scenes = propagateSceneStates(scenes, storyTimeline);
 
   return {
-    title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : 'Kịch bản video',
+    title,
     scenes: scenes.map((s) => ({
       id: s.id,
       durationSeconds: s.durationSeconds,
@@ -232,9 +235,7 @@ function parseScript(raw: string, characters: PipelineCharacter[]): GeminiVideoS
       visual: buildSceneVisualPrompt(s, characters),
       voiceover: s.voiceover,
     })),
-    masterCastPrompt: typeof parsed.masterCastPrompt === 'string' && parsed.masterCastPrompt.trim()
-      ? parsed.masterCastPrompt.trim()
-      : undefined,
+    masterCastPrompt,
   };
 }
 

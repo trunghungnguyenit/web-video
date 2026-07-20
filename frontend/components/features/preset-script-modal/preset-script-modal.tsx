@@ -254,7 +254,7 @@ export function PresetScriptModal({ preset, onClose, onApply, onApplyDemo }: Pre
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-primary" />
                 <span className="text-sm font-semibold text-foreground">2. Nội dung &amp; cài đặt</span>
-                <span className="text-xs text-muted-foreground">({draft.input.sceneCount} cảnh · {draft.input.videoType})</span>
+                <span className="text-xs text-muted-foreground">({draft.input.sceneCount} cảnh)</span>
               </div>
               {openSection === 'input'
                 ? <ChevronUp className="w-4 h-4 text-muted-foreground" />
@@ -304,15 +304,6 @@ export function PresetScriptModal({ preset, onClose, onApply, onApplyDemo }: Pre
                         <option value="8">8 cảnh</option>
                         <option value="10">10 cảnh</option>
                         <option value="15">15 cảnh</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="field-label block mb-1.5">Kiểu video</label>
-                      <select value={draft.input.videoType} onChange={(e) => setInput('videoType', e.target.value)} className="input-base w-full min-w-0">
-                        <option value="storytelling">Kể chuyện</option>
-                        <option value="tutorial">Hướng dẫn</option>
-                        <option value="ads">Quảng cáo</option>
-                        <option value="review">Review</option>
                       </select>
                     </div>
                     <div>
