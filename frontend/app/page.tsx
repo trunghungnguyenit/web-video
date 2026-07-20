@@ -79,7 +79,7 @@ function VideoDetailView({
   savedScriptsSectionRef: React.RefObject<HTMLDivElement | null>;
   onSaveScript: (
     content: string,
-    meta: { language: string; sceneCount: string; videoType: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality?: string },
+    meta: { language: string; sceneCount: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality?: string },
   ) => void;
   onUpdateScript: (script: SavedScript) => void;
   onDeleteScript: (id: string) => void;
@@ -117,7 +117,6 @@ function VideoDetailView({
         content: script.content,
         language: script.meta.language,
         sceneCount: script.meta.sceneCount,
-        videoType: script.meta.videoType,
         voice: script.meta.voice,
         aspectRatio: script.meta.aspectRatio ?? '16:9',
         sceneDuration: script.meta.sceneDuration ?? '6',
@@ -339,7 +338,7 @@ export default function Page() {
 
   const handleSaveScript = useCallback((
     content: string,
-    meta: { language: string; sceneCount: string; videoType: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality?: string },
+    meta: { language: string; sceneCount: string; voice: string; aspectRatio: string; sceneDuration: string; videoQuality?: string },
   ) => {
     const now = new Date().toISOString();
     const newScript: SavedScript = {

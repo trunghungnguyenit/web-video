@@ -54,7 +54,7 @@ async function pollUntilDone(apiKey: string, taskId: string, sceneId: string): P
  * - Đã có videoUrl → bỏ qua
  * - Có kieTaskId → chỉ poll (resume sau refresh)
  * - Chưa có → tạo task 1 lần rồi poll
- * - Có ảnh Master Cast / ảnh nguồn → image-to-video (đồng nhất nhân vật)
+ * - Có ảnh nguồn riêng của cảnh (tab "Từ hình ảnh") → image-to-video
  */
 export async function generateSceneVideoAssetKie(
   scene: VideoScene,

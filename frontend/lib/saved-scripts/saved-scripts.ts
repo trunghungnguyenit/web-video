@@ -3,7 +3,6 @@
 export interface SavedScriptMeta {
   language: string;
   sceneCount: string;
-  videoType: string;
   voice: string;
   aspectRatio: string;
   sceneDuration: string;
@@ -32,13 +31,6 @@ export function deriveTitle(content: string): string {
   return trimmed.length > 60 ? trimmed.slice(0, 57) + '...' : trimmed || 'Kịch bản không tên';
 }
 
-export const VIDEO_TYPE_LABELS: Record<string, string> = {
-  storytelling: 'Kể chuyện',
-  tutorial: 'Hướng dẫn',
-  ads: 'Quảng cáo',
-  review: 'Review',
-};
-
 export const LANGUAGE_LABELS: Record<string, string> = {
   vi: 'Tiếng Việt',
   en: 'English',
@@ -55,7 +47,6 @@ export const SCENE_COUNT_LABELS: Record<string, string> = {
 };
 
 export const SCENE_COUNT_OPTIONS = Object.entries(SCENE_COUNT_LABELS) as [string, string][];
-export const VIDEO_TYPE_OPTIONS = Object.entries(VIDEO_TYPE_LABELS) as [string, string][];
 export const LANGUAGE_OPTIONS = Object.entries(LANGUAGE_LABELS) as [string, string][];
 
 /** Nhãn hiển thị số cảnh từ giá trị form */

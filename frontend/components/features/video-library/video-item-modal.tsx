@@ -17,7 +17,6 @@ import {
   SCENE_COUNT_OPTIONS,
   VIDEO_PROVIDER_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
-  VIDEO_TYPE_OPTIONS,
   type VideoSettings,
 } from '@/contexts/project-settings-context';
 import { getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts/saved-scripts';
@@ -193,7 +192,6 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       inputType: 'text',
       language: settings.language,
       sceneCount: settings.sceneCount,
-      videoType: settings.videoType,
       characters,
       aspectRatio: settings.aspectRatio,
       sceneDuration: settings.sceneDuration,
@@ -211,7 +209,6 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       pipeline,
       sourceContent: trimmedContent,
       sceneCount: settings.sceneCount,
-      videoType: settings.videoType,
       language: settings.language,
     });
 
@@ -320,11 +317,6 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             <Field label="Số cảnh">
               <select value={settings.sceneCount} onChange={(e) => patch({ sceneCount: e.target.value })} className={selectClass}>
                 {SCENE_COUNT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
-            </Field>
-            <Field label="Kiểu video">
-              <select value={settings.videoType} onChange={(e) => patch({ videoType: e.target.value })} className={selectClass}>
-                {VIDEO_TYPE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
             <Field label="Tỷ lệ">

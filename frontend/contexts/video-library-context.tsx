@@ -53,7 +53,6 @@ interface AnalyzeInput {
   pipeline: AnalyzePipelineRequest;
   sourceContent: string;
   sceneCount: string;
-  videoType: string;
   language: string;
   /** Tab "Từ hình ảnh" — ảnh theo đúng thứ tự cảnh, ảnh[i] gắn vào scenes[i] để gửi Veo */
   sceneImages?: Array<{ base64: string; mimeType: string } | null>;
@@ -397,7 +396,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
         ...p.settings,
         language: input.language,
         sceneCount: input.sceneCount,
-        videoType: input.videoType,
         voice: input.voice,
         aspectRatio: input.aspectRatio ?? '16:9',
         sceneDuration: normalizeSceneDurationSetting(
@@ -656,7 +654,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
         ...p.settings,
         language: input.language,
         sceneCount: String(preset.demoScenes.length),
-        videoType: input.videoType,
         voice: input.voice,
         aspectRatio: veoInput.aspectRatio,
         sceneDuration: veoInput.sceneDuration,
@@ -673,7 +670,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       scenes: buildDemoScenesFromPreset(preset),
       sourceContent: input.content,
       sceneCount: String(preset.demoScenes.length),
-      videoType: input.videoType,
       language: input.language,
       aspectRatio: veoInput.aspectRatio,
       sceneDuration: veoInput.sceneDuration,
@@ -739,7 +735,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           scenes,
           sourceContent: input.sourceContent,
           sceneCount: input.sceneCount,
-          videoType: input.videoType,
           language: input.language,
           aspectRatio: veoInput.aspectRatio,
           sceneDuration: veoInput.sceneDuration,
@@ -830,7 +825,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           scenes,
           sourceContent: input.sourceContent,
           sceneCount: input.sceneCount,
-          videoType: input.videoType,
           language: input.language,
           aspectRatio: veoInput.aspectRatio,
           sceneDuration: veoInput.sceneDuration,
@@ -965,7 +959,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
         scenes: item.scenes,
         sourceContent: item.inputContent,
         sceneCount: item.settings.sceneCount,
-        videoType: item.settings.videoType,
         language: item.settings.language,
         aspectRatio: item.veoInput.aspectRatio,
         sceneDuration: item.veoInput.sceneDuration,

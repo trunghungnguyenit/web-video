@@ -13,7 +13,7 @@ import {
   SceneStoppedError,
 } from '@/lib/veo/veo-generation-lock';
 import { isFatalErrorMessage } from '@/lib/veo/fatal-error-patterns';
-import { fetchVideoAsBase64, trimToLastSeconds } from '@/lib/veo/scene-continuity';
+import { fetchVideoAsBase64, trimNewSegment } from '@/lib/veo/scene-continuity';
 
 export const VEO_POLL_INTERVAL_MS = 10_000;
 export const VEO_MAX_POLL_MS = 10 * 60 * 1000;
@@ -90,6 +90,9 @@ export async function generateSceneVideoAsset(
     // cắt lại chỉ giữ đoạn mới sau khi tải xong. Tính theo tham số truyền vào (không phụ
     // thuộc nhánh start-mới hay resume) để đúng cả khi resume poll sau khi refresh trang.
     const usedContinuity = Boolean(veoInput.sceneContinuity && previousSceneVideoUrl);
+    // Đo độ dài THẬT của video cảnh trước — dùng để tính đúng đoạn mới cần giữ lại sau khi
+    // tải file gộp về (KHÔNG giả định cứng Google thêm đúng bao nhiêu giây mỗi lần gọi).
+    let previousDurationSeconds: number | undefined;
 
     if (!operationName) {
       if (isSceneStopped(scene.id)) throw new SceneStoppedError();
@@ -101,6 +104,7 @@ export async function generateSceneVideoAsset(
       const previousVideo = usedContinuity && previousSceneVideoUrl
         ? await fetchVideoAsBase64(previousSceneVideoUrl)
         : undefined;
+      previousDurationSeconds = previousVideo?.durationSeconds;
       console.log('[veo/generate] Master Cast / continuity check:', {
         sceneId: scene.id,
         hasSceneSourceImage: Boolean(scene.sourceImageBase64),
@@ -108,6 +112,7 @@ export async function generateSceneVideoAsset(
         hasCharacterImage: Boolean(characterImage?.imageBase64),
         sceneContinuityEnabled: Boolean(veoInput.sceneContinuity),
         usedContinuity,
+        previousDurationSeconds,
         characterNames: veoInput.characters?.map((c) => c.name) ?? [],
       });
 
@@ -125,15 +130,22 @@ export async function generateSceneVideoAsset(
       );
       operationName = started.operationName;
       callbacks?.onOperationStarted?.(operationName);
+    } else if (usedContinuity && previousSceneVideoUrl) {
+      // Resume sau refresh (đã start từ trước, chỉ poll tiếp) — vẫn cần đo lại độ dài
+      // cảnh trước để cắt đúng lúc tải kết quả về, vì biến trên không giữ được qua reload.
+      const previousVideo = await fetchVideoAsBase64(previousSceneVideoUrl);
+      previousDurationSeconds = previousVideo?.durationSeconds;
     }
 
     // Không bọc try/catch riêng — pollUntilDone/downloadVideo throw gì thì để nguyên
     // vậy propagate lên caller (scene-generation-queue.ts tự phân loại fatal/stop/retry).
     const videoUri = await pollUntilDone(apiKey, operationName, scene.id);
     const blob = await veoService.downloadVideo({ apiKey, videoUri });
-    // Video Extension trả file gộp (cảnh trước + cảnh mới) — cắt lại đúng 8s cuối để
-    // lưu trữ đúng 1 clip riêng cho cảnh này, không lặp lại nội dung cảnh trước.
-    const finalBlob = usedContinuity ? await trimToLastSeconds(blob, 8) : blob;
+    // Video Extension trả file gộp (cảnh trước + cảnh mới) — cắt bỏ đúng phần cảnh trước
+    // (đo bằng độ dài thật, không giả định cứng) để lưu lại đúng 1 clip riêng cho cảnh này.
+    const finalBlob = usedContinuity && previousDurationSeconds
+      ? await trimNewSegment(blob, previousDurationSeconds)
+      : blob;
     const videoUrl = URL.createObjectURL(finalBlob);
     return { videoUrl, veoOperationName: undefined };
   });

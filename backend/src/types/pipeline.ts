@@ -17,7 +17,6 @@ export interface GeminiInput {
   content: string;
   language: string;
   sceneCount: string;
-  videoType: string;
   inputType: 'text' | 'link' | 'image' | 'file';
   characters?: PipelineCharacter[];
   /** Tab link — URL video (YouTube public → file_uri trực tiếp) */

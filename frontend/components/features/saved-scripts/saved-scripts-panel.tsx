@@ -10,7 +10,7 @@ import { FieldError } from '@/components/ui/field-error';
 import { ModalOverlay } from '@/components/ui/modal-overlay';
 import type { SavedScript, SavedScriptMeta } from '@/lib/saved-scripts/saved-scripts';
 import {
-  VIDEO_TYPE_LABELS, LANGUAGE_LABELS, SCENE_COUNT_LABELS,
+  LANGUAGE_LABELS, SCENE_COUNT_LABELS,
   ASPECT_RATIO_LABELS, SCENE_DURATION_LABELS, VIDEO_QUALITY_LABELS,
   formatRelativeDate, formatSceneCount, formatAspectRatio, formatSceneDuration,
 } from '@/lib/saved-scripts/saved-scripts';
@@ -189,7 +189,6 @@ function EditModal({ script, onClose, onSave }: EditModalProps) {
             {[
               { key: 'language' as const, label: 'Ngôn ngữ', options: LANGUAGE_LABELS },
               { key: 'sceneCount' as const, label: 'Số lượng cảnh', options: SCENE_COUNT_LABELS },
-              { key: 'videoType' as const, label: 'Kiểu video', options: VIDEO_TYPE_LABELS },
               { key: 'aspectRatio' as const, label: 'Tỷ lệ video', options: ASPECT_RATIO_LABELS },
               { key: 'sceneDuration' as const, label: 'Thời lượng cảnh', options: SCENE_DURATION_LABELS },
               { key: 'videoQuality' as const, label: 'Chất lượng video', options: VIDEO_QUALITY_LABELS },
@@ -436,9 +435,6 @@ export function SavedScriptsPanel({
                     <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                       <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
                         {LANGUAGE_LABELS[script.meta.language] ?? script.meta.language}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
-                        {VIDEO_TYPE_LABELS[script.meta.videoType] ?? script.meta.videoType}
                       </span>
                       <span className="text-[10px] text-muted-foreground/60 bg-muted/30 px-1.5 py-0.5 rounded">
                         {formatSceneCount(script.meta.sceneCount)}
