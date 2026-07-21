@@ -13,7 +13,7 @@ import {
   SceneStoppedError,
 } from '@/lib/veo/veo-generation-lock';
 import { isFatalErrorMessage } from '@/lib/veo/fatal-error-patterns';
-import { fetchVideoAsBase64, trimNewSegment } from '@/lib/veo/scene-continuity';
+import { extractLastFrameBase64 } from '@/lib/veo/last-frame';
 
 export const VEO_POLL_INTERVAL_MS = 10_000;
 export const VEO_MAX_POLL_MS = 10 * 60 * 1000;
@@ -33,14 +33,14 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Poll operations.get — poll ngay lần đầu, sau đó mỗi 10s, timeout 10 phút */
-async function pollUntilDone(apiKey: string, operationName: string, sceneId: string): Promise<string> {
+async function pollUntilDone(apiKey: string, operationName: string, sceneId: string, quality?: string): Promise<string> {
   return withOperationPollLock(operationName, async () => {
     for (let i = 0; i < VEO_MAX_POLLS; i++) {
       if (i > 0) await sleep(VEO_POLL_INTERVAL_MS);
 
       if (isSceneStopped(sceneId)) throw new SceneStoppedError();
 
-      const status = await veoService.pollOperation({ apiKey, operationName });
+      const status = await veoService.pollOperation({ apiKey, operationName, quality });
 
       if (status.error) {
         throw new Error(status.error);
@@ -61,14 +61,31 @@ async function pollUntilDone(apiKey: string, operationName: string, sceneId: str
  * - Có veoOperationName → chỉ poll (resume sau refresh)
  * - Chưa có → start 1 lần rồi poll
  */
+/**
+ * Câu ràng buộc nối vào prompt khi dùng khung-hình-cuối cảnh trước làm khung đầu.
+ *
+ * QUAN TRỌNG: chỉ neo NHÂN DẠNG nhân vật (mặt/outfit/art style) — TUYỆT ĐỐI không được nói
+ * "giữ nguyên bối cảnh/setting", vì scene prompt phía trên (Environment/Action/Camera do
+ * Gemini sinh cho ĐÚNG cảnh này) có thể mô tả 1 bối cảnh/hành động khác hẳn cảnh trước (vd
+ * cắt cảnh sang phòng khác). Nói "giữ nguyên setting" ở đây sẽ MÂU THUẪN trực tiếp với
+ * "Environment: location: ..." đã viết ngay phía trên trong cùng 1 prompt, khiến model ưu
+ * tiên bám khung hình neo thay vì làm theo mô tả cảnh mới → video trông như lặp lại cảnh cũ.
+ */
+const CONTINUITY_FRAME_NOTE =
+  'The starting frame is only a visual anchor for character identity (faces, hairstyles, outfits, art style) carried over '
+  + 'from the previous shot — it is NOT a constraint on setting or action. Follow the environment, action, and camera exactly '
+  + 'as described in the scene prompt above, even if the location or activity is completely different from the starting frame '
+  + '(treat it as a hard cut/new shot when the scene describes a new setting) — only the characters\' appearance and overall art style must stay consistent.';
+
 export async function generateSceneVideoAsset(
   scene: VideoScene,
   veoInput: VeoInput,
   callbacks?: SceneVideoCallbacks,
   /**
-   * Scene Continuity (Video Extension, Veo 3.1) — videoUrl của cảnh liền TRƯỚC (không
-   * phải cảnh 1). Chỉ dùng khi veoInput.sceneContinuity bật; provider khác Veo (Kie) hoặc
-   * cảnh 1 thì bỏ qua tham số này (undefined).
+   * Scene Continuity — videoUrl của cảnh liền TRƯỚC (không phải cảnh 1). Khi bật continuity,
+   * trích khung hình CUỐI của video này làm khung đầu (first frame) cho cảnh hiện tại qua
+   * /veo/generate FIRST_AND_LAST_FRAMES_2_VIDEO. Provider khác Veo (Kie) hoặc cảnh 1 thì
+   * bỏ qua tham số này (undefined).
    */
   previousSceneVideoUrl?: string,
 ): Promise<{ videoUrl: string; veoOperationName?: string }> {
@@ -86,67 +103,64 @@ export async function generateSceneVideoAsset(
 
   return withSceneVideoLock(scene.id, async () => {
     let operationName = !callbacks?.forceNew ? scene.veoOperationName?.trim() : undefined;
-    // Google trả về file GỘP (video cảnh trước + đoạn mới) khi dùng Video Extension — phải
-    // cắt lại chỉ giữ đoạn mới sau khi tải xong. Tính theo tham số truyền vào (không phụ
-    // thuộc nhánh start-mới hay resume) để đúng cả khi resume poll sau khi refresh trang.
-    const usedContinuity = Boolean(veoInput.sceneContinuity && previousSceneVideoUrl);
-    // Đo độ dài THẬT của video cảnh trước — dùng để tính đúng đoạn mới cần giữ lại sau khi
-    // tải file gộp về (KHÔNG giả định cứng Google thêm đúng bao nhiêu giây mỗi lần gọi).
-    let previousDurationSeconds: number | undefined;
 
     if (!operationName) {
       if (isSceneStopped(scene.id)) throw new SceneStoppedError();
+
+      // Ảnh nguồn riêng của cảnh (tab "Từ hình ảnh") — LUÔN ưu tiên cao nhất. Đây là ảnh
+      // user chủ động chọn cho ĐÚNG cảnh này (vd từng chiếc áo dài khác nhau mỗi cảnh),
+      // tuyệt đối không được để continuity tự động ghi đè.
+      const sceneOwnImage = scene.sourceImageBase64 && scene.sourceImageMimeType
+        ? { base64: scene.sourceImageBase64, mimeType: scene.sourceImageMimeType }
+        : undefined;
+
+      // Scene Continuity — chỉ trích khung hình cuối cảnh trước khi cảnh này KHÔNG có ảnh
+      // nguồn riêng (continuity dành cho luồng kịch bản/text thuần, không áp dụng khi user
+      // đã chỉ định ảnh cụ thể cho từng cảnh). Thất bại (video mất sau F5, CORS taint...)
+      // → undefined, fallback tạo cảnh thường.
+      const continuityFrame = !sceneOwnImage && veoInput.sceneContinuity && previousSceneVideoUrl
+        ? await extractLastFrameBase64(previousSceneVideoUrl)
+        : undefined;
+
+      const startImage = sceneOwnImage ?? continuityFrame;
+
+      const basePrompt = buildScenePrompt(scene.prompt, veoInput.masterCharacterText);
+      const prompt = continuityFrame ? `${basePrompt}\n\n[${CONTINUITY_FRAME_NOTE}]` : basePrompt;
 
       const referenceImage = veoInput.referenceImage?.base64 && veoInput.referenceImage?.mimeType
         ? veoInput.referenceImage
         : undefined;
       const characterImage = veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
-      const previousVideo = usedContinuity && previousSceneVideoUrl
-        ? await fetchVideoAsBase64(previousSceneVideoUrl)
-        : undefined;
-      previousDurationSeconds = previousVideo?.durationSeconds;
       console.log('[veo/generate] Master Cast / continuity check:', {
         sceneId: scene.id,
         hasSceneSourceImage: Boolean(scene.sourceImageBase64),
         hasReferenceImage: Boolean(referenceImage),
         hasCharacterImage: Boolean(characterImage?.imageBase64),
         sceneContinuityEnabled: Boolean(veoInput.sceneContinuity),
-        usedContinuity,
-        previousDurationSeconds,
+        usedContinuityFrame: Boolean(continuityFrame),
         characterNames: veoInput.characters?.map((c) => c.name) ?? [],
       });
 
       const started = await withVeoConcurrency(() =>
         veoService.startGeneration({
           apiKey,
-          prompt: buildScenePrompt(scene.prompt, veoInput.masterCharacterText),
+          prompt,
           veoInput,
           durationSeconds: scene.durationSeconds,
-          image: scene.sourceImageBase64 && scene.sourceImageMimeType
-            ? { base64: scene.sourceImageBase64, mimeType: scene.sourceImageMimeType }
-            : undefined,
-          previousVideo,
+          image: startImage,
         }),
       );
       operationName = started.operationName;
       callbacks?.onOperationStarted?.(operationName);
-    } else if (usedContinuity && previousSceneVideoUrl) {
-      // Resume sau refresh (đã start từ trước, chỉ poll tiếp) — vẫn cần đo lại độ dài
-      // cảnh trước để cắt đúng lúc tải kết quả về, vì biến trên không giữ được qua reload.
-      const previousVideo = await fetchVideoAsBase64(previousSceneVideoUrl);
-      previousDurationSeconds = previousVideo?.durationSeconds;
     }
 
     // Không bọc try/catch riêng — pollUntilDone/downloadVideo throw gì thì để nguyên
     // vậy propagate lên caller (scene-generation-queue.ts tự phân loại fatal/stop/retry).
-    const videoUri = await pollUntilDone(apiKey, operationName, scene.id);
+    const videoUri = await pollUntilDone(apiKey, operationName, scene.id, veoInput.videoQuality);
     const blob = await veoService.downloadVideo({ apiKey, videoUri });
-    // Video Extension trả file gộp (cảnh trước + cảnh mới) — cắt bỏ đúng phần cảnh trước
-    // (đo bằng độ dài thật, không giả định cứng) để lưu lại đúng 1 clip riêng cho cảnh này.
-    const finalBlob = usedContinuity && previousDurationSeconds
-      ? await trimNewSegment(blob, previousDurationSeconds)
-      : blob;
-    const videoUrl = URL.createObjectURL(finalBlob);
+    const videoUrl = URL.createObjectURL(blob);
+    // Thành công → xoá veoOperationName (không còn cần resume-poll cảnh này). Cảnh sau
+    // nối tiếp bằng KHUNG HÌNH CUỐI của videoUrl này, không cần taskId nữa.
     return { videoUrl, veoOperationName: undefined };
   });
 }

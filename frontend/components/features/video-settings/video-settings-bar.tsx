@@ -31,7 +31,7 @@ function Field({
   className?: string;
 }) {
   return (
-    <div className={cn('shrink-0 min-w-[7.5rem] sm:min-w-[8.5rem]', className)}>
+    <div className={cn('shrink-0 min-w-30 sm:min-w-34', className)}>
       <label
         htmlFor={htmlFor}
         className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide block mb-1 truncate"
@@ -60,7 +60,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
   return (
     <div className={cn('space-y-1.5', className)}>
       <div className="flex gap-2 overflow-x-auto scrollbar-none pb-0.5 -mx-0.5 px-0.5">
-        <Field label="Nhà cung cấp" htmlFor="header-video-provider" className="min-w-[10rem]">
+        <Field label="Nhà cung cấp" htmlFor="header-video-provider" className="min-w-40">
           <select
             id="header-video-provider"
             value={settings.videoProvider}
@@ -74,7 +74,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
         </Field>
 
         {settings.videoProvider === 'veo' && hasVeoKey && (
-          <Field label="Model Veo" htmlFor="header-veo-model" className="min-w-[9rem]">
+          <Field label="Model Veo" htmlFor="header-veo-model" className="min-w-36">
             <SelectVeo
               id="header-veo-model"
               showLabel={false}
@@ -94,7 +94,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
               role="switch"
               aria-checked={settings.sceneContinuity}
               onClick={() => patchSettings({ sceneContinuity: !settings.sceneContinuity })}
-              title="Dùng đoạn cuối video cảnh trước làm bối cảnh khởi đầu cho cảnh sau — tăng đồng nhất nhân vật, camera, chuyển động, ánh sáng và mạch phim. Chỉ Veo 3.1 hỗ trợ, khoá cứng 8s/720p khi bật."
+              title="Nối cảnh sau từ KHUNG HÌNH CUỐI của cảnh trước làm khung đầu — giữ nhân vật, bối cảnh, ánh sáng liền mạch giữa các cảnh. Chỉ Veo 3.1 hỗ trợ."
               className={cn(
                 'w-full h-[30px] px-2 flex items-center gap-1.5 rounded-lg border transition-colors text-[11px] font-medium',
                 settings.sceneContinuity
@@ -121,7 +121,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
         )}
 
         {settings.videoProvider === 'kie' && (
-          <Field label="Chế độ" htmlFor="header-kie-mode" className="min-w-[8rem]">
+          <Field label="Chế độ" htmlFor="header-kie-mode" className="min-w-32">
             <select
               id="header-kie-mode"
               value={settings.kieMode}
@@ -180,15 +180,9 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             id="header-scene-duration"
             value={settings.sceneDuration}
             onChange={(e) => patchSettings({ sceneDuration: e.target.value })}
-            disabled={settings.videoQuality === '1080p' || settings.sceneContinuity}
+            disabled={settings.videoQuality === '1080p'}
             className={selectClass}
-            title={
-              settings.sceneContinuity
-                ? 'Liên tục cảnh bắt buộc 8 giây/cảnh'
-                : settings.videoQuality === '1080p'
-                  ? '1080p bắt buộc 8 giây/cảnh'
-                  : undefined
-            }
+            title={settings.videoQuality === '1080p' ? '1080p bắt buộc 8 giây/cảnh' : undefined}
           >
             {sceneDurationOptions.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
@@ -201,9 +195,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             id="header-video-quality"
             value={settings.videoQuality}
             onChange={(e) => patchSettings({ videoQuality: e.target.value })}
-            disabled={settings.sceneContinuity}
             className={selectClass}
-            title={settings.sceneContinuity ? 'Liên tục cảnh bắt buộc 720p' : undefined}
           >
             {(settings.videoProvider === 'kie' ? KIE_VIDEO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS).map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
@@ -211,7 +203,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
           </select>
         </Field>
 
-        <Field label="Giọng đọc" htmlFor="header-voice" className="min-w-[10rem] sm:min-w-[11rem]">
+        <Field label="Giọng đọc" htmlFor="header-voice" className="min-w-40 sm:min-w-44">
           <VoiceSelect
             id="header-voice"
             value={settings.voice}

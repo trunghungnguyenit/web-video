@@ -14,14 +14,15 @@ interface StartBody {
   prompt: string;
   veoInput: VeoInput;
   durationSeconds: number;
+  /** Khung đầu — ảnh nguồn cảnh (tab "Từ hình ảnh") HOẶC khung hình cuối cảnh trước (Scene Continuity) */
   image?: { base64: string; mimeType: string };
-  /** Scene Continuity (Video Extension, Veo 3.1) — video thật của cảnh liền trước */
-  previousVideo?: { base64: string; mimeType: string };
 }
 
 interface PollBody {
   apiKey: string;
   operationName: string;
+  /** '1080p' → sau khi task xong, backend tự gọi thêm get-1080p-video */
+  quality?: string;
 }
 
 interface DownloadBody {
@@ -63,7 +64,8 @@ veoRoute.post('/models', async (c) => {
 
 /**
  * POST /api/veo/generate/start
- * Bắt đầu tạo video — đúng 1 lần predictLongRunning, trả operationName
+ * Bắt đầu tạo video — đúng 1 lần /veo/generate, trả operationName (taskId). Khi Scene
+ * Continuity bật, cảnh sau gửi kèm `image` = khung hình cuối cảnh trước (FIRST_AND_LAST_FRAMES).
  */
 veoRoute.post('/generate/start', async (c) => {
   try {
@@ -85,7 +87,6 @@ veoRoute.post('/generate/start', async (c) => {
       veoInput: body.veoInput,
       durationSeconds: body.durationSeconds ?? 6,
       image: body.image,
-      previousVideo: body.previousVideo,
     });
 
     return ok(c, { operationName });
@@ -109,7 +110,7 @@ veoRoute.post('/operations/poll', async (c) => {
       return fail(c, 'Thiếu operationName.', 400);
     }
 
-    const result = await pollVideoOperation(body.apiKey, body.operationName);
+    const result = await pollVideoOperation(body.apiKey, body.operationName, body.quality);
     return ok(c, result);
   } catch (err) {
     return veoErrorResponse(c, err);

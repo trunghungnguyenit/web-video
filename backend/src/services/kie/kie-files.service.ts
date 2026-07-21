@@ -46,16 +46,19 @@ export async function uploadKieImageBase64(params: {
   base64: string;
   mimeType: string;
   fileName?: string;
+  /** Thư mục upload trên Kie temp storage — mặc định 'master-cast' (Grok Imagine); Veo dùng 'veo-scenes' */
+  uploadPath?: string;
 }): Promise<string> {
   const apiKey = params.apiKey.trim();
-  if (!apiKey) throw new Error('Thiếu Kie.ai API Key để upload ảnh Master Cast.');
+  if (!apiKey) throw new Error('Thiếu API Key để upload ảnh.');
 
   const pure = params.base64.replace(/^data:[^;]+;base64,/, '').trim();
-  if (!pure) throw new Error('Ảnh Master Cast trống — không upload được.');
+  if (!pure) throw new Error('Ảnh trống — không upload được.');
 
   const mime = params.mimeType.trim() || 'image/png';
   const dataUrl = `data:${mime};base64,${pure}`;
-  const fileName = params.fileName?.trim() || `master-cast-${Date.now()}.${extFromMime(mime)}`;
+  const uploadPath = params.uploadPath?.trim() || 'master-cast';
+  const fileName = params.fileName?.trim() || `${uploadPath}-${Date.now()}.${extFromMime(mime)}`;
 
   const res = await fetch(UPLOAD_URL, {
     method: 'POST',
@@ -65,19 +68,20 @@ export async function uploadKieImageBase64(params: {
     },
     body: JSON.stringify({
       base64Data: dataUrl,
-      uploadPath: 'master-cast',
+      uploadPath,
       fileName,
     }),
   });
 
-  const data = await readJsonOrThrow(res, 'Kie upload ảnh');
+  const data = await readJsonOrThrow(res, 'Upload ảnh');
   const url = data.data?.downloadUrl?.trim() || data.data?.fileUrl?.trim();
 
   if (!res.ok || data.success === false || data.code !== 200 || !url) {
-    throw new Error(data.msg ?? `Kie upload ảnh lỗi (${res.status})`);
+    throw new Error(data.msg ?? `Upload ảnh lỗi (${res.status})`);
   }
 
-  console.log('[kie/upload] Master Cast OK:', {
+  console.log('[kie/upload] OK:', {
+    uploadPath,
     fileName: data.data?.fileName,
     urlPreview: `${url.slice(0, 80)}…`,
   });

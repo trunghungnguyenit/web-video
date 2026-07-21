@@ -160,9 +160,10 @@ export async function runSceneGenerationQueue(
     queueItems[i] = { ...queueItems[i], step: 'video' };
     callbacks.onQueueUpdate?.([...queueItems]);
 
-    // Scene Continuity (Video Extension, Veo 3.1) — cảnh sau (không phải cảnh 1) nối
-    // tiếp từ video THẬT của cảnh liền trước. scenes[i-1].videoUrl lúc này đã là kết quả
-    // mới nhất (loop tuần tự, đã await xong cảnh trước) hoặc video có sẵn từ trước.
+    // Scene Continuity — cảnh sau (không phải cảnh 1) nối tiếp bằng KHUNG HÌNH CUỐI của
+    // video cảnh liền trước, dùng làm khung đầu cho /veo/generate. scenes[i-1].videoUrl
+    // lúc này đã là kết quả mới nhất (loop tuần tự, đã await xong cảnh trước). Nếu undefined
+    // (resume mất blob) → generateSceneVideoAsset tự fallback tạo cảnh không có khung nối.
     const previousSceneVideoUrl = veoInput.sceneContinuity && i > 0
       ? scenes[i - 1]?.videoUrl
       : undefined;
@@ -188,6 +189,8 @@ export async function runSceneGenerationQueue(
       finished = {
         ...working,
         videoUrl,
+        // Xoá operationId — cảnh đã xong, cảnh sau nối tiếp bằng khung hình cuối của videoUrl
+        // này (không cần taskId). Giữ lại chỉ khiến sceneNeedsVeoResume hiểu nhầm đang chạy.
         veoOperationName: undefined,
         kieTaskId: undefined,
         // Video mới sinh — path Storage cũ (nếu có) không còn đại diện đúng nội

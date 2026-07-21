@@ -371,8 +371,9 @@ export function SceneGallery({
       }
       const patch = overrides?.[id];
       const working: VideoScene = patch ? { ...scene, ...patch, errorMessage: undefined } : { ...scene, errorMessage: undefined };
-      // Scene Continuity (Video Extension, Veo 3.1) — nối tiếp từ video hiện có của
-      // đúng cảnh liền trước (theo index), không phải cảnh đang tạo lại.
+      // Scene Continuity — nối tiếp bằng khung hình cuối video của đúng cảnh liền trước
+      // (theo index), không phải cảnh đang tạo lại. undefined nếu cảnh trước chưa có video
+      // → generateSceneVideoAsset tự fallback tạo cảnh không có khung nối.
       const previousSceneVideoUrl = veoInput.sceneContinuity
         ? scenesRef.current.find((s) => s.index === scene.index - 1)?.videoUrl
         : undefined;

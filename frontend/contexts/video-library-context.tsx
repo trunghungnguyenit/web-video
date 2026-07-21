@@ -46,6 +46,11 @@ import {
   uploadSceneAssets,
   deleteSceneAssets,
   deleteProjectStorageAssets,
+  resolveSourceUploadSignedUrls,
+  uploadSourceImage as uploadSourceImageToStorage,
+  uploadSourceDocument as uploadSourceDocumentToStorage,
+  deleteSourceUploads,
+  getSourceUploadSignedUrl,
 } from '@/lib/video-library/video-library-storage';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -94,6 +99,14 @@ interface VideoLibraryContextValue {
   saveActiveSceneVideos: () => Promise<{ saved: number; failed: number }>;
   /** Xoá file Storage của các cảnh vừa bị xoá khỏi mục 3 */
   deleteSceneStorageAssets: (scenes: VideoScene[]) => void;
+  /** Upload 1 ảnh nguồn (Mục 2 — tab "Từ hình ảnh") — trả path Storage, undefined nếu chưa đăng nhập */
+  uploadSourceImage: (imageId: string, file: File) => Promise<string | undefined>;
+  /** Upload tài liệu nguồn (Mục 2 — tab "Từ file") — trả path Storage, undefined nếu chưa đăng nhập */
+  uploadSourceDocument: (file: File) => Promise<string | undefined>;
+  /** Xoá 1 file nguồn khỏi Storage (user xoá/thay ảnh) */
+  deleteSourceUpload: (path: string) => void;
+  /** Signed URL tức thời cho path nguồn — dùng khi resubmit cần fetch lại bytes thật */
+  getSourceSignedUrl: (path: string) => Promise<string | undefined>;
 }
 
 const VideoLibraryContext = createContext<VideoLibraryContextValue | null>(null);
@@ -184,7 +197,8 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     (async () => {
       try {
         const rawItems = (await fetchRemoteVideoLibrary(supabase, user.id)).map(normalizeItemOnLoad);
-        const remoteItems = await resolveSceneSignedUrls(supabase, rawItems);
+        const withSceneUrls = await resolveSceneSignedUrls(supabase, rawItems);
+        const remoteItems = await resolveSourceUploadSignedUrls(supabase, withSceneUrls);
         if (remoteItems.length > 0) {
           setItems(remoteItems);
           setActiveItemId((prev) => (remoteItems.some((i) => i.id === prev) ? prev : remoteItems[0].id));
@@ -365,7 +379,14 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
               : s,
           ),
         );
-        saved++;
+        // uploadSceneAssets tự bắt lỗi nội bộ cho video/audio riêng (không throw) — video
+        // là điều kiện chính của `targets` (lọc theo !videoPath), nên coi thành công thật
+        // sự chỉ khi videoPath có giá trị; audio lỗi (vd blob hết hạn) không tính là fail.
+        if (videoPath) {
+          saved++;
+        } else {
+          failed++;
+        }
       } catch (err) {
         console.error('[video-library] Lưu video Storage thất bại:', err);
         failed++;
@@ -382,6 +403,40 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     void deleteSceneAssets(supabase, scenes).catch((err) => {
       console.error('[video-library] Xoá file Storage của cảnh thất bại:', err);
     });
+  }, [user]);
+
+  /**
+   * Upload 1 ảnh nguồn (Mục 2 — tab "Từ hình ảnh") lên Storage NGAY khi user đính kèm
+   * (không đợi bấm "Phân tích") — sống sót qua điều hướng/reload. Trả `undefined` nếu
+   * chưa đăng nhập (giữ hành vi ephemeral như trước, nhất quán scene-videos/scene-audio).
+   */
+  const uploadSourceImage = useCallback(async (imageId: string, file: File): Promise<string | undefined> => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user) return undefined;
+    return uploadSourceImageToStorage(supabase, user.id, activeItemIdRef.current, imageId, file);
+  }, [user]);
+
+  /** Upload tài liệu nguồn (Mục 2 — tab "Từ file") lên Storage ngay khi user đính kèm */
+  const uploadSourceDocument = useCallback(async (file: File): Promise<string | undefined> => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user) return undefined;
+    return uploadSourceDocumentToStorage(supabase, user.id, activeItemIdRef.current, file);
+  }, [user]);
+
+  /** Xoá 1 file nguồn khỏi Storage (user xoá/thay ảnh) — chạy nền, không chặn UI, lỗi chỉ log */
+  const deleteSourceUpload = useCallback((path: string) => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user || !path) return;
+    void deleteSourceUploads(supabase, [path]).catch((err) => {
+      console.error('[video-library] Xoá file nguồn Storage thất bại:', err);
+    });
+  }, [user]);
+
+  /** Signed URL tức thời cho path nguồn — dùng khi resubmit cần fetch lại bytes thật */
+  const getSourceSignedUrl = useCallback(async (path: string): Promise<string | undefined> => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user) return undefined;
+    return getSourceUploadSignedUrl(supabase, path);
   }, [user]);
 
   const setActiveTimelineFocus = useCallback((sceneId: string | null) => {
@@ -842,7 +897,12 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     return true;
   }, [updateItem, runSceneGeneration]);
 
-  /** Xác nhận preview tab link — đính kèm ảnh Master Cast rồi mới chạy TTS/Veo/Kie */
+  /**
+   * Xác nhận preview tab link — chạy TTS/Veo/Kie. Ảnh Master Cast là TUỲ CHỌN: không có
+   * ảnh vẫn cho tạo video (cảnh 1 dùng TEXT_2_VIDEO thuần, dựa vào masterCastPrompt (text)
+   * + Scene Continuity nối khung hình cuối cho cảnh 2+ nếu user bật) — trước đây chặn cứng
+   * ở đây khiến luồng "chỉ link + prompt, không ảnh" không thể chạy được.
+   */
   const confirmLinkGeneration = useCallback((itemId: string, imageDataUrl?: string): boolean => {
     const item = itemsRef.current.find((p) => p.id === itemId);
     if (!item?.pendingLinkReview) return false;
@@ -863,48 +923,48 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       imageBytesApprox: image ? Math.round((image.base64.length * 3) / 4) : 0,
     });
 
-    if (!image) {
-      console.warn('[master-cast/confirm] CHẶN — chưa có ảnh Master Cast, không gửi tạo video.');
-      return false;
-    }
-
     analyzeInFlightRef.current.add(itemId);
 
     const epoch = (generationEpochRef.current.get(itemId) ?? 0) + 1;
     generationEpochRef.current.set(itemId, epoch);
 
     const result = item.pendingLinkReview;
+    // masterCastPrompt là NGUỒN DUY NHẤT (user thấy + sửa được trong MasterCastPanel) —
+    // chèn vào đầu prompt mọi cảnh lúc gửi Veo/Kie, dù có ảnh hay không (text vẫn hữu ích
+    // để củng cố nhận diện nhân vật khi không có ảnh tham chiếu).
+    const masterCharacterText = item.masterCastPrompt?.trim() || undefined;
     const veoInput: VeoInput = {
       ...result.veoInput,
-      // Field rõ ràng — mọi cảnh đọc referenceImage trước
-      referenceImage: { base64: image.base64, mimeType: image.mimeType },
-      // Mô tả Gemini Vision phân tích trực tiếp từ ảnh Character Sheet — chèn vào
-      // đầu prompt mọi cảnh lúc gửi Veo/Kie để củng cố thêm cho ảnh tham chiếu
-      masterCharacterText: item.masterCastImageDescription?.trim() || undefined,
-      characters: [
-        ...(result.veoInput.characters ?? []).filter((c) => c.name !== 'Master Cast'),
-        {
-          name: 'Master Cast',
-          role: '',
-          traits: '',
-          outfit: '',
-          description: item.masterCastPrompt ?? '',
-          style: 'Realistic',
-          imageBase64: image.base64,
-          imageMimeType: image.mimeType,
-        } satisfies PipelineCharacter,
-      ],
+      // Không có ảnh → referenceImage undefined, cảnh 1 rơi về TEXT_2_VIDEO như tab file/text.
+      referenceImage: image ? { base64: image.base64, mimeType: image.mimeType } : undefined,
+      masterCharacterText,
+      characters: image
+        ? [
+            ...(result.veoInput.characters ?? []).filter((c) => c.name !== 'Master Cast'),
+            {
+              name: 'Master Cast',
+              role: '',
+              traits: '',
+              outfit: '',
+              description: item.masterCastPrompt ?? '',
+              style: 'Realistic',
+              imageBase64: image.base64,
+              imageMimeType: image.mimeType,
+            } satisfies PipelineCharacter,
+          ]
+        : (result.veoInput.characters ?? []).filter((c) => c.name !== 'Master Cast'),
     };
 
-    console.log('[master-cast/confirm] Gắn referenceImage + Master Cast character — sẽ gửi kèm mỗi cảnh.', {
+    console.log('[master-cast/confirm] Gắn referenceImage + Master Cast character (nếu có ảnh) — sẽ gửi kèm mỗi cảnh.', {
       characters: (veoInput.characters ?? []).map((c) => ({
         name: c.name,
         hasImage: Boolean(c.imageBase64),
       })),
       hasReferenceImage: Boolean(veoInput.referenceImage?.base64),
+      hasMasterCharacterText: Boolean(masterCharacterText),
     });
 
-    // Một lần update: lưu ảnh + xoá pending + giữ prompt
+    // Một lần update: lưu ảnh (nếu có) + xoá pending + giữ prompt
     updateItem(itemId, {
       pendingLinkReview: null,
       masterCastImageDataUrl: rawImage,
@@ -990,6 +1050,10 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       confirmLinkGeneration,
       saveActiveSceneVideos,
       deleteSceneStorageAssets,
+      uploadSourceImage,
+      uploadSourceDocument,
+      deleteSourceUpload,
+      getSourceSignedUrl,
     }),
     [
       items,
@@ -1012,6 +1076,10 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       confirmLinkGeneration,
       saveActiveSceneVideos,
       deleteSceneStorageAssets,
+      uploadSourceImage,
+      uploadSourceDocument,
+      deleteSourceUpload,
+      getSourceSignedUrl,
     ],
   );
 

@@ -1,4 +1,5 @@
-import { VeoApiError, isFatalVeoMessage, withVeoRetry } from '../../lib/veo-errors';
+import { VeoApiError, withVeoRetry } from '../../lib/veo-errors';
+import { readKieJson, parseKieError } from '../../lib/kie-http';
 import {
   resolveKieAspectRatio,
   resolveKieDurationSeconds,
@@ -46,38 +47,10 @@ export interface PollGrokTaskResult {
   error?: string;
 }
 
-function parseKieError(msg: string | undefined, status: number, fallback: string): VeoApiError {
-  const message = msg ?? fallback;
-  return new VeoApiError(message, { status, fatal: isFatalVeoMessage(message) || status === 401 });
-}
-
-/** Đọc JSON an toàn — Kie đôi khi trả HTML (404/502) thay vì JSON */
-async function readKieJson<T>(res: Response, label: string): Promise<T> {
-  const text = await res.text();
-  const trimmed = text.trim();
-  if (!trimmed) {
-    throw new VeoApiError(`${label}: phản hồi trống (${res.status}).`, { status: res.status });
-  }
-  if (trimmed.startsWith('<')) {
-    throw new VeoApiError(
-      `${label}: server trả HTML thay vì JSON (${res.status}) — kiểm tra API / endpoint.`,
-      { status: res.status },
-    );
-  }
-  try {
-    return JSON.parse(trimmed) as T;
-  } catch {
-    throw new VeoApiError(
-      `${label}: không parse được JSON (${res.status}): ${trimmed.slice(0, 120)}`,
-      { status: res.status },
-    );
-  }
-}
-
 /** POST /jobs/createTask — T2V hoặc I2V (khi có ảnh Master Cast / ảnh nguồn) */
 export async function startGrokVideoGeneration(params: GenerateGrokVideoParams): Promise<string> {
   const apiKey = params.apiKey.trim();
-  if (!apiKey) throw new VeoApiError('Thiếu Kie.ai API Key.', { fatal: true });
+  if (!apiKey) throw new VeoApiError('Thiếu API Key.', { fatal: true });
 
   const prompt = params.prompt.trim();
   if (!prompt) throw new VeoApiError('Prompt video không được để trống.');
@@ -146,10 +119,10 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
       body: JSON.stringify({ model, input }),
     });
 
-    const data = await readKieJson<CreateTaskResponse>(res, 'Kie createTask');
+    const data = await readKieJson<CreateTaskResponse>(res, 'Grok createTask');
 
     if (!res.ok || data.code !== 200 || !data.data?.taskId) {
-      throw parseKieError(data.msg, res.status, `Kie.ai API lỗi (${res.status})`);
+      throw parseKieError(data.msg, res.status, `Lỗi API tạo video (${res.status})`);
     }
 
     return data.data.taskId;
@@ -159,17 +132,17 @@ export async function startGrokVideoGeneration(params: GenerateGrokVideoParams):
 /** GET /jobs/recordInfo?taskId= — poll trạng thái task */
 export async function pollGrokVideoTask(apiKey: string, taskId: string): Promise<PollGrokTaskResult> {
   const key = apiKey.trim();
-  if (!key) throw new VeoApiError('Thiếu Kie.ai API Key.', { fatal: true });
+  if (!key) throw new VeoApiError('Thiếu API Key.', { fatal: true });
 
-  return withVeoRetry('Kie poll', async () => {
+  return withVeoRetry('Grok poll', async () => {
     const res = await fetch(`${BASE_URL}/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, {
       headers: { Authorization: `Bearer ${key}` },
     });
 
-    const data = await readKieJson<RecordInfoResponse>(res, 'Kie poll');
+    const data = await readKieJson<RecordInfoResponse>(res, 'Grok poll');
 
     if (!res.ok || data.code !== 200 || !data.data) {
-      throw parseKieError(data.msg, res.status, `Kie.ai API lỗi (${res.status})`);
+      throw parseKieError(data.msg, res.status, `Lỗi API tạo video (${res.status})`);
     }
 
     const { state, resultJson, failMsg } = data.data;
@@ -199,15 +172,14 @@ export async function pollGrokVideoTask(apiKey: string, taskId: string): Promise
 }
 
 /**
- * Tải video MP4 từ URL kết quả kie.ai — qua backend thay vì fetch thẳng từ trình
- * duyệt, vì CDN của kie.ai không đảm bảo gửi header CORS cho phép fetch cross-origin
- * (khác Veo — video.uri của Google cũng cần proxy vì cần header X-goog-api-key).
+ * Tải video MP4 từ URL kết quả — qua backend thay vì fetch thẳng từ trình duyệt, vì
+ * CDN không đảm bảo gửi header CORS cho phép fetch cross-origin.
  */
 export async function downloadGrokVideo(videoUrl: string): Promise<Buffer> {
   const url = videoUrl.trim();
   if (!url) throw new VeoApiError('Thiếu videoUrl.', { fatal: true });
 
-  return withVeoRetry('Kie download', async () => {
+  return withVeoRetry('Grok download', async () => {
     const res = await fetch(url, { redirect: 'follow' });
     if (!res.ok) {
       throw new VeoApiError(`Không tải được video Grok Imagine (${res.status}).`, { status: res.status });

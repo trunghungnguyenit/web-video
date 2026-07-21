@@ -12,9 +12,14 @@ export const SCENE_DURATION_LABELS: Record<string, string> = {
   '8': '8 giây/cảnh',
 };
 
-/** true nếu chất lượng video là 1080p (Veo bắt buộc 8s/cảnh) */
-export function is1080pQuality(videoQuality?: string): boolean {
-  return videoQuality === '1080p';
+/**
+ * Trước đây (Google trực tiếp) 1080p bắt buộc 8s/cảnh ngay trong predictLongRunning.
+ * Qua kie.ai, 1080p là lệnh gọi phụ (get-1080p-video) tách biệt hoàn toàn khỏi duration
+ * của lần generate gốc — luôn trả false, giữ lại hàm/tham số videoQuality ở các hàm bên
+ * dưới để không phải sửa lại toàn bộ call site đang truyền videoQuality vào.
+ */
+export function is1080pQuality(_videoQuality?: string): boolean {
+  return false;
 }
 
 /** Dropdown options theo chất lượng video */

@@ -1,4 +1,4 @@
-const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+/** Danh sách model Veo 3.1 qua kie.ai — kie.ai không có endpoint discovery như Google, nên trả cứng 3 model */
 
 export interface VeoModelInfo {
   id: string;
@@ -6,72 +6,15 @@ export interface VeoModelInfo {
   description?: string;
 }
 
-interface GoogleModel {
-  name?: string;
-  displayName?: string;
-  description?: string;
-  supportedGenerationMethods?: string[];
-}
-
-interface ListModelsResponse {
-  models?: GoogleModel[];
-  error?: { message?: string };
-}
-
-function modelIdFromName(name: string): string {
-  return name.replace(/^models\//, '');
-}
-
-function formatModelLabel(id: string): string {
-  return id
-    .replace(/^veo-/, 'Veo ')
-    .replace(/-generate-/g, ' ')
-    .replace(/-preview$/g, ' (Preview)')
-    .replace(/-001$/g, '')
-    .replace(/-/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isVeoVideoModel(model: GoogleModel): boolean {
-  const id = model.name ? modelIdFromName(model.name) : '';
-  if (!id.startsWith('veo-')) return false;
-
-  const methods = model.supportedGenerationMethods ?? [];
-  if (methods.length === 0) return true;
-  return methods.some((m) =>
-    m.includes('predictLongRunning') || m.includes('generateVideo') || m.includes('generate'),
-  );
-}
+const STATIC_VEO_MODELS: VeoModelInfo[] = [
+  { id: 'veo3', displayName: 'Veo 3.1 Quality', description: 'Chất lượng cao nhất, không hỗ trợ Master Cast reference' },
+  { id: 'veo3_fast', displayName: 'Veo 3.1 Fast', description: 'Cân bằng tốc độ/chi phí, hỗ trợ Master Cast reference' },
+  { id: 'veo3_lite', displayName: 'Veo 3.1 Lite', description: 'Rẻ nhất, phù hợp khối lượng lớn' },
+];
 
 export async function listVeoModels(apiKey: string): Promise<VeoModelInfo[]> {
   const key = apiKey.trim();
   if (!key) throw new Error('Thiếu API Key.');
 
-  const res = await fetch(`${BASE_URL}/models?pageSize=1000`, {
-    headers: { 'X-goog-api-key': key },
-  });
-  const data = (await res.json()) as ListModelsResponse;
-  if (!res.ok) {
-    throw new Error(data.error?.message ?? `Không lấy được danh sách model (${res.status}).`);
-  }
-
-  const models = (data.models ?? [])
-    .filter(isVeoVideoModel)
-    .map((m) => {
-      const id = modelIdFromName(m.name!);
-      return {
-        id,
-        displayName: m.displayName?.trim() || formatModelLabel(id),
-        description: m.description?.trim(),
-      };
-    })
-    .sort((a, b) => a.displayName.localeCompare(b.displayName, 'vi'));
-
-  if (models.length === 0) {
-    throw new Error('Key hợp lệ nhưng không có model Veo — kiểm tra quyền Veo 3 trên tài khoản Google AI.');
-  }
-
-  return models;
-
+  return STATIC_VEO_MODELS;
 }

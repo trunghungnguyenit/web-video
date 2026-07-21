@@ -18,6 +18,12 @@ export interface GeminiInput {
   language: string;
   sceneCount: string;
   inputType: 'text' | 'link' | 'image' | 'file';
+  /**
+   * Tab "Từ hình ảnh" — 'multi' (nhiều ảnh, mỗi ảnh 1 cảnh/1 look độc lập — lookbook) |
+   * 'single' (1 ảnh + Prompt tổng, câu chuyện liên tục nhiều cảnh). Quyết định buildPrompt()
+   * dùng quy tắc "phim liên tục" (single) hay "lookbook — trang phục đổi mỗi cảnh" (multi).
+   */
+  imageMode?: 'multi' | 'single';
   characters?: PipelineCharacter[];
   /** Tab link — URL video (YouTube public → file_uri trực tiếp) */
   sourceVideoUrl?: string;
@@ -28,6 +34,14 @@ export interface GeminiInput {
   videoFileBase64?: string;
   videoFileMimeType?: string;
   videoFileName?: string;
+  /**
+   * Tab "Từ file" — tài liệu upload (PDF/DOC/DOCX/TXT), base64 thuần không kèm
+   * data-URL prefix. PDF gửi thẳng cho Gemini đọc (inline_data); DOC/DOCX/TXT được
+   * trích xuất text ở BE rồi gộp vào "content" trước khi build prompt.
+   */
+  documentFileBase64?: string;
+  documentFileMimeType?: string;
+  documentFileName?: string;
 }
 
 /** Bước 2 — sinh video từ scene.visual — Veo 3 (mặc định) hoặc Grok Imagine (kie.ai) */

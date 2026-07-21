@@ -14,8 +14,6 @@ interface MasterCastPanelProps {
   onPromptChange: (value: string) => void;
   imageDataUrl?: string;
   onImageChange: (dataUrl: string | undefined) => void;
-  /** Nhận mô tả nhân vật do Gemini Vision phân tích trực tiếp từ ảnh vừa upload — chèn vào prompt mọi cảnh lúc gửi Veo/Kie */
-  onDescriptionChange?: (description: string | undefined) => void;
   /**
    * Có mặt khi đang chờ xác nhận (tab link).
    * Truyền kèm imageDataUrl hiện tại (không phụ thuộc state async của parent).
@@ -36,7 +34,7 @@ function readImageFile(file: File): Promise<string> {
 }
 
 /** Khối "Master Cast" — prompt mô tả toàn bộ dàn nhân vật (Gemini sinh) + ảnh tham chiếu user tự upload/dán. Chỉ hiện cho video tạo từ tab "Từ link video". */
-export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageChange, onDescriptionChange, onConfirm }: MasterCastPanelProps) {
+export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageChange, onConfirm }: MasterCastPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** Ref đồng bộ ngay khi chọn ảnh — tránh race khi bấm xác nhận trước khi parent re-render */
   const imageRef = useRef<string | undefined>(imageDataUrl);
@@ -44,6 +42,12 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
 
+  /**
+   * Vision phân tích ĐÚNG ảnh vừa upload — kết quả ghi THẲNG vào ô prompt (thay vì 1 field
+   * ẩn riêng) để đây là NGUỒN DUY NHẤT được gửi cho Veo/Kie lúc tạo video. Trước đây có 2
+   * field tách rời (prompt hiển thị/sửa được vs field ẩn thực sự dùng để generate) khiến
+   * user sửa prompt xong không có tác dụng gì — sáp nhập lại để sửa ở đây là sửa thật.
+   */
   const analyzeCharacterSheet = async (dataUrl: string) => {
     const parsed = parseDataUrl(dataUrl);
     if (!parsed) return;
@@ -54,10 +58,10 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
         imageBase64: parsed.base64,
         imageMimeType: parsed.mimeType,
       });
-      onDescriptionChange?.(description);
+      if (description.trim()) onPromptChange(description.trim());
     } catch {
-      // Best-effort — ảnh tham chiếu vẫn gửi kèm Veo/Kie như bình thường dù phân tích thất bại
-      onDescriptionChange?.(undefined);
+      // Best-effort — ảnh tham chiếu vẫn gửi kèm Veo/Kie như bình thường dù phân tích thất bại;
+      // giữ nguyên prompt hiện có (không xoá) để user vẫn còn mô tả cũ dùng tạm.
     } finally {
       setAnalyzing(false);
     }
@@ -102,13 +106,10 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
     }
   };
 
+  // Ảnh tham chiếu là TUỲ CHỌN — không có ảnh vẫn cho tạo video (dựa vào prompt text +
+  // Scene Continuity nối khung hình cuối cho cảnh 2+ nếu user bật).
   const handleConfirm = () => {
-    const current = imageRef.current?.trim();
-    if (!current) {
-      setError('Hãy tải hoặc dán ảnh tham chiếu nhân vật trước khi tạo video.');
-      return;
-    }
-    onConfirm?.(current);
+    onConfirm?.(imageRef.current?.trim());
   };
 
   return (
@@ -137,7 +138,7 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
           ) : (
             <span className="flex flex-col items-center gap-1 px-3 text-center text-xs font-medium text-muted-foreground group-hover:text-primary transition-colors">
               <Crown className="w-3.5 h-3.5" />
-              <span>Ảnh tham chiếu</span>
+              <span>Ảnh tham chiếu (tuỳ chọn)</span>
               <span className="text-[10px] font-normal opacity-80">Click tải lên hoặc Ctrl+V dán</span>
             </span>
           )}
@@ -151,7 +152,7 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
 
         <div className="flex-1 min-w-0 space-y-1.5">
           <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Prompt mô tả dàn nhân vật (Gemini tự sinh — có thể sửa)
+            Prompt mô tả dàn nhân vật (tự sinh từ ảnh upload — sửa gì, dùng đúng cái đó)
           </label>
           <textarea
             value={prompt}
@@ -162,7 +163,7 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
           />
           {error && <FieldError className="items-center gap-1">{error}</FieldError>}
           <p className="text-[11px] text-muted-foreground">
-            Ảnh sheet dùng để giữ ngoại hình nhân vật — mỗi cảnh vẫn theo prompt riêng (hành động/bối cảnh mới), không copy nguyên ảnh này.
+            Đây là mô tả DUY NHẤT được chèn vào mọi cảnh khi tạo video — sửa trực tiếp ở đây nếu AI mô tả sai chi tiết nào. Ảnh sheet chỉ giữ ngoại hình, mỗi cảnh vẫn theo prompt riêng (hành động/bối cảnh mới), không copy nguyên ảnh này.
           </p>
         </div>
       </div>
@@ -170,7 +171,7 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
       {onConfirm && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-primary/20 bg-primary/5">
           <p className="text-xs text-muted-foreground">
-            Upload/dán ảnh tham chiếu xong rồi bấm xác nhận — hệ thống mới gửi ảnh + tạo giọng đọc + video.
+            Ảnh tham chiếu là tuỳ chọn — có thể bấm xác nhận ngay để tạo giọng đọc + video chỉ bằng prompt, hoặc tải/dán ảnh trước để tăng độ nhất quán ngoại hình nhân vật.
           </p>
           <button
             type="button"

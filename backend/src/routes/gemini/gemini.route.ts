@@ -25,7 +25,8 @@ geminiRoute.post('/analyze', async (c) => {
     // }
     if (!body.geminiInput?.content?.trim()
       && !body.geminiInput?.videoFileBase64?.trim()
-      && !body.geminiInput?.sourceVideoUrl?.trim()) {
+      && !body.geminiInput?.sourceVideoUrl?.trim()
+      && !body.geminiInput?.documentFileBase64?.trim()) {
       return fail(c, 'Nội dung không được để trống.');
     }
     if (!body.veoInput || !body.ttsInput) {
@@ -43,6 +44,9 @@ geminiRoute.post('/analyze', async (c) => {
         hasVideoFile: Boolean(body.geminiInput.videoFileBase64?.trim()),
         videoFileMimeType: body.geminiInput.videoFileMimeType,
         videoFileName: body.geminiInput.videoFileName,
+        hasDocumentFile: Boolean(body.geminiInput.documentFileBase64?.trim()),
+        documentFileMimeType: body.geminiInput.documentFileMimeType,
+        documentFileName: body.geminiInput.documentFileName,
         veo: {
           aspectRatio: body.veoInput.aspectRatio,
           sceneDuration: body.veoInput.sceneDuration,

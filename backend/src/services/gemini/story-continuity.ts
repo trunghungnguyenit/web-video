@@ -110,6 +110,43 @@ Khuôn mẫu chung: Cảnh N có action làm Vật A chuyển từ trạng thái
 Ví dụ minh hoạ ở nhiều bối cảnh khác nhau (chỉ để hiểu khuôn mẫu, KHÔNG giới hạn phạm vi rule ở đúng các ví dụ này — áp dụng tương tự cho bất kỳ vật thể nào khác xuất hiện trong câu chuyện): ly nước đã đổ hết → cảnh sau ly vẫn rỗng, không tự đầy lại; cửa sổ đã vỡ → cảnh sau vẫn vỡ, không tự lành; nến đã tắt → cảnh sau vẫn tối, không tự sáng lại; tờ giấy đã bị xé → cảnh sau vẫn rách; ngôi nhà đã cháy/sập → cảnh sau vẫn tàn tích, không tự nguyên vẹn lại; xe đã hư → cảnh sau vẫn hư, không tự lành lặn.`;
 }
 
+/**
+ * Quy tắc LOOKBOOK — thay thế buildCinematicContinuityRules() khi tab "Từ hình ảnh" ở chế
+ * độ "Nhiều ảnh" (mỗi ảnh = 1 cảnh/1 look độc lập, KHÔNG phải phim liên tục). Khác biệt cốt
+ * lõi so với continuity thường: TRANG PHỤC được phép/kỳ vọng đổi mỗi cảnh (đúng theo ảnh
+ * nguồn/prompt riêng của từng cảnh), thay vì "giữ nguyên trang phục" như phim thông thường.
+ */
+export function buildLookbookRules(): string {
+  return `## GLOBAL LOOKBOOK RULES (bắt buộc — mỗi cảnh là 1 LOOK ĐỘC LẬP, KHÔNG phải phim liên tục)
+Đây là video lookbook/quảng cáo thời trang/sản phẩm — mỗi cảnh dùng ĐÚNG 1 ảnh nguồn khác
+nhau do người dùng cung cấp, mỗi ảnh thể hiện 1 trang phục/thiết kế/sản phẩm RIÊNG BIỆT của
+CÙNG một người mẫu/nhân vật.
+
+### Nhân vật — điều khác biệt quan trọng nhất so với phim thông thường
+- Khuôn mặt, kiểu tóc, tông da, vóc dáng, phong cách hình ảnh — GIỮ NGUYÊN xuyên suốt mọi
+  cảnh (đây LUÔN là cùng 1 người mẫu/nhân vật, chỉ đổi trang phục).
+- Trang phục — DUY NHẤT ở đây được PHÉP và ĐƯỢC KỲ VỌNG thay đổi ở MỌI cảnh, đúng chính xác
+  theo mô tả/ảnh nguồn của CHÍNH cảnh đó. TUYỆT ĐỐI KHÔNG áp dụng quy tắc "giữ nguyên trang
+  phục xuyên suốt" — quy tắc đó CHỈ dành cho phim kể chuyện liên tục, KHÔNG áp dụng ở đây.
+- KHÔNG bắt buộc các cảnh phải nối tiếp hành động/vị trí vật lý của nhau như 1 cú máy dài —
+  mỗi cảnh là 1 shot/look ĐỘC LẬP. previousSceneSummary/transition/nextSceneHook chỉ cần
+  điền hợp lý (vd chuyển cảnh đơn giản như "Cut"), KHÔNG cần mô tả 1 hành động vật lý nối
+  tiếp thật sự giữa 2 outfit khác nhau.
+
+### Bối cảnh & camera
+- Bối cảnh (studio/background/ánh sáng) nên giữ nhất quán để đồng bộ phong cách cả bộ ảnh,
+  trừ khi mô tả riêng từng cảnh yêu cầu khác.
+- Camera/chuyển động: theo ĐÚNG mô tả riêng của từng cảnh (vd slow-motion, zoom in/out,
+  orbital shot 360 độ...) — không cần tiếp nối chuyển động camera giữa các cảnh như phim.
+
+### Vẫn áp dụng như bình thường
+- Mỗi cảnh CHỈ mô tả đúng những gì được cung cấp cho ảnh/prompt của cảnh đó — không bịa
+  thêm nhân vật, tình huống, hay cốt truyện không liên quan.
+- Emotion/pose/dáng đứng tự nhiên, phù hợp phong cách thời trang/lookbook/quảng cáo.
+- Mỗi cảnh vẫn cần khai đủ characterStates/objectStates/environment/camera theo schema bên
+  dưới — chỉ khác là KHÔNG kế thừa trang phục từ cảnh trước.`;
+}
+
 /** Đoạn JSON schema chèn vào prompt Gemini — SceneTimelineBuilder: mỗi cảnh phải khai đủ
  * state, KHÔNG tự viết "visual"/prompt trực tiếp (PromptBuilder ở dưới lo việc đó). */
 export function buildStoryPipelineSchema(count: number, lang: string): string {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Pencil, Plus, X } from 'lucide-react';
+import { Pencil, Plus, X, Type, Link2, Image, File } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ModalOverlay } from '@/components/ui/modal-overlay';
 import { FieldError } from '@/components/ui/field-error';
@@ -30,7 +30,6 @@ import {
   type VideoLibraryItem,
 } from '@/lib/video-library/video-library';
 import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
-import { getVeoApiKey } from '@/lib/veo/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
 import { resolveSceneStyleLabel } from '@/lib/scene/scene-styles';
 
@@ -45,17 +44,28 @@ interface VideoItemModalProps {
 }
 
 const selectClass =
-  'w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20';
+  'w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 disabled:opacity-60';
 
 const MIN_CONTENT_CHARS = 20;
+const MAX_CONTENT_CHARS = 5000;
+
+type ContentInputType = NonNullable<CreateVideoItemOptions['initialInputType']>;
+
+const CONTENT_TYPE_OPTIONS: { id: ContentInputType; icon: typeof Type; label: string; desc: string }[] = [
+  { id: 'text', icon: Type, label: 'Tự nhập nội dung', desc: 'Nhập từ bàn phím' },
+  { id: 'link', icon: Link2, label: 'Từ link video', desc: 'YouTube, TikTok...' },
+  { id: 'image', icon: Image, label: 'Từ hình ảnh', desc: 'Tải lên hình ảnh' },
+  { id: 'file', icon: File, label: 'Từ file', desc: 'PDF, Word, DOCX...' },
+];
 
 export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: VideoItemModalProps) {
   const { updateItem, startRegenerate } = useVideoLibrary();
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [contentInputType, setContentInputType] = useState<ContentInputType | null>(null);
   const [settings, setSettings] = useState<VideoSettings>(DEFAULT_VIDEO_SETTINGS);
-  const [errors, setErrors] = useState<{ title?: string; content?: string; submit?: string }>({});
+  const [errors, setErrors] = useState<{ title?: string; content?: string; contentInputType?: string; submit?: string }>({});
   const [saved, setSaved] = useState(false);
 
   const { models: veoModels, loading: veoModelsLoading, hasKey: hasVeoKey } = useVeoModels();
@@ -78,6 +88,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     } else {
       setTitle('');
       setContent('');
+      setContentInputType(null);
       setSettings({ ...DEFAULT_VIDEO_SETTINGS });
     }
   }, [open, mode, initialItem]);
@@ -108,17 +119,20 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
 
   const contentChanged = mode === 'edit' && initialItem
     ? content.trim() !== initialItem.inputContent.trim()
-      || JSON.stringify(settings) !== JSON.stringify(initialItem.settings)
+    || JSON.stringify(settings) !== JSON.stringify(initialItem.settings)
     : false;
 
   const handleCreate = () => {
     const name = title.trim();
-    if (!name) {
-      setErrors({ title: 'Vui lòng đặt tên cho video.' });
+    const e: { title?: string; contentInputType?: string } = {};
+    if (!name) e.title = 'Vui lòng đặt tên cho video.';
+    if (!contentInputType) e.contentInputType = 'Vui lòng chọn Nguồn nội dung video.';
+    if (e.title || e.contentInputType) {
+      setErrors(e);
       return;
     }
     setErrors({});
-    onCreate?.({ title: name, settings: { ...settings } });
+    onCreate?.({ title: name, settings: { ...settings }, initialInputType: contentInputType! });
     onClose();
   };
 
@@ -149,7 +163,11 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     }
     const trimmedContent = content.trim();
     if (trimmedContent.length < MIN_CONTENT_CHARS) {
-      setErrors({ content: `Nội dung quá ngắn — cần ít nhất ${MIN_CONTENT_CHARS} ký tự.` });
+      setErrors({ content: `Nội dung quá ngắn — cần ít nhất ${MIN_CONTENT_CHARS} ký tự (hiện tại: ${trimmedContent.length}).` });
+      return;
+    }
+    if (trimmedContent.length > MAX_CONTENT_CHARS) {
+      setErrors({ content: `Nội dung quá dài — tối đa ${MAX_CONTENT_CHARS} ký tự (hiện tại: ${trimmedContent.length}).` });
       return;
     }
 
@@ -160,12 +178,12 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     //   return;
     // }
     const isKieProvider = settings.videoProvider === 'kie';
-    const videoApiKey = isKieProvider ? getApiKey(API_KEY_IDS.kie) : getVeoApiKey();
+    const videoApiKey = getApiKey(API_KEY_IDS.kie);
     if (!videoApiKey) {
       setErrors({
         submit: isKieProvider
-          ? 'Chưa có Kie.ai API Key — nhập key riêng tại mục API Keys (ô Kie.ai).'
-          : 'Chưa có Veo API Key — nhập key riêng tại mục API Keys (ô Veo).',
+          ? 'Chưa có Video API Key — nhập key riêng tại mục API Keys.'
+          : 'Chưa có Video API Key — nhập key riêng tại mục API Keys để tạo video Veo 3.1.',
       });
       return;
     }
@@ -262,6 +280,45 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             {errors.title && <FieldError>{errors.title}</FieldError>}
           </div>
 
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Nguồn nội dung <span className="text-destructive">*</span>
+              </label>
+              <div role="tablist" aria-label="Nguồn nội dung" className="grid grid-cols-2 gap-2">
+                {CONTENT_TYPE_OPTIONS.map((opt) => {
+                  const isActive = contentInputType === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => { setContentInputType(opt.id); setErrors((p) => ({ ...p, contentInputType: undefined })); }}
+                      className={cn(
+                        'p-3 rounded-lg border transition-all text-left',
+                        isActive
+                          ? 'bg-primary/10 border-primary/40 text-primary ring-1 ring-primary/20'
+                          : 'bg-background border-border text-muted-foreground hover:border-primary/30 hover:text-foreground hover:bg-primary/5',
+                      )}
+                    >
+                      <opt.icon className="w-4 h-4 mb-1.5" />
+                      <span className="block text-xs font-semibold leading-tight">{opt.label}</span>
+                      <span className="block text-[10px] text-muted-foreground mt-0.5">{opt.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {errors.contentInputType ? (
+                <FieldError>{errors.contentInputType}</FieldError>
+              ) : (
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Nội dung cụ thể (nhập text, dán link, tải ảnh/file) sẽ điền ở Mục 2 sau khi tạo.
+                </p>
+              )}
+            </div>
+          )}
+
           {isEdit && (
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -272,8 +329,9 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
                 onChange={(e) => { setContent(e.target.value); setErrors((p) => ({ ...p, content: undefined })); }}
                 placeholder="Nội dung để AI tạo video..."
                 rows={5}
+                maxLength={MAX_CONTENT_CHARS}
                 className={cn(
-                  'w-full resize-y min-h-[110px] px-3 py-2 text-sm rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
+                  'w-full resize-y min-h-27.5 px-3 py-2 text-sm rounded-lg border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1',
                   errors.content ? 'border-destructive/60 focus:ring-destructive/30' : 'border-border focus:ring-primary/30',
                 )}
               />

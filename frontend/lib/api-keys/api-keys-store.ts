@@ -37,10 +37,12 @@ function writeAll(keys: Record<string, string>): void {
   writeJSON(STORAGE_KEY, keys);
 }
 
-/** Id chuẩn dùng trong UI & pipeline — tránh hard-code string rải rác */
+/**
+ * Id chuẩn dùng trong UI & pipeline — tránh hard-code string rải rác. Không còn `veo`
+ * riêng — Veo 3.1 giờ dùng chung key `kie` (xem frontend/lib/veo/veo-models.ts).
+ */
 export const API_KEY_IDS = {
   gemini: 'gemini',
-  veo: 'veo',
   elevenlabs: TTS_KEY_ID,
   kie: 'kie',
 } as const;

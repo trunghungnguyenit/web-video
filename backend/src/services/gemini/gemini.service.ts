@@ -15,11 +15,13 @@ import {
 import {
   buildStoryPipelineSchema,
   buildCinematicContinuityRules,
+  buildLookbookRules,
   buildSceneVisualPrompt,
   parseSceneStates,
   parseStoryTimeline,
   propagateSceneStates,
 } from './story-continuity';
+import { extractDocument } from './document-extract.service';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -120,7 +122,17 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
     geminiInput.videoFileBase64?.trim()
     || (geminiInput.sourceVideoUrl?.trim() && isYouTubeUrl(geminiInput.sourceVideoUrl)),
   );
+  // Chỉ PDF mới gửi kèm dạng file thật (inline_data) — DOC/DOCX/TXT đã được trích xuất
+  // và gộp thẳng vào geminiInput.content trước khi tới đây (xem resolveDocumentFilePart)
+  const hasDocumentPdfPart = Boolean(
+    geminiInput.documentFileBase64?.trim()
+    && (geminiInput.documentFileMimeType === 'application/pdf' || geminiInput.documentFileName?.toLowerCase().endsWith('.pdf')),
+  );
   const isKieProvider = veoInput.provider === 'kie';
+  // Tab "Từ hình ảnh" — chế độ "Nhiều ảnh": mỗi ảnh = 1 cảnh/1 look ĐỘC LẬP (lookbook),
+  // KHÔNG phải phim liên tục — quy tắc "giữ nguyên trang phục" của continuity thường SAI ở
+  // đây (trang phục phải đổi theo từng ảnh nguồn). Dùng buildLookbookRules() thay thế.
+  const isMultiImageMode = geminiInput.inputType === 'image' && geminiInput.imageMode === 'multi';
 
   const durationRule = isKieProvider
     ? 'Mỗi cảnh durationSeconds trong khoảng 6–30 (Grok Imagine). Chế độ tự động: chọn số giây phù hợp độ dài voiceover.'
@@ -146,7 +158,14 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 ## Lưu ý tab link (không có video bytes)
 - Không có file video đính kèm — chỉ có URL/mô tả text.
 - Ưu tiên mô tả người dùng; URL chỉ là tham chiếu.`
-      : '';
+      : hasDocumentPdfPart
+        ? `
+## Tài liệu PDF đính kèm (bắt buộc bám sát)
+- Bạn ĐÃ được gửi kèm file PDF thật. Hãy ĐỌC toàn bộ nội dung file đó (chữ, bảng, hình minh hoạ nếu có).
+- Kịch bản phải dựa đúng trên nội dung PDF — không bịa thông tin không có trong file.
+- Có thể tóm lược / tái cấu trúc thành đúng ${count} cảnh cho phù hợp định dạng video ngắn.
+- Phần "Nội dung" bên dưới (nếu có) chỉ là ghi chú bổ sung, KHÔNG thay thế nội dung PDF.`
+        : '';
 
   const masterCastRule = isLinkInput
     ? `\n- "masterCastPrompt": viết bằng tiếng Anh (chuẩn prompt tạo ảnh), mô tả ngoại hình/trang phục từng nhân vật chính — ảnh tham chiếu chung cho toàn bộ video`
@@ -154,13 +173,19 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 
   return `Bạn là award-winning Hollywood film director, screenwriter, storyboard artist, và cinematic AI prompt engineer.
 
-Nhiệm vụ: tạo MỘT bộ phim liên tục đã chia thành các cảnh — KHÔNG tạo các cảnh độc lập. Mỗi cảnh chỉ là segment của cùng một movie; khi ghép video phải seamless, không discontinuity.
+${isMultiImageMode
+    ? `Nhiệm vụ: tạo MỘT bộ ảnh/video LOOKBOOK gồm ${count} cảnh — mỗi cảnh ứng với ĐÚNG 1 ảnh nguồn do người dùng cung cấp, thể hiện 1 trang phục/thiết kế RIÊNG BIỆT của CÙNG một người mẫu/nhân vật. Đây KHÔNG phải phim kể chuyện liên tục — mỗi cảnh là 1 look/shot độc lập.
+
+Pipeline: Mỗi ảnh + prompt riêng → hiểu bối cảnh chung (storyTimeline) → tách ${count} segments (scenes[] state đầy đủ, MỖI cảnh có trang phục riêng theo đúng ảnh nguồn) → hệ thống ghép state thành Video Prompt (bạn KHÔNG tự viết prompt Veo trực tiếp).
+
+Giữ giọng thực tế, rõ ràng như video thời trang/quảng cáo sản phẩm — không cần kịch tính/cảm xúc tiến triển giữa các cảnh vì mỗi cảnh là 1 look độc lập.`
+    : `Nhiệm vụ: tạo MỘT bộ phim liên tục đã chia thành các cảnh — KHÔNG tạo các cảnh độc lập. Mỗi cảnh chỉ là segment của cùng một movie; khi ghép video phải seamless, không discontinuity.
 
 Pipeline: Nội dung/Video → hiểu TOÀN BỘ phim (storyTimeline) → tách ${count} segments kế thừa liên tục (scenes[] state đầy đủ) → hệ thống ghép state thành Video Prompt (bạn KHÔNG tự viết prompt Veo trực tiếp).
 
-TỰ SUY LUẬN phong cách/mức độ kịch tính phù hợp TỪ CHÍNH nội dung/prompt người dùng bên dưới (không có lựa chọn "kiểu video" nào được truyền vào) — ví dụ nội dung kể chuyện thì kịch tính, cảm xúc tiến triển rõ; nội dung hướng dẫn/sản phẩm/quảng cáo thì giữ giọng thực tế, rõ ràng, không gượng ép cảm xúc kịch tính không phù hợp. DÙ phong cách nào, quy tắc liên kết cảnh/không lặp hành động ở dưới vẫn LUÔN áp dụng — mọi video đều phải là các đoạn nối tiếp nhau như 1 video liên tục, không phải các clip rời rạc.
+TỰ SUY LUẬN phong cách/mức độ kịch tính phù hợp TỪ CHÍNH nội dung/prompt người dùng bên dưới (không có lựa chọn "kiểu video" nào được truyền vào) — ví dụ nội dung kể chuyện thì kịch tính, cảm xúc tiến triển rõ; nội dung hướng dẫn/sản phẩm/quảng cáo thì giữ giọng thực tế, rõ ràng, không gượng ép cảm xúc kịch tính không phù hợp. DÙ phong cách nào, quy tắc liên kết cảnh/không lặp hành động ở dưới vẫn LUÔN áp dụng — mọi video đều phải là các đoạn nối tiếp nhau như 1 video liên tục, không phải các clip rời rạc.`}
 
-${buildCinematicContinuityRules()}
+${isMultiImageMode ? buildLookbookRules() : buildCinematicContinuityRules()}
 
 ## Cài đặt Gemini (kịch bản)
 - Ngôn ngữ voiceover: ${lang}
@@ -179,8 +204,9 @@ ${videoRules}
 - Giọng đọc: ${voice}
 - Tốc độ: ${speed}
 
-## Nhân vật cố định (ngoại hình KHÔNG được đổi qua mọi cảnh)
-${charactersBlock}
+${isMultiImageMode
+    ? `## Nhân vật (khuôn mặt/vóc dáng cố định — TRANG PHỤC đổi mỗi cảnh theo ảnh nguồn)\n${charactersBlock}`
+    : `## Nhân vật cố định (ngoại hình KHÔNG được đổi qua mọi cảnh)\n${charactersBlock}`}
 
 ## Nội dung / yêu cầu người dùng
 ${geminiInput.content.trim()}
@@ -195,8 +221,11 @@ Quy tắc bổ sung:
 - Video Prompt fields = English, TRỪ "voiceover" (luôn ${lang} — TTS ElevenLabs đọc đè lên, KHÔNG mô tả hình ảnh) và "dialogueCue" (lời nói THẬT do Veo/Kie tự tạo giọng ngay trong video — generateAudio). dialogueCue: nếu có video đính kèm, PHẢI theo đúng ngôn ngữ nhân vật đang nói trong chính video đó (xem/nghe để xác định) — KHÔNG tự ép sang ${lang} hay tiếng Anh; nếu không có video (tab text/ảnh/file) thì dùng ${lang}
 - voiceover: ngắn gọn, tự nhiên như lời dẫn phim — giọng ${voice}
 - characterStates[].name: dùng ĐÚNG cùng 1 cách gọi tên xuyên suốt mọi cảnh, PHẢI viết bằng tiếng Anh (vd "Bald Prisoner", "Shin") — TRỪ KHI nội dung/video có sẵn tên riêng cụ thể thì giữ nguyên. TUYỆT ĐỐI không tự đặt nhãn mô tả bằng tiếng Việt (vd "Tù nhân đầu trọc") vì field này bị chèn thẳng vào giữa Video Prompt tiếng Anh, gây lẫn ngôn ngữ
-- Nếu có nhân vật cố định ở mục trên: KHÔNG đổi ngoại hình/trang phục — chỉ emotion/pose/action/eye direction
-- ƯU TIÊN giữ nguyên ngoại hình nhân vật hơn sáng tạo đổi thiết kế${masterCastRule}`;
+${isMultiImageMode
+    ? `- Khuôn mặt/vóc dáng/tông da nhân vật: GIỮ NGUYÊN xuyên suốt mọi cảnh (cùng 1 người mẫu). TRANG PHỤC: PHẢI đổi ở mỗi cảnh theo đúng ảnh nguồn/prompt riêng của cảnh đó — KHÔNG áp dụng "giữ nguyên trang phục"
+- ƯU TIÊN bám sát đúng trang phục/thiết kế trong ảnh nguồn của TỪNG cảnh hơn là giữ nhất quán trang phục giữa các cảnh`
+    : `- Nếu có nhân vật cố định ở mục trên: KHÔNG đổi ngoại hình/trang phục — chỉ emotion/pose/action/eye direction
+- ƯU TIÊN giữ nguyên ngoại hình nhân vật hơn sáng tạo đổi thiết kế`}${masterCastRule}`;
 }
 
 /** Luôn dùng full pipeline StoryTimeline/StateManager/PromptBuilder — mỗi cảnh mang state
@@ -346,10 +375,51 @@ async function resolveVideoFilePart(
   return { part: null };
 }
 
+/**
+ * Chuẩn bị phần file tài liệu (tab "Từ file") cho generateContent:
+ * - PDF → trả về inline_data để Gemini tự đọc trực tiếp (native document understanding).
+ * - DOC/DOCX/TXT → trích xuất text thật, GỘP vào geminiInput.content (thay vì chỉ ghi
+ *   tên file như trước đây) để Gemini viết kịch bản dựa trên đúng nội dung file.
+ */
+async function resolveDocumentFilePart(
+  geminiInput: AnalyzePipelineRequest['geminiInput'],
+): Promise<{ part: GeminiPart | null; mergedContent?: string }> {
+  const base64 = geminiInput.documentFileBase64?.trim();
+  if (!base64) return { part: null };
+
+  const extracted = await extractDocument({
+    base64,
+    mimeType: geminiInput.documentFileMimeType?.trim() || '',
+    fileName: geminiInput.documentFileName?.trim(),
+  });
+
+  if (extracted.isPdf) {
+    return {
+      part: { inline_data: { mime_type: 'application/pdf', data: base64 } },
+    };
+  }
+
+  const fileLabel = geminiInput.documentFileName?.trim() || 'tài liệu đã upload';
+  const mergedContent = [
+    `Nội dung trích xuất từ file "${fileLabel}":`,
+    extracted.text ?? '',
+    geminiInput.content?.trim() ? `\nGhi chú thêm từ người dùng:\n${geminiInput.content.trim()}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  return { part: null, mergedContent };
+}
+
 export async function analyzeContent(request: AnalyzePipelineRequest): Promise<GeminiVideoScript> {
   const { geminiInput } = request;
 
-  if (!geminiInput.content?.trim() && !geminiInput.videoFileBase64?.trim() && !geminiInput.sourceVideoUrl?.trim()) {
+  if (
+    !geminiInput.content?.trim()
+    && !geminiInput.videoFileBase64?.trim()
+    && !geminiInput.sourceVideoUrl?.trim()
+    && !geminiInput.documentFileBase64?.trim()
+  ) {
     throw new Error('Nội dung không được để trống.');
   }
 
@@ -364,7 +434,14 @@ export async function analyzeContent(request: AnalyzePipelineRequest): Promise<G
     throw new Error('Thiếu Gemini API Key — nhập tại mục API Keys.');
   }
 
-  const prompt = buildPrompt(request);
+  // Tab "Từ file" — trích xuất trước khi build prompt vì DOC/DOCX/TXT cần GỘP text
+  // thật vào geminiInput.content (PDF thì không đổi content, gửi thẳng inline_data)
+  const documentResolved = await resolveDocumentFilePart(geminiInput);
+  const effectiveRequest = documentResolved.mergedContent
+    ? { ...request, geminiInput: { ...geminiInput, content: documentResolved.mergedContent } }
+    : request;
+
+  const prompt = buildPrompt(effectiveRequest);
   let uploaded: GeminiUploadedFile | undefined;
 
   try {
@@ -373,6 +450,7 @@ export async function analyzeContent(request: AnalyzePipelineRequest): Promise<G
 
     const parts: GeminiPart[] = [{ text: prompt }];
     if (resolved.part) parts.unshift(resolved.part);
+    if (documentResolved.part) parts.unshift(documentResolved.part);
 
     // File Files API gắn với key đã upload — generateContent phải cùng key đó.
     // YouTube file_uri / không có upload → dùng user key hoặc pool như cũ.

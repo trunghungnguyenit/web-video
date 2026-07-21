@@ -29,7 +29,7 @@ interface ApiResponse<T> {
 
 class KieService {
   private async parseError(res: Response): Promise<never> {
-    let message = `Kie.ai lỗi (${res.status})`;
+    let message = `Lỗi API tạo video (${res.status})`;
     let fatal = false;
     try {
       const json = (await res.json()) as ApiResponse<unknown>;
@@ -53,7 +53,7 @@ class KieService {
 
     const json = (await res.json()) as ApiResponse<{ taskId: string }>;
     if (!res.ok || !json.success || !json.data?.taskId) {
-      const err = new Error(json.error ?? `Kie.ai lỗi (${res.status})`);
+      const err = new Error(json.error ?? `Lỗi API tạo video (${res.status})`);
       (err as Error & { fatal?: boolean }).fatal = json.fatal;
       throw err;
     }
@@ -71,7 +71,7 @@ class KieService {
 
     const json = (await res.json()) as ApiResponse<{ done: boolean; videoUrl?: string; error?: string }>;
     if (!res.ok || !json.success) {
-      const err = new Error(json.error ?? `Kie.ai poll lỗi (${res.status})`);
+      const err = new Error(json.error ?? `Lỗi kiểm tra trạng thái (${res.status})`);
       (err as Error & { fatal?: boolean }).fatal = json.fatal;
       throw err;
     }

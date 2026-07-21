@@ -3,22 +3,45 @@ import {
   resolveVeoAspectRatio,
   resolveVeoDurationSeconds,
   resolveVeoModel,
-  resolveVeoResolution,
+  supportsReferenceMode,
 } from '../../lib/veo-config';
-import { isFatalVeoMessage, isTransientHttpStatus, VeoApiError, withVeoRetry } from '../../lib/veo-errors';
+import { VeoApiError, isTransientHttpStatus, withVeoRetry } from '../../lib/veo-errors';
+import { readKieJson, parseKieError } from '../../lib/kie-http';
+import { uploadKieImageBase64 } from '../kie/kie-files.service';
 
-const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+const BASE_URL = 'https://api.kie.ai/api/v1';
 
-interface LongRunningResponse {
-  name?: string;
-  done?: boolean;
-  error?: { message?: string; code?: number };
-  response?: {
-    generateVideoResponse?: {
-      generatedSamples?: Array<{ video?: { uri?: string } }>;
+type VeoGenerationType = 'TEXT_2_VIDEO' | 'FIRST_AND_LAST_FRAMES_2_VIDEO' | 'REFERENCE_2_VIDEO';
+
+interface GenerateResponse {
+  code?: number;
+  msg?: string;
+  data?: { taskId?: string };
+}
+
+interface RecordInfoResponse {
+  code?: number;
+  msg?: string;
+  data?: {
+    taskId?: string;
+    /** 0=Generating, 1=Success, 2=Failed, 3=Generation Failed */
+    successFlag?: number;
+    errorCode?: number;
+    errorMessage?: string;
+    response?: {
+      resultUrls?: string[];
+      originUrls?: string[];
+      /** Chỉ có ở task loại extend — nghi là file gộp (gốc + đoạn mới), cần verify thực tế */
+      fullResultUrls?: string[];
+      resolution?: string;
     };
-    generatedVideos?: Array<{ video?: { uri?: string } }>;
   };
+}
+
+interface Get1080pResponse {
+  code?: number;
+  msg?: string;
+  data?: { resultUrl?: string };
 }
 
 export interface GenerateSceneVideoParams {
@@ -28,12 +51,6 @@ export interface GenerateSceneVideoParams {
   durationSeconds: number;
   /** Ảnh nguồn riêng cho đúng cảnh này (tab "Từ hình ảnh") — ưu tiên hơn ảnh nhân vật/master cast */
   image?: { base64: string; mimeType: string };
-  /**
-   * Scene Continuity (Video Extension, Veo 3.1 only) — video THẬT của cảnh liền trước, dùng
-   * làm bối cảnh nối tiếp (instance.video). Google bắt buộc durationSeconds=8, resolution=720p
-   * khi dùng field này, và không kết hợp cùng lúc với instance.image (sceneStartImage).
-   */
-  previousVideo?: { base64: string; mimeType: string };
 }
 
 export interface PollOperationResult {
@@ -42,62 +59,100 @@ export interface PollOperationResult {
   error?: string;
 }
 
-function extractVideoUri(data: LongRunningResponse): string | undefined {
-  return (
-    data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
-    ?? data.response?.generatedVideos?.[0]?.video?.uri
-  );
+/** GET /veo/get-1080p-video — trả undefined nếu chưa sẵn sàng (poll lại sau), throw nếu lỗi thật */
+async function fetchVeo1080pVideo(apiKey: string, taskId: string): Promise<string | undefined> {
+  const res = await fetch(`${BASE_URL}/veo/get-1080p-video?taskId=${encodeURIComponent(taskId)}&index=0`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+
+  const data = await readKieJson<Get1080pResponse>(res, 'Veo 1080p');
+
+  // 422 = chưa sẵn sàng (record chưa success / chưa có data) theo docs — không phải lỗi thật
+  if (data.code === 422) return undefined;
+
+  if (!res.ok || data.code !== 200 || !data.data?.resultUrl) {
+    throw parseKieError(data.msg, res.status, `Veo lấy video 1080p lỗi (${res.status})`);
+  }
+
+  return data.data.resultUrl;
 }
 
-function parseGoogleError(data: LongRunningResponse, status: number): VeoApiError {
-  const message = data.error?.message ?? `Veo API lỗi (${status})`;
-  return new VeoApiError(message, { status, fatal: isFatalVeoMessage(message) || status === 401 || status === 403 });
-}
-
-function normalizeOpPath(operationName: string): string {
-  return operationName.startsWith('operations/')
-    ? operationName
-    : operationName.replace(/^\/+/, '');
-}
-
-/** GET operations — chỉ poll status, không gọi predictLongRunning */
+/** GET /veo/record-info — poll trạng thái, xử lý luôn bước nâng cấp 1080p nếu quality yêu cầu */
 export async function pollVideoOperation(
   apiKey: string,
   operationName: string,
+  quality?: string,
 ): Promise<PollOperationResult> {
   const key = apiKey.trim();
   if (!key) throw new VeoApiError('Thiếu Veo API Key.', { fatal: true });
 
-  const opPath = normalizeOpPath(operationName);
+  const taskId = operationName.trim();
 
   return withVeoRetry('Veo poll', async () => {
-    const res = await fetch(`${BASE_URL}/${opPath}`, {
-      headers: { 'X-goog-api-key': key },
+    const res = await fetch(`${BASE_URL}/veo/record-info?taskId=${encodeURIComponent(taskId)}`, {
+      headers: { Authorization: `Bearer ${key}` },
     });
 
-    const data = (await res.json()) as LongRunningResponse;
+    const data = await readKieJson<RecordInfoResponse>(res, 'Veo poll');
 
-    if (!res.ok) {
-      throw parseGoogleError(data, res.status);
+    if (!res.ok || data.code !== 200 || !data.data) {
+      throw parseKieError(data.msg, res.status, `Veo API lỗi (${res.status})`);
     }
 
-    if (data.error?.message) {
-      throw new VeoApiError(data.error.message, { fatal: isFatalVeoMessage(data.error.message) });
+    const info = data.data;
+
+    if (info.successFlag === 2 || info.successFlag === 3) {
+      throw parseKieError(info.errorMessage, res.status, 'Veo tạo video thất bại.');
     }
 
-    if (data.done) {
-      const uri = extractVideoUri(data);
-      if (!uri) {
-        throw new VeoApiError('Veo không trả về video URI.');
-      }
-      return { done: true, videoUri: uri };
+    if (info.successFlag !== 1) {
+      return { done: false };
     }
 
-    return { done: false };
+    const resultUrls = info.response?.resultUrls ?? [];
+    const baseUri = resultUrls[0] ?? info.response?.fullResultUrls?.[0];
+    if (!baseUri) throw new VeoApiError('Veo không trả về video URL.');
+
+    if (quality !== '1080p') {
+      return { done: true, videoUri: baseUri };
+    }
+
+    const hdUrl = await fetchVeo1080pVideo(key, taskId);
+    if (!hdUrl) return { done: false };
+    return { done: true, videoUri: hdUrl };
   });
 }
 
-/** POST predictLongRunning — đúng 1 lần generateVideos cho mỗi cảnh */
+/**
+ * Gom tối đa 3 ảnh tham chiếu cho REFERENCE_2_VIDEO — referenceImage (Master Cast, ảnh
+ * chung đại diện cả dàn nhân vật) luôn ưu tiên slot đầu, sau đó tới ảnh riêng của từng
+ * nhân vật (PipelineCharacter.imageBase64). Loại trùng theo nội dung base64 để không gửi
+ * lặp cùng 1 ảnh 2 lần (vd Master Cast character giả lập mang cùng ảnh với referenceImage).
+ */
+function collectReferenceImages(
+  veoInput: GenerateSceneVideoParams['veoInput'],
+): Array<{ base64: string; mimeType: string }> {
+  const images: Array<{ base64: string; mimeType: string }> = [];
+  const seen = new Set<string>();
+
+  const add = (base64?: string, mimeType?: string) => {
+    if (!base64 || !mimeType || images.length >= 3) return;
+    // So khớp theo 1 đoạn đầu base64 là đủ để phát hiện trùng ảnh — không cần hash toàn bộ.
+    const key = base64.slice(0, 200);
+    if (seen.has(key)) return;
+    seen.add(key);
+    images.push({ base64, mimeType });
+  };
+
+  add(veoInput.referenceImage?.base64, veoInput.referenceImage?.mimeType);
+  for (const c of veoInput.characters ?? []) {
+    add(c.imageBase64, c.imageMimeType);
+  }
+
+  return images;
+}
+
+/** POST /veo/generate — đúng 1 lần cho mỗi cảnh. Scene Continuity: `image` = khung hình cuối cảnh trước → FIRST_AND_LAST_FRAMES_2_VIDEO */
 export async function startVideoGeneration(params: GenerateSceneVideoParams): Promise<string> {
   const apiKey = params.apiKey.trim();
   if (!apiKey) throw new VeoApiError('Thiếu Veo API Key.', { fatal: true });
@@ -105,130 +160,91 @@ export async function startVideoGeneration(params: GenerateSceneVideoParams): Pr
   const prompt = params.prompt.trim();
   if (!prompt) throw new VeoApiError('Prompt video không được để trống.');
 
-  const quality = params.veoInput.videoQuality ?? '720p';
-  const model = resolveVeoModel(params.veoInput.veoModel);
-  let resolution = resolveVeoResolution(quality);
+  let model = resolveVeoModel(params.veoInput.veoModel);
   const aspectRatio = resolveVeoAspectRatio(params.veoInput.aspectRatio);
 
-  // Scene Continuity (Video Extension, Veo 3.1) — ưu tiên CAO NHẤT: dùng video thật của
-  // cảnh liền trước để nối tiếp, Google không cho kết hợp cùng instance.image/referenceImages.
-  const previousVideo = params.previousVideo?.base64 && params.previousVideo?.mimeType
-    ? params.previousVideo
-    : undefined;
-
   // Ảnh nguồn cảnh (tab "Từ hình ảnh") = first frame / animate-from-image
-  const sceneStartImage = !previousVideo && params.image?.base64 && params.image?.mimeType
-    ? { bytesBase64Encoded: params.image.base64, mimeType: params.image.mimeType }
-    : undefined;
+  const sceneStartImage = params.image?.base64 && params.image?.mimeType ? params.image : undefined;
 
-  // Master Cast / avatar nhân vật = referenceImages (asset) — giữ ngoại hình, KHÔNG dùng làm khung đầu
-  // (nếu gửi vào instance.image thì mọi cảnh sẽ giống y hệt ảnh sheet).
-  const masterRef =
-    !previousVideo && !sceneStartImage
-    && params.veoInput.referenceImage?.base64
-    && params.veoInput.referenceImage?.mimeType
-      ? {
-          base64: params.veoInput.referenceImage.base64,
-          mimeType: params.veoInput.referenceImage.mimeType,
-        }
-      : !previousVideo && !sceneStartImage
-        ? (() => {
-            const c = params.veoInput.characters?.find((x) => x.imageBase64 && x.imageMimeType);
-            return c?.imageBase64 && c.imageMimeType
-              ? { base64: c.imageBase64, mimeType: c.imageMimeType }
-              : undefined;
-          })()
-        : undefined;
+  // Master Cast / avatar nhân vật = REFERENCE_2_VIDEO (giữ ngoại hình, KHÔNG dùng làm khung đầu).
+  // kie.ai cho tối đa 3 ảnh tham chiếu — gom referenceImage (Master Cast) + ảnh riêng của
+  // từng nhân vật (nếu có), loại trùng theo nội dung base64 để không gửi lặp cùng 1 ảnh.
+  const referenceImages = !sceneStartImage ? collectReferenceImages(params.veoInput) : [];
 
-  // referenceImages (Veo 3.1) bắt buộc duration = 8. Video Extension (Veo 3.1) bắt buộc
-  // duration = 8 VÀ resolution = 720p — Google không cho tuỳ chỉnh khi dùng instance.video.
-  let durationSeconds = resolveVeoDurationSeconds(params.durationSeconds, quality);
-  if ((masterRef || previousVideo) && durationSeconds !== 8) {
+  let durationSeconds = resolveVeoDurationSeconds(params.durationSeconds);
+  let generationType: VeoGenerationType = 'TEXT_2_VIDEO';
+  let imageUrls: string[] | undefined;
+
+  if (sceneStartImage) {
+    generationType = 'FIRST_AND_LAST_FRAMES_2_VIDEO';
+    const url = await uploadKieImageBase64({
+      apiKey,
+      base64: sceneStartImage.base64,
+      mimeType: sceneStartImage.mimeType,
+      uploadPath: 'veo-scenes',
+    });
+    imageUrls = [url];
+  } else if (referenceImages.length > 0) {
+    generationType = 'REFERENCE_2_VIDEO';
+    // REFERENCE_2_VIDEO chỉ hỗ trợ model fast/lite — tự hạ xuống fast nếu đang chọn quality
+    if (!supportsReferenceMode(model)) {
+      console.log(`[veo/start] Master Cast reference cần model fast/lite — hạ từ ${model} xuống veo3_fast.`);
+      model = 'veo3_fast';
+    }
     durationSeconds = 8;
-  }
-  if (previousVideo && resolution !== '720p') {
-    resolution = '720p';
-  }
-
-  const instance: Record<string, unknown> = { prompt };
-
-  if (previousVideo) {
-    instance.video = {
-      bytesBase64Encoded: previousVideo.base64,
-      mimeType: previousVideo.mimeType,
-    };
-  } else if (sceneStartImage) {
-    instance.image = sceneStartImage;
-  } else if (masterRef) {
-    instance.referenceImages = [
-      {
-        image: {
-          bytesBase64Encoded: masterRef.base64,
-          mimeType: masterRef.mimeType,
-        },
-        referenceType: 'asset',
-      },
-    ];
+    imageUrls = await Promise.all(
+      referenceImages.map((img, i) =>
+        uploadKieImageBase64({
+          apiKey,
+          base64: img.base64,
+          mimeType: img.mimeType,
+          uploadPath: 'veo-scenes',
+          fileName: `veo-ref-${i}-${Date.now()}.${img.mimeType.includes('png') ? 'png' : 'jpg'}`,
+        }),
+      ),
+    );
   }
 
-  console.log('[veo/start] image mode:', {
+  console.log('[veo/start] mode:', {
     model,
-    mode: previousVideo ? 'scene-continuity' : sceneStartImage ? 'start-frame' : masterRef ? 'reference-asset' : 'text-only',
+    generationType,
     durationSeconds,
-    resolution,
+    referenceImageCount: referenceImages.length,
     characterNames: params.veoInput.characters?.map((c) => c.name) ?? [],
-    imageBytesApprox: sceneStartImage
-      ? Math.round((sceneStartImage.bytesBase64Encoded.length * 3) / 4)
-      : masterRef
-        ? Math.round((masterRef.base64.length * 3) / 4)
-        : previousVideo
-          ? Math.round((previousVideo.base64.length * 3) / 4)
-          : 0,
   });
 
   return withVeoRetry('Veo start', async () => {
-    const startRes = await fetch(`${BASE_URL}/models/${model}:predictLongRunning`, {
+    const startRes = await fetch(`${BASE_URL}/veo/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-goog-api-key': apiKey,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        instances: [instance],
-        parameters: {
-          aspectRatio,
-          resolution,
-          durationSeconds,
-          // Veo 3 / 3.1: bật audio native (SFX + ambient + thoại trong video nếu prompt mô tả)
-          generateAudio: true,
-        },
+        prompt,
+        model,
+        generationType,
+        imageUrls,
+        aspect_ratio: aspectRatio,
+        resolution: '720p',
+        duration: durationSeconds,
       }),
     });
 
-    const startData = (await startRes.json()) as LongRunningResponse & { name?: string };
+    const startData = await readKieJson<GenerateResponse>(startRes, 'Veo start');
 
-    if (!startRes.ok) {
-      throw parseGoogleError(startData, startRes.status);
+    if (!startRes.ok || startData.code !== 200 || !startData.data?.taskId) {
+      throw parseKieError(startData.msg, startRes.status, `Veo API lỗi (${startRes.status})`);
     }
 
-    const operationName = startData.name;
-    if (!operationName) {
-      throw new VeoApiError('Veo không trả về operation name.');
-    }
-
-    return operationName;
+    return startData.data.taskId;
   });
 }
 
-export async function downloadVideo(apiKey: string, uri: string): Promise<Buffer> {
-  const key = apiKey.trim();
-  if (!key) throw new VeoApiError('Thiếu Veo API Key.', { fatal: true });
-
+/** Tải video MP4 kết quả — kie.ai CDN không cần auth header (khác Google cần X-goog-api-key) */
+export async function downloadVideo(_apiKey: string, uri: string): Promise<Buffer> {
   return withVeoRetry('Veo download', async () => {
-    const res = await fetch(uri, {
-      headers: { 'X-goog-api-key': key },
-      redirect: 'follow',
-    });
+    const res = await fetch(uri, { redirect: 'follow' });
 
     if (!res.ok) {
       const message = `Không tải được video Veo (${res.status}).`;

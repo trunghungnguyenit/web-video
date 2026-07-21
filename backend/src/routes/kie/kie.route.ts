@@ -24,7 +24,7 @@ interface DownloadBody {
 }
 
 function kieErrorResponse(c: Parameters<typeof fail>[0], err: unknown) {
-  const message = err instanceof Error ? err.message : 'Lỗi khi gọi Kie.ai';
+  const message = err instanceof Error ? err.message : 'Lỗi khi gọi API tạo video';
   const fatal = err instanceof VeoApiError ? err.fatal : false;
   return c.json({ success: false, error: message, fatal }, fatal ? 402 : 500);
 }
@@ -40,7 +40,7 @@ kieRoute.post('/generate/start', async (c) => {
     const body = await c.req.json<StartBody>();
 
     if (!body.apiKey?.trim()) {
-      return fail(c, 'Thiếu Kie.ai API Key.', 400);
+      return fail(c, 'Thiếu API Key.', 400);
     }
     if (!body.prompt?.trim()) {
       return fail(c, 'Prompt video không được để trống.', 400);
@@ -82,7 +82,7 @@ kieRoute.post('/operations/poll', async (c) => {
     const body = await c.req.json<PollBody>();
 
     if (!body.apiKey?.trim()) {
-      return fail(c, 'Thiếu Kie.ai API Key.', 400);
+      return fail(c, 'Thiếu API Key.', 400);
     }
     if (!body.taskId?.trim()) {
       return fail(c, 'Thiếu taskId.', 400);

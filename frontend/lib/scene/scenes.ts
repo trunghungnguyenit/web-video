@@ -26,7 +26,11 @@ export interface VideoScene {
   audioUrl?: string;
   /** Độ dài thực của MP3 (giây) — dùng sync timeline */
   audioDurationSeconds?: number;
-  /** Google long-running operation — lưu để resume poll sau refresh, không gọi generate lại */
+  /**
+   * kie.ai Veo 3.1 taskId — lưu để resume poll sau refresh (chỉ trong lúc status='generating'),
+   * không gọi generate lại. Xoá khi cảnh thành công. Scene Continuity nối cảnh sau bằng khung
+   * hình cuối của videoUrl cảnh trước (không dùng taskId), nên không giữ lại sau khi xong.
+   */
   veoOperationName?: string;
   /** Kie.ai (Grok Imagine) taskId — lưu để resume poll sau refresh, không tạo task lại */
   kieTaskId?: string;
