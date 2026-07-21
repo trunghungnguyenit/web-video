@@ -38,10 +38,10 @@ export interface VideoSettings {
   /** Chế độ nội dung Grok Imagine — chỉ áp dụng khi videoProvider = 'kie' */
   kieMode: 'fun' | 'normal' | 'spicy';
   /**
-   * Scene Continuity (Video Extension) — chỉ Veo 3.1/3.1 Fast hỗ trợ. Khi bật, mỗi cảnh
-   * (trừ cảnh 1) nối tiếp từ video THẬT của cảnh liền trước (không chỉ ảnh tham chiếu),
-   * giữ chuyển động/camera/ánh sáng liên tục hơn. Mặc định TẮT — không phải project nào
-   * cũng cần cảnh liên tục, và tính năng khoá cứng 8s/720p khi bật.
+   * Scene Continuity — chỉ Veo 3.1 hỗ trợ. Khi bật, mỗi cảnh (trừ cảnh 1) nối tiếp bằng
+   * KHUNG HÌNH CUỐI của cảnh liền trước làm khung đầu (/veo/generate FIRST_AND_LAST_FRAMES),
+   * neo lại nhân vật/bối cảnh bằng pixel thật. Mặc định TẮT — không phải project nào cũng
+   * cần cảnh liên tục. Không còn khoá cứng 8s/720p (generate tôn trọng duration 4/6/8).
    */
   sceneContinuity: boolean;
 }
@@ -62,8 +62,8 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 };
 
 export const VIDEO_PROVIDER_OPTIONS: [string, string][] = [
-  ['veo', 'Veo 3 (Google)'],
-  ['kie', 'Grok Imagine (kie.ai)'],
+  ['veo', 'Veo 3.1'],
+  ['kie', 'Grok Imagine'],
 ];
 
 export const KIE_MODE_OPTIONS: [string, string][] = [
@@ -173,16 +173,6 @@ export function ProjectSettingsProvider({
       return supported ? prev : { ...prev, sceneContinuity: false };
     });
   }, [settings.videoProvider, settings.veoModel]);
-
-  // Google bắt buộc durationSeconds=8 + resolution=720p khi dùng Video Extension — ép
-  // ngay trên UI (không chỉ lúc gọi API) để không gây hiểu lầm chọn 4s/6s/1080p mà vô hiệu.
-  useEffect(() => {
-    setSettings((prev) => {
-      if (!prev.sceneContinuity) return prev;
-      if (prev.sceneDuration === '8' && prev.videoQuality === '720p') return prev;
-      return { ...prev, sceneDuration: '8', videoQuality: '720p' };
-    });
-  }, [settings.sceneContinuity]);
 
   const applyFromPreset = useCallback((input: PresetInput) => {
     setSettings((prev) => ({

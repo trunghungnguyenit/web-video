@@ -28,6 +28,12 @@ export interface GeminiInput {
   language: string;
   sceneCount: string;
   inputType: 'text' | 'link' | 'image' | 'file';
+  /**
+   * Tab "Từ hình ảnh" — 'multi' (nhiều ảnh, mỗi ảnh 1 cảnh/1 look độc lập — lookbook) |
+   * 'single' (1 ảnh + Prompt tổng, câu chuyện liên tục nhiều cảnh). Quyết định backend dùng
+   * quy tắc "phim liên tục" (single) hay "lookbook — trang phục đổi mỗi cảnh" (multi).
+   */
+  imageMode?: 'multi' | 'single';
   characters?: PipelineCharacter[];
   /** Tab link — URL video gốc */
   sourceVideoUrl?: string;
@@ -35,6 +41,10 @@ export interface GeminiInput {
   videoFileBase64?: string;
   videoFileMimeType?: string;
   videoFileName?: string;
+  /** Tab "Từ file" — tài liệu PDF/DOC/DOCX/TXT (base64), BE trích xuất/đọc trực tiếp */
+  documentFileBase64?: string;
+  documentFileMimeType?: string;
+  documentFileName?: string;
 }
 
 export interface VeoInput {
@@ -63,8 +73,9 @@ export interface VeoInput {
   /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
   kieMode?: 'fun' | 'normal' | 'spicy';
   /**
-   * Scene Continuity (Video Extension) — chỉ Veo 3.1/3.1 Fast. Khi bật, cảnh sau (không
-   * phải cảnh 1) nối tiếp từ video THẬT của cảnh liền trước thay vì chỉ ảnh tham chiếu.
+   * Scene Continuity — chỉ Veo 3.1. Khi bật, cảnh sau (không phải cảnh 1) dùng KHUNG HÌNH
+   * CUỐI của cảnh liền trước làm khung đầu (/veo/generate FIRST_AND_LAST_FRAMES_2_VIDEO),
+   * neo lại nhân vật/bối cảnh bằng pixel thật.
    */
   sceneContinuity?: boolean;
 }
@@ -138,6 +149,7 @@ export interface BuildPipelineParams {
   sceneStyleLabel: string;
   sceneStyleId: string;
   inputType: 'text' | 'link' | 'image' | 'file';
+  imageMode?: 'multi' | 'single';
   characters: PipelineCharacter[];
   provider?: 'veo' | 'kie';
   kieMode?: 'fun' | 'normal' | 'spicy';
@@ -146,6 +158,9 @@ export interface BuildPipelineParams {
   videoFileBase64?: string;
   videoFileMimeType?: string;
   videoFileName?: string;
+  documentFileBase64?: string;
+  documentFileMimeType?: string;
+  documentFileName?: string;
 }
 
 /** Gom form → 3 payload riêng cho Gemini / Veo / TTS */
@@ -159,11 +174,15 @@ export function buildAnalyzePipeline(params: BuildPipelineParams): AnalyzePipeli
       language: params.language,
       sceneCount: params.sceneCount,
       inputType: params.inputType,
+      imageMode: params.imageMode,
       characters,
       sourceVideoUrl: params.sourceVideoUrl?.trim() || undefined,
       videoFileBase64: params.videoFileBase64 || undefined,
       videoFileMimeType: params.videoFileMimeType || undefined,
       videoFileName: params.videoFileName || undefined,
+      documentFileBase64: params.documentFileBase64 || undefined,
+      documentFileMimeType: params.documentFileMimeType || undefined,
+      documentFileName: params.documentFileName || undefined,
     },
     veoInput: {
       apiKey: params.veoApiKey || undefined,

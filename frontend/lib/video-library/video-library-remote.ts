@@ -6,7 +6,7 @@
 // người dùng — apiKey chỉ được lưu ở localStorage (frontend/lib/api-keys-store.ts).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { VideoLibraryItem } from '@/lib/video-library/video-library';
+import type { SourceImageItem, VideoLibraryItem } from '@/lib/video-library/video-library';
 import type { VideoScene } from '@/lib/scene/scenes';
 import type { SavedCharacter } from '@/lib/character/saved-characters';
 import { createEmptyCharacter } from '@/lib/character/saved-characters';
@@ -24,6 +24,16 @@ interface ProjectRow {
   scenes_done: number;
   scenes_total: number;
   input_content: string;
+  input_type: VideoLibraryItem['inputType'] | null;
+  initial_input_type: VideoLibraryItem['initialInputType'] | null;
+  link_url: string | null;
+  link_description: string | null;
+  image_master_brief: string | null;
+  image_mode: VideoLibraryItem['imageMode'] | null;
+  source_images: SourceImageItem[] | null;
+  source_document_path: string | null;
+  source_document_name: string | null;
+  source_document_mime_type: string | null;
   settings: VideoSettings;
   applied_input: VideoLibraryItem['appliedInput'];
   timeline: VideoLibraryItem['timelineDemo'];
@@ -78,6 +88,17 @@ function toProjectRow(userId: string, item: VideoLibraryItem): ProjectRow {
     scenes_done: item.scenesDone,
     scenes_total: item.scenesTotal,
     input_content: item.inputContent,
+    input_type: item.inputType ?? null,
+    initial_input_type: item.initialInputType ?? null,
+    link_url: item.linkUrl ?? null,
+    link_description: item.linkDescription ?? null,
+    image_master_brief: item.imageMasterBrief ?? null,
+    image_mode: item.imageMode ?? null,
+    // previewUrl là signed URL tạm — không lưu DB, chỉ lưu {id,path,fileName,mimeType,prompt,label,voiceHint}
+    source_images: item.sourceImages?.map(({ previewUrl: _previewUrl, ...rest }) => rest) ?? null,
+    source_document_path: item.sourceDocumentPath ?? null,
+    source_document_name: item.sourceDocumentName ?? null,
+    source_document_mime_type: item.sourceDocumentMimeType ?? null,
     settings: item.settings,
     applied_input: item.appliedInput,
     timeline: item.timelineDemo,
@@ -100,6 +121,17 @@ function fromProjectRow(row: ProjectRow): Omit<VideoLibraryItem, 'characters' | 
     scenesDone: row.scenes_done,
     scenesTotal: row.scenes_total,
     inputContent: row.input_content,
+    inputType: row.input_type ?? undefined,
+    initialInputType: row.initial_input_type ?? undefined,
+    linkUrl: row.link_url ?? undefined,
+    linkDescription: row.link_description ?? undefined,
+    imageMasterBrief: row.image_master_brief ?? undefined,
+    imageMode: row.image_mode ?? undefined,
+    // previewUrl (signed URL) được resolveSourceUploadSignedUrls gán sau, ngay sau khi fetch
+    sourceImages: row.source_images ?? undefined,
+    sourceDocumentPath: row.source_document_path ?? undefined,
+    sourceDocumentName: row.source_document_name ?? undefined,
+    sourceDocumentMimeType: row.source_document_mime_type ?? undefined,
     settings: { ...DEFAULT_VIDEO_SETTINGS, ...(row.settings ?? {}) },
     appliedInput: row.applied_input ?? null,
     timelineDemo: row.timeline ?? null,

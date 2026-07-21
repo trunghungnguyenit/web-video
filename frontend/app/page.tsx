@@ -17,6 +17,7 @@ import type { PresetScript } from '@/lib/preset/preset-scripts';
 import type { SavedScript } from '@/lib/saved-scripts/saved-scripts';
 import { generateScriptId, deriveTitle } from '@/lib/saved-scripts/saved-scripts';
 import type { SavedCharacter } from '@/lib/character/saved-characters';
+import type { SourceImageItem } from '@/lib/video-library/video-library';
 import { VideoLibraryProvider, useVideoLibrary } from '@/contexts/video-library-context';
 import { VeoModelsProvider } from '@/contexts/veo-models-context';
 import { ProjectSettingsProvider, type VideoSettings } from '@/contexts/project-settings-context';
@@ -100,11 +101,40 @@ function VideoDetailView({
   } = useVideoLibrary();
 
   const [applyKey, setApplyKey] = useState(0);
-  /** Chỉ hiện khung Character Master khi tạo video từ tab "Tự nhập nội dung" (text) */
-  const [activeInputTab, setActiveInputTab] = useState<TabId>('text');
+  /** Chỉ hiện khung Character Master khi tạo video từ tab "Tự nhập nội dung" (text). null = chưa chọn cách nhập */
+  const [activeInputTab, setActiveInputTab] = useState<TabId | null>('text');
 
   const handleContentChange = useCallback((inputContent: string) => {
     updateActiveItem({ inputContent });
+  }, [updateActiveItem]);
+
+  /** Chốt khoá "Nguồn nội dung" ngay lần chọn đầu tiên (item chưa từng có initialInputType) */
+  const handleInputTypeLocked = useCallback((tab: TabId) => {
+    updateActiveItem({ initialInputType: tab });
+  }, [updateActiveItem]);
+
+  const handleLinkChange = useCallback((linkUrl: string, linkDescription: string) => {
+    updateActiveItem({ linkUrl, linkDescription });
+  }, [updateActiveItem]);
+
+  const handleImageMasterBriefChange = useCallback((imageMasterBrief: string) => {
+    updateActiveItem({ imageMasterBrief });
+  }, [updateActiveItem]);
+
+  const handleImageModeChange = useCallback((imageMode: 'multi' | 'single') => {
+    updateActiveItem({ imageMode });
+  }, [updateActiveItem]);
+
+  const handleImagesMetaChange = useCallback((sourceImages: SourceImageItem[]) => {
+    updateActiveItem({ sourceImages });
+  }, [updateActiveItem]);
+
+  const handleDocumentMetaChange = useCallback((meta: { path: string; name: string; mimeType: string } | null) => {
+    updateActiveItem({
+      sourceDocumentPath: meta?.path,
+      sourceDocumentName: meta?.name,
+      sourceDocumentMimeType: meta?.mimeType,
+    });
   }, [updateActiveItem]);
 
   const handleCharactersChange = useCallback((characters: SavedCharacter[]) => {
@@ -193,7 +223,25 @@ function VideoDetailView({
                 presetData={activeItem.appliedInput}
                 presetKey={applyKey}
                 initialContent={activeItem.inputContent}
+                initialInputType={activeItem.initialInputType}
+                locked={Boolean(activeItem.initialInputType)}
+                onInputTypeLocked={handleInputTypeLocked}
                 onContentChange={handleContentChange}
+                savedLinkUrl={activeItem.linkUrl}
+                savedLinkDescription={activeItem.linkDescription}
+                onLinkChange={handleLinkChange}
+                savedImageMasterBrief={activeItem.imageMasterBrief}
+                onImageMasterBriefChange={handleImageMasterBriefChange}
+                savedImageMode={activeItem.imageMode}
+                onImageModeChange={handleImageModeChange}
+                savedSourceImages={activeItem.sourceImages}
+                onImagesMetaChange={handleImagesMetaChange}
+                savedSourceDocument={activeItem.sourceDocumentPath ? {
+                  path: activeItem.sourceDocumentPath,
+                  name: activeItem.sourceDocumentName ?? '',
+                  mimeType: activeItem.sourceDocumentMimeType ?? '',
+                } : null}
+                onDocumentMetaChange={handleDocumentMetaChange}
                 onSaveScript={onSaveScript}
                 focusVoiceSpeedKey={focusVoiceSpeedKey}
                 focusSceneStyleKey={focusSceneStyleKey}
@@ -231,7 +279,6 @@ function VideoDetailView({
                   onPromptChange={(masterCastPrompt) => updateActiveItem({ masterCastPrompt })}
                   imageDataUrl={activeItem.masterCastImageDataUrl}
                   onImageChange={(masterCastImageDataUrl) => updateActiveItem({ masterCastImageDataUrl })}
-                  onDescriptionChange={(masterCastImageDescription) => updateActiveItem({ masterCastImageDescription })}
                   onConfirm={activeItem.pendingLinkReview
                     ? (imageDataUrl) => confirmLinkGeneration(activeItem.id, imageDataUrl)
                     : undefined}
@@ -424,90 +471,90 @@ export default function Page() {
   return (
     <VideoLibraryProvider>
       <VeoModelsProvider>
-      <div className="flex h-screen bg-background overflow-hidden">
-        <div className="hidden md:flex flex-shrink-0">
-          <Sidebar
+        <div className="flex h-screen bg-background overflow-hidden">
+          <div className="hidden md:flex shrink-0">
+            <Sidebar
+              activeView={currentView}
+              activeMenuId={activeMenuId}
+              activeTool={activeTool}
+              collapsed={sidebarCollapsed}
+              onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+              onMenuClick={handleMenuClick}
+              onToolClick={handleToolClick}
+              onPresetSelect={handlePresetSelect}
+            />
+          </div>
+
+          {sidebarOpen && (
+            <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+              <div className="absolute left-0 top-0 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <Sidebar
+                  activeView={currentView}
+                  activeMenuId={activeMenuId}
+                  activeTool={activeTool}
+                  collapsed={false}
+                  onToggleCollapse={() => setSidebarOpen(false)}
+                  onMenuClick={handleMenuClick}
+                  onToolClick={handleToolClick}
+                  onPresetSelect={handlePresetSelect}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+            {currentView === 'video-detail' ? (
+              <VideoDetailView
+                activeTool={activeTool}
+                setActiveTool={setActiveTool}
+                focusVoiceSpeedKey={focusVoiceSpeedKey}
+                focusSceneStyleKey={focusSceneStyleKey}
+                focusContentKey={focusContentKey}
+                setFocusContentKey={setFocusContentKey}
+                focusBgmKey={focusBgmKey}
+                setFocusBgmKey={setFocusBgmKey}
+                selectedPreset={selectedPreset}
+                setSelectedPreset={setSelectedPreset}
+                characterSectionRef={characterSectionRef}
+                inputSectionRef={inputSectionRef}
+                sceneSectionRef={sceneSectionRef}
+                timelineSectionRef={timelineSectionRef}
+                characterMasterRef={characterMasterRef}
+                savedScripts={savedScripts}
+                savedScriptsSectionRef={savedScriptsSectionRef}
+                onSaveScript={handleSaveScript}
+                onUpdateScript={handleUpdateScript}
+                onDeleteScript={handleDeleteScript}
+                scrollToRef={scrollToRef}
+                onBack={() => setCurrentView('video-library')}
+              />
+            ) : (
+              <>
+                <Header
+                  title={viewTitles[currentView]}
+                  onBackClick={currentView === 'settings' ? () => handleMenuClick('video-library', 'video-library') : undefined}
+                  onMenuOpen={() => setSidebarOpen(true)}
+                />
+                <div className="flex-1 overflow-y-auto">
+                  <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
+                    {currentView === 'video-library' && <VideoLibraryView onOpenDetail={handleOpenVideoDetail} />}
+                    {currentView === 'api-keys' && <ApiKeysManagement />}
+                    {currentView === 'settings' && (
+                      <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} />
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          <MobileNav
             activeView={currentView}
-            activeMenuId={activeMenuId}
-            activeTool={activeTool}
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
             onMenuClick={handleMenuClick}
-            onToolClick={handleToolClick}
-            onPresetSelect={handlePresetSelect}
+            onMenuOpen={() => setSidebarOpen(true)}
           />
         </div>
-
-        {sidebarOpen && (
-          <div className="fixed inset-0 z-40 md:hidden" onClick={() => setSidebarOpen(false)}>
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <div className="absolute left-0 top-0 h-full w-72 bg-sidebar border-r border-sidebar-border shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <Sidebar
-                activeView={currentView}
-                activeMenuId={activeMenuId}
-                activeTool={activeTool}
-                collapsed={false}
-                onToggleCollapse={() => setSidebarOpen(false)}
-                onMenuClick={handleMenuClick}
-                onToolClick={handleToolClick}
-                onPresetSelect={handlePresetSelect}
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-          {currentView === 'video-detail' ? (
-            <VideoDetailView
-              activeTool={activeTool}
-              setActiveTool={setActiveTool}
-              focusVoiceSpeedKey={focusVoiceSpeedKey}
-              focusSceneStyleKey={focusSceneStyleKey}
-              focusContentKey={focusContentKey}
-              setFocusContentKey={setFocusContentKey}
-              focusBgmKey={focusBgmKey}
-              setFocusBgmKey={setFocusBgmKey}
-              selectedPreset={selectedPreset}
-              setSelectedPreset={setSelectedPreset}
-              characterSectionRef={characterSectionRef}
-              inputSectionRef={inputSectionRef}
-              sceneSectionRef={sceneSectionRef}
-              timelineSectionRef={timelineSectionRef}
-              characterMasterRef={characterMasterRef}
-              savedScripts={savedScripts}
-              savedScriptsSectionRef={savedScriptsSectionRef}
-              onSaveScript={handleSaveScript}
-              onUpdateScript={handleUpdateScript}
-              onDeleteScript={handleDeleteScript}
-              scrollToRef={scrollToRef}
-              onBack={() => setCurrentView('video-library')}
-            />
-          ) : (
-            <>
-              <Header
-                title={viewTitles[currentView]}
-                onBackClick={currentView === 'settings' ? () => handleMenuClick('video-library', 'video-library') : undefined}
-                onMenuOpen={() => setSidebarOpen(true)}
-              />
-              <div className="flex-1 overflow-y-auto">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6">
-                  {currentView === 'video-library' && <VideoLibraryView onOpenDetail={handleOpenVideoDetail} />}
-                  {currentView === 'api-keys' && <ApiKeysManagement />}
-                  {currentView === 'settings' && (
-                    <SettingsPanel activeTab={settingsTab} onTabChange={setSettingsTab} />
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        <MobileNav
-          activeView={currentView}
-          onMenuClick={handleMenuClick}
-          onMenuOpen={() => setSidebarOpen(true)}
-        />
-      </div>
       </VeoModelsProvider>
     </VideoLibraryProvider>
   );

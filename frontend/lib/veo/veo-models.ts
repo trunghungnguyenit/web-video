@@ -8,7 +8,7 @@ export interface VeoModelOption {
   description?: string;
 }
 
-/** Gợi ý model Veo phù hợp chất lượng (720p-fast → fast model) */
+/** Gợi ý model Veo phù hợp chất lượng (720p-fast → veo3_fast) */
 export function suggestVeoModelForQuality(
   quality: string,
   models: VeoModelOption[],
@@ -16,27 +16,23 @@ export function suggestVeoModelForQuality(
   if (models.length === 0) return '';
 
   if (quality === '720p-fast') {
-    const fast = models.find((m) => m.id.includes('fast'));
+    const fast = models.find((m) => m.id === 'veo3_fast');
     if (fast) return fast.id;
   }
 
-  const standard = models.find(
-    (m) => m.id.includes('generate') && !m.id.includes('fast'),
-  );
+  const standard = models.find((m) => m.id === 'veo3');
   return standard?.id ?? models[0].id;
 }
 
-/** Chỉ đọc Veo API key riêng — không dùng chung Gemini key */
+/** Veo giờ dùng chung key kie.ai với Grok Imagine — không còn key Google riêng */
 export function getVeoApiKey(): string {
-  return getApiKey(API_KEY_IDS.veo).trim();
+  return getApiKey(API_KEY_IDS.kie).trim();
 }
 
 /**
- * Video Extension (nối tiếp cảnh trước bằng video thật — Scene Continuity) chỉ Veo 3.1 /
- * Veo 3.1 Fast hỗ trợ, KHÔNG áp dụng cho Veo 3.1 Lite hay Veo 3.0.
- * @see https://ai.google.dev/gemini-api/docs/veo
+ * Scene Continuity (nối cảnh bằng khung hình cuối cảnh trước → /veo/generate
+ * FIRST_AND_LAST_FRAMES_2_VIDEO) áp dụng cho mọi model Veo 3.1 — không giới hạn.
  */
-export function supportsVideoExtension(modelId: string | undefined): boolean {
-  const id = modelId?.trim().toLowerCase() ?? '';
-  return id.includes('veo-3.1') && !id.includes('lite');
+export function supportsVideoExtension(_modelId: string | undefined): boolean {
+  return true;
 }

@@ -16,6 +16,23 @@ export type VideoLibrarySortOrder = 'newest' | 'oldest';
 export interface CreateVideoItemOptions {
   title: string;
   settings: VideoSettings;
+  /** Nguồn nội dung đã chọn ở modal "Tạo video mới" — Mục 2 dùng để tự hiện đúng giao diện, bỏ qua màn chọn lại.
+   * Tách riêng khỏi `inputType` (tab lúc phân tích gần nhất) để không kích hoạt MasterCastPanel/layout trước khi có cảnh. */
+  initialInputType?: 'text' | 'link' | 'image' | 'file';
+}
+
+/** 1 ảnh đã upload cho tab "Từ hình ảnh" — path Storage (bucket `source-uploads`), KHÔNG phải base64 */
+export interface SourceImageItem {
+  id: string;
+  /** Path bucket `source-uploads`, dạng `{userId}/{projectId}/image-{id}.{ext}` */
+  path: string;
+  fileName: string;
+  mimeType: string;
+  prompt: string;
+  label?: string;
+  voiceHint?: string;
+  /** Signed URL — tạo lại mỗi lần load (resolveSourceUploadSignedUrls), KHÔNG lưu DB */
+  previewUrl?: string;
 }
 
 /** Kết quả generate cảnh đang "tạo lại" — giữ tách biệt tới khi thành công mới ghi đè field sống */
@@ -51,14 +68,40 @@ export interface VideoLibraryItem {
   inputContent: string;
   /** Tab nguồn mục 2 lúc phân tích gần nhất — quyết định giao diện hiển thị cảnh (link dùng layout khác) */
   inputType?: 'text' | 'link' | 'image' | 'file';
+  /**
+   * Nguồn nội dung đã chọn lúc "Tạo video mới" (hoặc lần chọn đầu tiên ở màn inline
+   * cho item mặc định) — LUÔN đáng tin cậy để Mục 2 tự chọn đúng tab, và một khi đã có
+   * giá trị thì bị KHOÁ vĩnh viễn (ẩn nút "Đổi cách nhập"), không ảnh hưởng layout cảnh.
+   */
+  initialInputType?: 'text' | 'link' | 'image' | 'file';
+  /** Tab "Từ link video" — giữ lại qua reload/điều hướng */
+  linkUrl?: string;
+  linkDescription?: string;
+  /** Tab "Từ hình ảnh" — Prompt tổng áp dụng cho ảnh chưa có prompt riêng (hoặc toàn bộ video ở chế độ 'single') */
+  imageMasterBrief?: string;
+  /**
+   * Tab "Từ hình ảnh" — chế độ: 'multi' (mặc định, nhiều ảnh — mỗi ảnh 1 cảnh riêng) |
+   * 'single' (1 ảnh duy nhất + Prompt tổng — Gemini viết kịch bản nhiều cảnh, ảnh dùng
+   * làm referenceImage giữ nhân vật xuyên suốt, giống cơ chế Master Cast của tab link).
+   */
+  imageMode?: 'multi' | 'single';
+  /** Tab "Từ hình ảnh" — từng ảnh đã upload (path Storage, không phải base64) */
+  sourceImages?: SourceImageItem[];
+  /** Tab "Từ file" — tài liệu đã upload (path Storage bucket `source-uploads`) */
+  sourceDocumentPath?: string;
+  sourceDocumentName?: string;
+  sourceDocumentMimeType?: string;
   /** Nhân vật mục 1 — riêng từng video */
   characters: SavedCharacter[];
-  /** Prompt mô tả toàn bộ dàn nhân vật (Gemini tự sinh — chỉ có khi inputType === 'link') */
+  /**
+   * Prompt mô tả toàn bộ dàn nhân vật (chỉ có khi inputType === 'link') — NGUỒN DUY NHẤT
+   * chèn vào mọi cảnh lúc gửi Veo/Kie (veoInput.masterCharacterText). Gemini sinh lần đầu
+   * từ nội dung video, được ghi đè bằng mô tả Gemini Vision khi user upload ảnh tham chiếu,
+   * và user có thể sửa tay sau đó — sửa gì thì đúng cái đó được gửi đi tạo video.
+   */
   masterCastPrompt?: string;
   /** Ảnh tham chiếu dàn nhân vật — user tự upload (data URL base64) */
   masterCastImageDataUrl?: string;
-  /** Mô tả nhân vật do Gemini Vision phân tích trực tiếp từ ảnh trên — chèn vào prompt mọi cảnh lúc gửi Veo/Kie */
-  masterCastImageDescription?: string;
   /** Kết quả phân tích tab link đang chờ xác nhận — chưa gọi TTS/Veo, chỉ hiện preview để xem/upload ảnh */
   pendingLinkReview?: SceneGenerationResult | null;
   appliedInput: PresetInput | null;
@@ -165,6 +208,7 @@ export function createVideoItem(
     veoInput: null,
     settings,
     inputContent: '',
+    initialInputType: typeof options === 'object' && 'initialInputType' in options ? options.initialInputType : undefined,
     characters: [createEmptyCharacter()],
     appliedInput: null,
     timelineDemo: null,

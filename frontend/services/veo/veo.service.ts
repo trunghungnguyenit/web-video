@@ -8,14 +8,15 @@ export interface GenerateSceneVideoPayload {
   veoInput: VeoInput;
   durationSeconds: number;
   operationName?: string;
+  /** Khung đầu — ảnh nguồn cảnh (tab "Từ hình ảnh") HOẶC khung hình cuối cảnh trước (Scene Continuity) */
   image?: { base64: string; mimeType: string };
-  /** Scene Continuity (Video Extension, Veo 3.1) — video thật của cảnh liền trước */
-  previousVideo?: { base64: string; mimeType: string };
 }
 
 export interface PollOperationPayload {
   apiKey: string;
   operationName: string;
+  /** '1080p' → backend tự gọi thêm get-1080p-video sau khi task xong */
+  quality?: string;
 }
 
 export interface DownloadVideoPayload {
@@ -62,7 +63,7 @@ class VeoService {
     return json.data?.models ?? [];
   }
 
-  /** POST /api/veo/generate/start — đúng 1 lần predictLongRunning */
+  /** POST /api/veo/generate/start — đúng 1 lần /veo/generate (kèm image nếu có khung đầu/nối cảnh) */
   async startGeneration(payload: Omit<GenerateSceneVideoPayload, 'operationName'>): Promise<{ operationName: string }> {
     const res = await fetchApi('/api/veo/generate/start', {
       method: 'POST',

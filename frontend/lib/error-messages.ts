@@ -40,19 +40,19 @@ const ERROR_PATTERNS: ErrorPattern[] = [
   },
   {
     test: /insufficient.*balance/i,
-    message: 'Tài khoản kie.ai đã hết số dư — nạp thêm tại kie.ai/api-key.',
+    message: 'Tài khoản đã hết số dư — nạp thêm tại trang quản lý API Key.',
   },
   {
     test: /rate limit|too many requests/i,
-    message: 'kie.ai đang giới hạn tần suất request — chờ một lát rồi thử lại.',
+    message: 'Đang giới hạn tần suất request — chờ một lát rồi thử lại.',
   },
   {
     test: /resource not found/i,
-    message: 'Không tìm thấy tài nguyên trên kie.ai (task hoặc model không hợp lệ).',
+    message: 'Không tìm thấy tài nguyên (task hoặc model không hợp lệ).',
   },
   {
     test: /parameter validation failed|invalid request parameters/i,
-    message: 'Tham số gửi lên kie.ai không hợp lệ — thử đổi mô tả cảnh hoặc cài đặt.',
+    message: 'Tham số gửi lên không hợp lệ — thử đổi mô tả cảnh hoặc cài đặt.',
   },
 ];
 

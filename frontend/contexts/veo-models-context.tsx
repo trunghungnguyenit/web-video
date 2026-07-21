@@ -12,6 +12,7 @@ import {
 import { API_KEYS_CHANGED_EVENT } from '@/lib/api-keys/api-keys-store';
 import { getVeoApiKey, type VeoModelOption } from '@/lib/veo/veo-models';
 import { fetchVeoModelsCached, invalidateVeoModelsCache } from '@/lib/veo/veo-models-cache';
+import { toUserMessage } from '@/lib/error-messages';
 
 interface VeoModelsContextValue {
   models: VeoModelOption[];
@@ -50,7 +51,7 @@ export function VeoModelsProvider({ children }: { children: ReactNode }) {
       const list = await fetchVeoModelsCached(apiKey);
       setModels(list);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Không tải được model Veo.';
+      const message = toUserMessage(err, 'Không tải được model Veo.');
       setError(message);
       setModels([]);
     } finally {

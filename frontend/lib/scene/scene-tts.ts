@@ -6,6 +6,7 @@ import { ttsService } from '@/services/tts/tts.service';
 import { revokeSceneVideoUrl } from '@/lib/scene/scene-video-placeholder';
 import { createSceneVideo } from '@/lib/scene/scene-video';
 import type { SceneVideoCallbacks } from '@/lib/veo/veo-generation';
+import { toUserMessage } from '@/lib/error-messages';
 
 /** Thu hồi blob URL audio TTS (tránh rò bộ nhớ) */
 function revokeSceneAudioUrl(url?: string) {
@@ -83,7 +84,7 @@ export async function regenerateSceneAssets(
   ttsInput: TtsInput,
   veoInput: VeoInput,
   callbacks?: SceneVideoCallbacks,
-  /** Scene Continuity (Video Extension, Veo 3.1) — videoUrl cảnh liền trước */
+  /** Scene Continuity — videoUrl cảnh liền trước (trích khung hình cuối làm khung đầu) */
   previousSceneVideoUrl?: string,
 ): Promise<VideoScene> {
   revokeSceneVideoUrl(scene.videoUrl);
@@ -111,7 +112,15 @@ export async function regenerateSceneAssets(
       },
       previousSceneVideoUrl,
     );
-    return { ...next, videoUrl, veoOperationName: undefined, kieTaskId: undefined, videoPath: undefined, status: 'success' };
+    return {
+      ...next,
+      videoUrl,
+      // Thành công — xoá operationId; cảnh sau nối tiếp bằng khung hình cuối của videoUrl này.
+      veoOperationName: undefined,
+      kieTaskId: undefined,
+      videoPath: undefined,
+      status: 'success',
+    };
   } catch (err) {
     // Cảnh đã kết luận LỖI — không giữ lại operationId vừa start được, để lần load
     // sau KHÔNG tự resume/gọi API ngầm; user phải chủ động bấm "Tạo lại" mới thử lại.
@@ -121,7 +130,7 @@ export async function regenerateSceneAssets(
       veoOperationName: undefined,
       kieTaskId: undefined,
       status: 'error',
-      errorMessage: err instanceof Error ? err.message : undefined,
+      errorMessage: toUserMessage(err, 'Tạo lại cảnh thất bại — thử lại.'),
     };
   }
 }

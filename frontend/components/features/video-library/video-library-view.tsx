@@ -5,6 +5,7 @@ import { Plus, Search, Trash2, Pencil, Eye, Loader2, X, AlertCircle } from 'luci
 import { cn } from '@/lib/utils';
 import { useVideoLibrary } from '@/contexts/video-library-context';
 import { VideoItemModal } from '@/components/features/video-library/video-item-modal';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import {
   videoItemProgressPercent,
   filterVideoItems,
@@ -210,6 +211,8 @@ export function VideoLibraryView({ onOpenDetail }: VideoLibraryViewProps) {
   const [sort, setSort] = useState<VideoLibrarySortOrder>('newest');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingItem, setEditingItem] = useState<VideoLibraryItem | null>(null);
+  const [deletingItem, setDeletingItem] = useState<VideoLibraryItem | null>(null);
+  const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
 
   const filtered = useMemo(
     () => filterVideoItems(items, search, statusFilter, sort),
@@ -218,15 +221,11 @@ export function VideoLibraryView({ onOpenDetail }: VideoLibraryViewProps) {
 
   const handleDeleteAll = () => {
     if (items.length === 0) return;
-    if (window.confirm(`Xóa toàn bộ ${items.length} video?`)) {
-      deleteAllItems();
-    }
+    setConfirmDeleteAll(true);
   };
 
   const handleDelete = (item: VideoLibraryItem) => {
-    if (window.confirm(`Xóa "${item.title}"?`)) {
-      deleteItem(item.id);
-    }
+    setDeletingItem(item);
   };
 
   const handleOpenDetail = (id: string) => {
@@ -332,6 +331,8 @@ export function VideoLibraryView({ onOpenDetail }: VideoLibraryViewProps) {
         onCreate={(options) => {
           createItem(options);
           setShowCreateModal(false);
+          // Đã chọn Nguồn nội dung — vào thẳng Mục 2 để hiện đúng giao diện, khỏi bấm "Xem chi tiết" lại
+          onOpenDetail();
         }}
       />
 
@@ -340,6 +341,30 @@ export function VideoLibraryView({ onOpenDetail }: VideoLibraryViewProps) {
         open={editingItem !== null}
         initialItem={editingItem}
         onClose={() => setEditingItem(null)}
+      />
+
+      <ConfirmDialog
+        open={deletingItem !== null}
+        title="Xoá video này?"
+        message={deletingItem ? <>Video &quot;{deletingItem.title}&quot; sẽ bị xoá vĩnh viễn, không thể khôi phục.</> : ''}
+        confirmLabel="Xoá video"
+        onCancel={() => setDeletingItem(null)}
+        onConfirm={() => {
+          if (deletingItem) deleteItem(deletingItem.id);
+          setDeletingItem(null);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteAll}
+        title={`Xoá toàn bộ ${items.length} video?`}
+        message="Tất cả video và dữ liệu liên quan sẽ bị xoá vĩnh viễn, không thể khôi phục."
+        confirmLabel="Xoá tất cả"
+        onCancel={() => setConfirmDeleteAll(false)}
+        onConfirm={() => {
+          deleteAllItems();
+          setConfirmDeleteAll(false);
+        }}
       />
     </div>
   );

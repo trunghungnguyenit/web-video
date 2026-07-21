@@ -11,7 +11,7 @@ export async function createSceneVideo(
   scene: VideoScene,
   veoInput: VeoInput,
   callbacks?: SceneVideoCallbacks,
-  /** Scene Continuity (Video Extension, Veo 3.1) — videoUrl cảnh liền trước, chỉ áp dụng cho Veo */
+  /** Scene Continuity — videoUrl cảnh liền trước (trích khung hình cuối làm khung đầu), chỉ áp dụng cho Veo */
   previousSceneVideoUrl?: string,
 ): Promise<string> {
   const apiKey = veoInput.apiKey?.trim();

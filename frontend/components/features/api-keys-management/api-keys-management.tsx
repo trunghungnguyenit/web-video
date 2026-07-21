@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
 import { SecretField } from '@/components/ui/secret-field';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
-import { getApiKey, setApiKey } from '@/lib/api-keys/api-keys-store';
+import { setApiKey } from '@/lib/api-keys/api-keys-store';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { fetchRemoteApiKeys, saveRemoteApiKey } from '@/lib/api-keys/api-keys-remote';
@@ -17,7 +17,7 @@ type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
 interface ApiKeyEntry {
   id: string;
   name: string;
-  service: 'gemini' | 'veo' | 'tts' | 'kie';
+  service: 'gemini' | 'tts' | 'kie';
   placeholder: string;
   value: string;
   status: KeyStatus;
@@ -28,7 +28,7 @@ interface ApiKeyEntry {
 /**
  * Theo luồng xử lý:
  * Gemini   → tạo kịch bản (script generation)
- * Veo      → tạo video từng cảnh
+ * Video    → tạo video từng cảnh (Veo 3.1 lẫn Grok Imagine — dùng chung 1 key)
  * TTS      → tạo giọng đọc (ElevenLabs)
  *
  * Backend nhận toàn bộ settings rồi phân phối key cho AI phù hợp.
@@ -45,15 +45,6 @@ const INITIAL_KEYS: ApiKeyEntry[] = [
     description: 'Tạo kịch bản, phân cảnh và lời thoại (ngôn ngữ, phong cách, thời lượng)',
   },
   {
-    id: 'veo',
-    name: 'Veo API Key',
-    service: 'veo',
-    placeholder: 'AIza... (key riêng cho Veo)',
-    value: '',
-    status: 'disconnected',
-    description: 'Veo 3 tạo video cảnh — bắt buộc nhập key riêng; lưu xong sẽ load danh sách model Veo',
-  },
-  {
     id: 'elevenlabs',
     name: 'ElevenLabs API Key',
     service: 'tts',
@@ -64,20 +55,19 @@ const INITIAL_KEYS: ApiKeyEntry[] = [
   },
   {
     id: 'kie',
-    name: 'Kie.ai API Key (Grok Imagine)',
+    name: 'Video API Key',
     service: 'kie',
-    placeholder: 'Bearer token từ kie.ai/api-key',
+    placeholder: 'Nhập Bearer token API tạo video',
     value: '',
     status: 'disconnected',
-    description: 'Tạo video cảnh bằng Grok Imagine — chọn "Nhà cung cấp: Grok Imagine" trong cài đặt để dùng',
+    description: 'Tạo video cảnh — dùng chung cho cả Veo 3.1 và Grok Imagine, chọn nhà cung cấp trong cài đặt',
   },
 ];
 
 const SERVICE_BADGE: Record<ApiKeyEntry['service'], { label: string; color: string }> = {
   gemini: { label: 'Gemini', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
-  veo:    { label: 'Veo',    color: 'text-violet-400 bg-violet-500/10 border-violet-500/30' },
   tts:    { label: 'TTS',    color: 'text-teal-400 bg-teal-500/10 border-teal-500/30' },
-  kie:    { label: 'Kie.ai', color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+  kie:    { label: 'Video',  color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
 };
 
 async function verifyKey(_id: string, value: string): Promise<{ ok: boolean; msg?: string }> {

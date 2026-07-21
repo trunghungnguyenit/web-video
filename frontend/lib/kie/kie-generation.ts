@@ -63,7 +63,7 @@ export async function generateSceneVideoAssetKie(
 ): Promise<{ videoUrl: string; kieTaskId?: string }> {
   const apiKey = veoInput.apiKey?.trim();
   if (!apiKey) {
-    throw new Error('Thiếu Kie.ai API Key.');
+    throw new Error('Thiếu API Key.');
   }
 
   if (scene.videoUrl && scene.status === 'success' && !callbacks?.forceNew) {
