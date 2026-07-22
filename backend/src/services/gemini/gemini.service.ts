@@ -97,7 +97,14 @@ function formatCharacters(characters: PipelineCharacter[] | undefined): string {
 }
 
 function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest): string {
-  const count = parseInt(geminiInput.sceneCount, 10) || 5;
+  // "auto" — không ép số cảnh cố định, để Gemini tự quyết định dựa trên độ dài THẬT của
+  // video/nội dung gốc (hữu ích nhất với tab link: video 20s không nên bị ép thành 15 cảnh,
+  // video 3 phút không nên bị nhồi vào 3 cảnh).
+  const isAutoSceneCount = geminiInput.sceneCount === 'auto';
+  const count = isAutoSceneCount ? 0 : (parseInt(geminiInput.sceneCount, 10) || 5);
+  const sceneCountPhrase = isAutoSceneCount
+    ? 'một số lượng cảnh PHÙ HỢP (tự quyết định — xem hướng dẫn "Số cảnh" bên dưới, không cố định trước)'
+    : `đúng ${count} cảnh`;
   const lang = LANGUAGE_LABELS[geminiInput.language] ?? geminiInput.language;
   const voice = VOICE_LABELS[ttsInput.voice] ?? ttsInput.voice;
   const ratio = ASPECT_RATIO_LABELS[veoInput.aspectRatio] ?? veoInput.aspectRatio;
@@ -151,7 +158,7 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 ## Video đính kèm (bắt buộc bám sát)
 - Bạn ĐÃ được gửi kèm VIDEO thật (file_uri). Hãy XEM video đó.
 - Kịch bản phải phản ánh đúng nội dung, nhân vật, hành động, lời thoại, trình tự trong video.
-- Không bịa cảnh không có trong video. Có thể rút gọn / tái cấu trúc thành đúng ${count} cảnh.
+- Không bịa cảnh không có trong video. Có thể rút gọn / tái cấu trúc thành ${sceneCountPhrase}.
 - Phần "Nội dung" bên dưới chỉ là gợi ý bổ sung (prompt người dùng), KHÔNG thay thế video.`
     : isLinkInput
       ? `
@@ -163,7 +170,7 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
 ## Tài liệu PDF đính kèm (bắt buộc bám sát)
 - Bạn ĐÃ được gửi kèm file PDF thật. Hãy ĐỌC toàn bộ nội dung file đó (chữ, bảng, hình minh hoạ nếu có).
 - Kịch bản phải dựa đúng trên nội dung PDF — không bịa thông tin không có trong file.
-- Có thể tóm lược / tái cấu trúc thành đúng ${count} cảnh cho phù hợp định dạng video ngắn.
+- Có thể tóm lược / tái cấu trúc thành ${sceneCountPhrase} cho phù hợp định dạng video ngắn.
 - Phần "Nội dung" bên dưới (nếu có) chỉ là ghi chú bổ sung, KHÔNG thay thế nội dung PDF.`
         : '';
 
@@ -181,7 +188,7 @@ Pipeline: Mỗi ảnh + prompt riêng → hiểu bối cảnh chung (storyTimeli
 Giữ giọng thực tế, rõ ràng như video thời trang/quảng cáo sản phẩm — không cần kịch tính/cảm xúc tiến triển giữa các cảnh vì mỗi cảnh là 1 look độc lập.`
     : `Nhiệm vụ: tạo MỘT bộ phim liên tục đã chia thành các cảnh — KHÔNG tạo các cảnh độc lập. Mỗi cảnh chỉ là segment của cùng một movie; khi ghép video phải seamless, không discontinuity.
 
-Pipeline: Nội dung/Video → hiểu TOÀN BỘ phim (storyTimeline) → tách ${count} segments kế thừa liên tục (scenes[] state đầy đủ) → hệ thống ghép state thành Video Prompt (bạn KHÔNG tự viết prompt Veo trực tiếp).
+Pipeline: Nội dung/Video → hiểu TOÀN BỘ phim (storyTimeline) → tách thành ${sceneCountPhrase}, kế thừa liên tục (scenes[] state đầy đủ) → hệ thống ghép state thành Video Prompt (bạn KHÔNG tự viết prompt Veo trực tiếp).
 
 TỰ SUY LUẬN phong cách/mức độ kịch tính phù hợp TỪ CHÍNH nội dung/prompt người dùng bên dưới (không có lựa chọn "kiểu video" nào được truyền vào) — ví dụ nội dung kể chuyện thì kịch tính, cảm xúc tiến triển rõ; nội dung hướng dẫn/sản phẩm/quảng cáo thì giữ giọng thực tế, rõ ràng, không gượng ép cảm xúc kịch tính không phù hợp. DÙ phong cách nào, quy tắc liên kết cảnh/không lặp hành động ở dưới vẫn LUÔN áp dụng — mọi video đều phải là các đoạn nối tiếp nhau như 1 video liên tục, không phải các clip rời rạc.`}
 
@@ -189,7 +196,13 @@ ${isMultiImageMode ? buildLookbookRules() : buildCinematicContinuityRules()}
 
 ## Cài đặt Gemini (kịch bản)
 - Ngôn ngữ voiceover: ${lang}
-- Số cảnh: đúng ${count} cảnh
+- Số cảnh: ${isAutoSceneCount
+    ? `TỰ ĐỘNG — không cố định trước, bạn tự quyết định số lượng cảnh phù hợp:${
+        hasVideoPart
+          ? ' có video đính kèm → dựa vào ĐỘ DÀI THẬT của video đó, ước lượng khoảng 1 cảnh mỗi 6–8 giây nội dung (video càng dài càng nhiều cảnh, video ngắn thì ít cảnh — không ép về 1 số cố định), điều chỉnh theo nhịp của từng đoạn/beat thật sự trong video.'
+          : ' không có video đính kèm → dựa vào độ dài/độ phức tạp của nội dung bên dưới (nội dung dài, nhiều diễn biến thì nhiều cảnh hơn; nội dung ngắn gọn thì ít cảnh), thường trong khoảng 3–15 cảnh.'
+      }`
+    : `đúng ${count} cảnh`}
 - Loại đầu vào: ${geminiInput.inputType}
 ${geminiInput.sourceVideoUrl?.trim() ? `- Source video URL: ${geminiInput.sourceVideoUrl.trim()}` : ''}
 ${videoRules}
@@ -212,7 +225,7 @@ ${isMultiImageMode
 ${geminiInput.content.trim()}
 
 ## Yêu cầu output — trả về DUY NHẤT JSON hợp lệ (không markdown, không giải thích) theo schema:
-${buildStoryPipelineSchema(count, lang)}
+${buildStoryPipelineSchema(isAutoSceneCount ? 'auto' : count, lang)}
 ${isLinkInput ? `
 Thêm field "masterCastPrompt" (ngang cấp "scenes") — đoạn mô tả DUY NHẤT bằng tiếng Anh, chi tiết, gộp toàn bộ nhân vật xuất hiện thành 1 "character reference sheet" — dùng làm ảnh tham chiếu giữ nhân vật nhất quán qua mọi cảnh.` : ''}
 
@@ -475,7 +488,9 @@ export async function analyzeContent(request: AnalyzePipelineRequest): Promise<G
 const CHARACTER_SHEET_VISION_PROMPT = `Bạn đang xem một "character reference sheet" (ảnh tham chiếu nhân vật) dùng để giữ nhân vật NHẤT QUÁN TUYỆT ĐỐI khi tạo video AI text-to-video/image-to-video qua nhiều cảnh riêng biệt (mỗi cảnh là 1 lần gọi API độc lập, model KHÔNG nhớ cảnh trước — nên mô tả này là tín hiệu DUY NHẤT giữ đúng ngoại hình).
 
 Viết bằng tiếng Anh, dạng "character sheet" súc tích, CÔ ĐỌNG TỪ KHÓA (không viết văn hoa mỹ, không câu chuyện) — để khi chèn nguyên văn vào đầu MỌI prompt cảnh, model dễ bám đúng chi tiết thay vì diễn giải lại. Với mỗi nhân vật xuất hiện trong ảnh, theo đúng format 1 dòng:
-"[Tên nếu có, không thì 'Character N']: [giới tính/tuổi ước lượng], [kiểu tóc + màu tóc chính xác], [khuôn mặt/đặc điểm nhận diện], [trang phục — từng món + màu sắc chính xác], [vóc dáng], [phong cách hình ảnh: vd 2D cartoon flat color / anime / realistic 3D...]."
+"[Tên nếu có, không thì 'Character N']: [giới tính/tuổi ước lượng nếu là người, hoặc loài/chủng loại nếu là động vật/sinh vật/đồ vật nhân hoá], [MÀU SẮC CHÍNH XÁC của lông/da/thân thể/chất liệu chính — bắt buộc phải ghi rõ, kể cả với động vật/vật thể, không được bỏ qua], [kiểu tóc + màu tóc chính xác nếu có], [khuôn mặt/đặc điểm nhận diện], [trang phục — từng món + màu sắc chính xác nếu có], [vóc dáng], [phong cách hình ảnh: vd 2D cartoon flat color / anime / realistic 3D...]."
+
+QUAN TRỌNG về màu sắc: nếu ảnh sheet có NHIỀU bản vẽ cùng 1 nhân vật (vd 1 bản màu đầy đủ + các bản phác thảo/line art đen trắng ở góc độ khác, hoặc bản vẽ giải phẫu/tỉ lệ dạng nét), LUÔN lấy màu sắc từ bản vẽ CÓ MÀU, rõ nét, đầy đủ nhất trong ảnh — TUYỆT ĐỐI không lấy màu (hoặc suy luận nhầm thành "xám/đen trắng") từ các bản phác thảo/line art không tô màu.
 
 Nếu nhiều nhân vật, mỗi người 1 dòng riêng. Không thêm tiêu đề, không markdown, không giải thích gì thêm ngoài các dòng mô tả — trả về TRỰC TIẾP nội dung đó.`;
 

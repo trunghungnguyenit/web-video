@@ -5,7 +5,6 @@ import type { PresetTimelineDemo } from '@/lib/preset/preset-scripts';
 /** Timeline demo (playhead, BGM…) theo id preset */
 export const PRESET_DEMO_TIMELINES: Record<number, PresetTimelineDemo> = {
   5: {
-    includeSubtitles: true,
     bgmPresetName: 'Cinematic Epic',
     bgmVolume: 28,
     voiceSpeed: 1,

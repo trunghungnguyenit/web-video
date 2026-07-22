@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, type Dispatch, type SetStateAction } from 'react';
 import {
-  ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film, Volume2, Save, X,
+  ImageIcon, AlertCircle, Loader2, CheckCircle2, Pencil, RefreshCw, Film, Volume2, Save, X, Play, Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
@@ -15,6 +15,7 @@ import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { toUserMessage } from '@/lib/error-messages';
 import type { VideoLibraryItem } from '@/lib/video-library/video-library';
 import { markSceneStopped } from '@/lib/veo/veo-generation-lock';
+import { downloadBlob } from '@/lib/video-library/video-composer';
 import { SceneToolbar } from './scene-toolbar';
 
 // ─── Thumbnail từ giữa clip (tránh frame 0 = Master Cast I2V) ─────────────────
@@ -66,6 +67,48 @@ function SceneVideoThumbnail({ videoUrl }: { videoUrl: string }) {
       playsInline
       preload="metadata"
     />
+  );
+}
+
+// ─── Preview Modal — xem trọn video 1 cảnh, không cần qua Timeline (mục 4) ───
+
+function ScenePreviewModal({ scene, onClose }: { scene: VideoScene; onClose: () => void }) {
+  if (!scene.videoUrl) return null;
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div
+        className="relative z-10 w-full max-w-2xl bg-card border border-border rounded-2xl flex flex-col shadow-2xl overflow-hidden"
+        role="dialog"
+        aria-modal
+        aria-label={`Xem video cảnh ${scene.index}`}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2 min-w-0">
+            <Film className="w-4 h-4 text-primary shrink-0" />
+            <h3 className="font-bold text-foreground truncate">
+              Cảnh {scene.index} · {formatSceneTimeRange(scene)} · {scene.durationSeconds}s
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors shrink-0"
+            aria-label="Đóng"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <video
+          key={scene.id}
+          src={scene.videoUrl}
+          controls
+          autoPlay
+          className="w-full aspect-video bg-black"
+        />
+      </div>
+    </ModalOverlay>
   );
 }
 
@@ -283,6 +326,7 @@ export function SceneGallery({
   const [regeneratingIds, setRegeneratingIds] = useState<string[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<VideoScene | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<VideoScene | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showSaveReminder, setShowSaveReminder] = useState(false);
 
@@ -304,6 +348,23 @@ export function SceneGallery({
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
+  };
+
+  const [downloadingIds, setDownloadingIds] = useState<string[]>([]);
+
+  /** Tải nguyên video 1 cảnh — không cắt/ghép/xử lý gì, đúng file gốc đã tạo */
+  const handleDownloadScene = async (scene: VideoScene) => {
+    if (!scene.videoUrl || downloadingIds.includes(scene.id)) return;
+    setDownloadingIds((prev) => [...prev, scene.id]);
+    try {
+      const res = await fetch(scene.videoUrl);
+      const blob = await res.blob();
+      downloadBlob(blob, `ai-video-studio-canh-${scene.index}.mp4`);
+    } catch {
+      showToast('Không tải được video cảnh này — thử lại.');
+    } finally {
+      setDownloadingIds((prev) => prev.filter((id) => id !== scene.id));
+    }
   };
 
   const handleSaveVideos = useCallback(async () => {
@@ -622,6 +683,19 @@ export function SceneGallery({
                   <>
                     <SceneVideoThumbnail videoUrl={scene.videoUrl} />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10 z-[1] pointer-events-none" />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreviewTarget(scene);
+                      }}
+                      className="absolute inset-0 z-[2] flex items-center justify-center group/play"
+                      title="Xem video cảnh này"
+                    >
+                      <span className="w-11 h-11 rounded-full bg-black/50 group-hover/play:bg-primary/80 flex items-center justify-center transition-colors">
+                        <Play className="w-5 h-5 text-white fill-white ml-0.5" />
+                      </span>
+                    </button>
                   </>
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center">
@@ -701,6 +775,24 @@ export function SceneGallery({
                     >
                       <Pencil className="w-3.5 h-3.5" />
                     </button>
+                    {scene.videoUrl && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDownloadScene(scene);
+                        }}
+                        disabled={downloadingIds.includes(scene.id)}
+                        className="p-1 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded transition-colors disabled:opacity-50"
+                        title="Tải video cảnh này"
+                      >
+                        {downloadingIds.includes(scene.id) ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
                     {(isError || isEdited) && (
                       <button
                         type="button"
@@ -738,6 +830,11 @@ export function SceneGallery({
             isRegenerating={regeneratingIds.includes(live.id)}
           />
         );
+      })()}
+
+      {previewTarget && (() => {
+        const live = scenes.find((s) => s.id === previewTarget.id) ?? previewTarget;
+        return <ScenePreviewModal key={live.id} scene={live} onClose={() => setPreviewTarget(null)} />;
       })()}
     </section>
   );

@@ -63,7 +63,6 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
 
 export const VIDEO_PROVIDER_OPTIONS: [string, string][] = [
   ['veo', 'Veo 3.1'],
-  ['kie', 'Grok Imagine'],
 ];
 
 export const KIE_MODE_OPTIONS: [string, string][] = [

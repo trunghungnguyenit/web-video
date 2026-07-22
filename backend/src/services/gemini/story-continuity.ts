@@ -107,7 +107,18 @@ Khuôn mẫu chung: Cảnh N có action làm Vật A chuyển từ trạng thái
 - ✅ ĐÚNG — các cảnh sau giữ nguyên trạng thái [Y] cho tới khi có hành động mới thay đổi nó.
 - ❌ SAI — một cảnh sau vô tình mô tả lại Vật A như đang ở trạng thái [X] (trạng thái TRƯỚC khi thay đổi) — đây là lỗi "cảnh sau lặp lại/reset về trạng thái cảnh trước", y hệt lỗi lặp hành động ở nhân vật.
 
-Ví dụ minh hoạ ở nhiều bối cảnh khác nhau (chỉ để hiểu khuôn mẫu, KHÔNG giới hạn phạm vi rule ở đúng các ví dụ này — áp dụng tương tự cho bất kỳ vật thể nào khác xuất hiện trong câu chuyện): ly nước đã đổ hết → cảnh sau ly vẫn rỗng, không tự đầy lại; cửa sổ đã vỡ → cảnh sau vẫn vỡ, không tự lành; nến đã tắt → cảnh sau vẫn tối, không tự sáng lại; tờ giấy đã bị xé → cảnh sau vẫn rách; ngôi nhà đã cháy/sập → cảnh sau vẫn tàn tích, không tự nguyên vẹn lại; xe đã hư → cảnh sau vẫn hư, không tự lành lặn.`;
+Ví dụ minh hoạ ở nhiều bối cảnh khác nhau (chỉ để hiểu khuôn mẫu, KHÔNG giới hạn phạm vi rule ở đúng các ví dụ này — áp dụng tương tự cho bất kỳ vật thể nào khác xuất hiện trong câu chuyện): ly nước đã đổ hết → cảnh sau ly vẫn rỗng, không tự đầy lại; cửa sổ đã vỡ → cảnh sau vẫn vỡ, không tự lành; nến đã tắt → cảnh sau vẫn tối, không tự sáng lại; tờ giấy đã bị xé → cảnh sau vẫn rách; ngôi nhà đã cháy/sập → cảnh sau vẫn tàn tích, không tự nguyên vẹn lại; xe đã hư → cảnh sau vẫn hư, không tự lành lặn.
+
+### Nhân vật phụ được giới thiệu PHẢI được xử lý nhất quán — không được lặng lẽ bỏ quên giữa chừng (quy tắc TỔNG QUÁT — áp dụng cho MỌI nhân vật phụ, MỌI câu chuyện, không riêng tình huống nào)
+Nếu 1 cảnh giới thiệu thêm một nhân vật NGOÀI danh sách nhân vật chính đã khai (nhân vật phụ/nền xuất hiện để tương tác, hội thoại ngắn, hỗ trợ mạch truyện), nhân vật phụ đó PHẢI được xử lý nhất quán ở các cảnh sau — không được biến mất vô lý:
+- Nếu còn liên quan tới mạch truyện ở các cảnh sau → tiếp tục xuất hiện đúng vị trí/trạng thái đã thiết lập (giống mọi nhân vật khác).
+- Nếu KHÔNG còn xuất hiện nữa → PHẢI có 1 hành động "rời cảnh" rõ ràng (quay đi, bước khuất, chào tạm biệt, được nhắc đã rời khỏi...) ngay trong cảnh họ xuất hiện lần cuối — TUYỆT ĐỐI không được lặng lẽ biến mất giữa 2 cảnh liên tiếp mà không một dòng nào giải thích.
+
+Khuôn mẫu: Cảnh N giới thiệu Nhân vật phụ B (không có trong danh sách nhân vật chính). Nếu B không xuất hiện lại ở cảnh N+1 trở đi → cảnh N (hoặc N+1) PHẢI có 1 dòng action/endingState thể hiện B rời đi/kết thúc vai trò TRƯỚC KHI B biến mất khỏi câu chuyện.
+- ✅ ĐÚNG: endingState cảnh N có "Nhân vật phụ B gật đầu chào rồi quay lưng rời đi" — người xem hiểu rõ vì sao B không còn xuất hiện.
+- ❌ SAI: B xuất hiện ở cảnh N, rồi từ cảnh N+1 trở đi không còn được nhắc tới trong characterStates nữa mà không có bất kỳ hành động rời đi nào — dễ khiến người xem tưởng nhầm B đã "biến thành" một nhân vật khác đang xuất hiện gần đó, hoặc đơn giản là lỗi.
+
+Đồng thời áp dụng NGHIÊM rule "không đổi địa điểm mà không có chuyển tiếp" đã nêu ở mục Continuity tuyệt đối: nếu cảnh N đang ở địa điểm A, cảnh N+1 KHÔNG được mở đầu đột ngột ở địa điểm B khác hẳn — phải có ít nhất 1 dòng mô tả hành động di chuyển (đi tới, chạy đến, được dẫn tới...) trong previousSceneSummary/currentState của cảnh N+1, hoặc dùng hẳn 1 cảnh riêng thể hiện quá trình di chuyển.`;
 }
 
 /**
@@ -148,8 +159,13 @@ CÙNG một người mẫu/nhân vật.
 }
 
 /** Đoạn JSON schema chèn vào prompt Gemini — SceneTimelineBuilder: mỗi cảnh phải khai đủ
- * state, KHÔNG tự viết "visual"/prompt trực tiếp (PromptBuilder ở dưới lo việc đó). */
-export function buildStoryPipelineSchema(count: number, lang: string): string {
+ * state, KHÔNG tự viết "visual"/prompt trực tiếp (PromptBuilder ở dưới lo việc đó).
+ * count = 'auto' — không ép số cảnh cố định, Gemini tự quyết định (xem hướng dẫn "Số cảnh"
+ * đã chèn riêng ở phần "Cài đặt Gemini" phía trên trong prompt chính). */
+export function buildStoryPipelineSchema(count: number | 'auto', lang: string): string {
+  const sceneCountLine = count === 'auto'
+    ? 'tách thành một số lượng cảnh PHÙ HỢP (tự quyết định theo hướng dẫn "Số cảnh" ở trên — KHÔNG cố định trước)'
+    : `tách đúng ${count} segments`;
   return `{
   "title": "short film title",
   "storyTimeline": {
@@ -183,7 +199,7 @@ export function buildStoryPipelineSchema(count: number, lang: string): string {
   ]
 }
 
-QUAN TRỌNG — pipeline: Nội dung → hiểu TOÀN BỘ phim (storyTimeline) → tách đúng ${count} segments liên tục (scenes) — như một movie bị cắt ra, KHÔNG phải ${count} clip độc lập.
+QUAN TRỌNG — pipeline: Nội dung → hiểu TOÀN BỘ phim (storyTimeline) → ${sceneCountLine} liên tục (scenes) — như một movie bị cắt ra, KHÔNG phải các clip độc lập.
 - NGÔN NGỮ: mọi trường trừ voiceover và dialogueCue = 100% English.
   - voiceover = LUÔN ${lang} (đây là lời dẫn TTS đọc đè lên, theo ngôn ngữ người dùng chọn).
   - dialogueCue = lời nói THẬT do Veo/Kie tự tạo giọng NGAY trong video (generateAudio) — nếu có video đính kèm, viết ĐÚNG theo ngôn ngữ nhân vật đang nói trong video gốc đó (nghe/xem video để xác định, KHÔNG tự ép sang ${lang} hay tiếng Anh); nếu không có video đính kèm (tab text/ảnh/file), dùng ${lang}.

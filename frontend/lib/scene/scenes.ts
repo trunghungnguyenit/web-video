@@ -89,12 +89,13 @@ export function findSceneAtPlayhead(scenes: VideoScene[], playhead: number): Vid
   return best;
 }
 
-/** Thời lượng thực tế cảnh — max(durationSeconds, audio + buffer) nếu có TTS */
+/**
+ * Thời lượng thực tế cảnh — LUÔN đúng bằng durationSeconds (độ dài THẬT của video, đo lại
+ * ngay lúc tạo xong — xem scene-generation-queue.ts). Mặc định: video dài bao nhiêu chạy bấy
+ * nhiêu, không tự kéo dài để khớp audio TTS (kể cả khi lời thoại dài hơn video) — không tự
+ * thêm/bớt gì cả.
+ */
 function sceneEffectiveDuration(scene: VideoScene): number {
-  if (scene.audioDurationSeconds != null && scene.audioDurationSeconds > 0) {
-    const fromAudio = Math.ceil((scene.audioDurationSeconds + 0.5) * 10) / 10;
-    return Math.max(scene.durationSeconds, fromAudio);
-  }
   return scene.durationSeconds;
 }
 
