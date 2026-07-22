@@ -1,6 +1,6 @@
 /**
  * Capture 1 khung hình giữa clip làm thumbnail.
- * I2V (Grok + Master Cast) frame 0 ≈ ảnh Character Sheet — không dùng làm đại diện cảnh.
+ * I2V (Master Cast) frame 0 ≈ ảnh Character Sheet — không dùng làm đại diện cảnh.
  */
 export function captureSceneThumbnail(
   videoUrl: string,

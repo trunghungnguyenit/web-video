@@ -5,7 +5,6 @@ import {
   resolveSceneDurationSeconds,
   snapToVeoDuration,
 } from '@/lib/veo/veo-duration';
-import { resolveKieSceneDuration } from '@/lib/kie/kie-duration';
 
 export type SceneStatus = 'generating' | 'success' | 'error' | 'edited';
 
@@ -32,8 +31,6 @@ export interface VideoScene {
    * hình cuối của videoUrl cảnh trước (không dùng taskId), nên không giữ lại sau khi xong.
    */
   veoOperationName?: string;
-  /** Kie.ai (Grok Imagine) taskId — lưu để resume poll sau refresh, không tạo task lại */
-  kieTaskId?: string;
   /** Path trong Supabase Storage bucket `scene-videos` — có nghĩa là video đã lưu cloud */
   videoPath?: string;
   /** Path trong Supabase Storage bucket `scene-audio` */
@@ -130,9 +127,7 @@ export function scenesFromGeminiScript(
   script: { scenes: Array<{ visual: string; voiceover: string; durationSeconds?: number }> },
   sceneDurationSetting?: string,
   videoQuality?: string,
-  provider?: 'veo' | 'kie',
 ): VideoScene[] {
-  const isKie = provider === 'kie';
   const fixedDuration =
     sceneDurationSetting && sceneDurationSetting !== 'auto'
       ? parseInt(sceneDurationSetting, 10)
@@ -142,15 +137,12 @@ export function scenesFromGeminiScript(
   const baseId = Date.now();
 
   return script.scenes.map((scene, i) => {
-    // Grok Imagine (kie.ai) nhận 6–30s bất kỳ — KHÔNG snap về lưới 4/6/8 của Veo,
-    // chỉ clamp an toàn, để giữ đúng thời lượng Gemini đã tính theo prompt riêng cho kie.
-    const durationSeconds = isKie
-      ? resolveKieSceneDuration(fixedDuration ?? scene.durationSeconds)
-      : fixedDuration && Number.isFinite(fixedDuration)
-        ? snapToVeoDuration(fixedDuration, videoQuality)
-        : scene.durationSeconds && scene.durationSeconds > 0
-          ? snapToVeoDuration(scene.durationSeconds, videoQuality)
-          : resolveSceneDurationSeconds(undefined, scene.voiceover, videoQuality);
+    // Cả 2 nhà cung cấp đều chạy Veo 3.1 → luôn snap về lưới 4/6/8 giây
+    const durationSeconds = fixedDuration && Number.isFinite(fixedDuration)
+      ? snapToVeoDuration(fixedDuration, videoQuality)
+      : scene.durationSeconds && scene.durationSeconds > 0
+        ? snapToVeoDuration(scene.durationSeconds, videoQuality)
+        : resolveSceneDurationSeconds(undefined, scene.voiceover, videoQuality);
     const timeStart = cursor;
     const timeEnd = cursor + durationSeconds;
     cursor = timeEnd;

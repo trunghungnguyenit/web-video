@@ -1,9 +1,10 @@
 // ─── Story Continuity — StoryAnalysisService + StoryTimelineBuilder + SceneTimelineBuilder
 // + StateManager + CharacterResolver + ObjectStateManager + PromptBuilder ───────────────────
 // File DUY NHẤT chứa toàn bộ rule/schema bắt Gemini hiểu TOÀN BỘ câu chuyện (storyTimeline)
-// TRƯỚC khi tách cảnh, và ghép state có cấu trúc của từng cảnh thành 1 prompt Veo/Kie hoàn
-// chỉnh — dùng CHUNG cho cả 2 provider (Veo lẫn Grok Imagine/kie.ai đều nhận "visual" từ
-// cùng nguồn này qua gemini.service.ts, không có logic riêng theo provider ở đây).
+// TRƯỚC khi tách cảnh, và ghép state có cấu trúc của từng cảnh thành 1 prompt Veo hoàn
+// chỉnh — dùng CHUNG cho cả 2 nhà cung cấp ('veo' qua kie.ai lẫn 'veo-gemini' gọi thẳng
+// Google đều nhận "visual" từ cùng nguồn này qua gemini.service.ts, không có logic riêng
+// theo nhà cung cấp ở đây).
 //
 // StateManager (propagateSceneStates) đảm bảo Ending State của cảnh N-1 LUÔN trở thành
 // Starting State của cảnh N — ghi đè cứng, không phụ thuộc việc Gemini có tuân thủ đúng hay
@@ -343,9 +344,11 @@ export function propagateSceneStates(scenes: SceneState[], storyTimeline: StoryT
 
 /**
  * CharacterResolver (Character Library) — map tên nhân vật trong characterStates về mô tả
- * ngoại hình CỐ ĐỊNH (traits/outfit/style) đã khai ở mục Nhân vật, để ngoại hình không bị mô
- * tả khác đi mỗi cảnh. Khớp mờ (alias/substring) làm fallback phòng khi Gemini gọi tên hơi
- * khác đi giữa các cảnh (vd "Father" vs "the father" vs "Bố").
+ * ngoại hình CỐ ĐỊNH (role/traits/outfit/style) đã khai ở mục Nhân vật, để ngoại hình không
+ * bị mô tả khác đi mỗi cảnh. Khớp mờ (alias/substring) làm fallback phòng khi Gemini gọi tên
+ * hơi khác đi giữa các cảnh (vd "Father" vs "the father" vs "Bố"). `description` (mô tả chi
+ * tiết, có thể dài/tường thuật) KHÔNG lặp lại ở đây — chỉ xuất hiện 1 lần trong khối nhận
+ * diện nhân vật cuối prompt (xem buildCharacterIdentityText, gemini.service.ts).
  */
 function resolveCharacterLine(state: CharacterStateEntry, characters: PipelineCharacter[]): string {
   const stateName = state.name.trim().toLowerCase();
@@ -356,7 +359,7 @@ function resolveCharacterLine(state: CharacterStateEntry, characters: PipelineCh
       return name.length > 2 && (stateName.includes(name) || name.includes(stateName));
     });
   const appearance = fixed
-    ? [fixed.traits, fixed.outfit, fixed.style].filter((v) => v?.trim()).join(', ')
+    ? [fixed.role, fixed.traits, fixed.outfit, fixed.style].filter((v) => v?.trim()).join(', ')
     : '';
 
   const parts = [
@@ -383,8 +386,8 @@ function formatObjectStates(objects: ObjectStateEntry[]): string {
 
 /**
  * PromptBuilder — ghép TOÀN BỘ state của 1 cảnh (đã kế thừa từ cảnh trước qua StateManager)
- * thành prompt Veo/Kie cuối cùng cho trường "visual" — đây là điểm DUY NHẤT sinh ra prompt,
- * Gemini không tự viết prompt trực tiếp nữa. Dùng CHUNG cho cả Veo lẫn Grok Imagine.
+ * thành prompt Veo cuối cùng cho trường "visual" — đây là điểm DUY NHẤT sinh ra prompt,
+ * Gemini không tự viết prompt trực tiếp nữa. Dùng CHUNG cho cả 2 nhà cung cấp Veo.
  */
 export function buildSceneVisualPrompt(scene: SceneState, characters: PipelineCharacter[]): string {
   const characterLines = scene.characterStates
@@ -404,9 +407,9 @@ export function buildSceneVisualPrompt(scene: SceneState, characters: PipelineCh
   // CHỈ đưa vào prompt đúng những gì THẬT SỰ cần vẽ cho cảnh này (Action/Camera/
   // Characters/Environment/Objects/Dialogue/Ambient). KHÔNG nhắc lại previousSceneSummary/
   // currentState/endingState/transition/nextSceneHook trong prompt — dù có đóng khung
-  // "đừng vẽ lại" thì đây vẫn là văn bản mô tả hình ảnh chi tiết, model (đặc biệt Grok
-  // Imagine — không có trí nhớ, không phân biệt được "bối cảnh để biết" với "nội dung cần
-  // vẽ") vẫn dễ bị "cảm hứng" vẽ theo, khiến cảnh sau trông như lặp lại cảnh trước. Liên
+  // "đừng vẽ lại" thì đây vẫn là văn bản mô tả hình ảnh chi tiết, mà model sinh video không
+  // có trí nhớ giữa các lần gọi và không phân biệt được "bối cảnh để biết" với "nội dung cần
+  // vẽ", nên vẫn dễ bị "cảm hứng" vẽ theo, khiến cảnh sau trông như lặp lại cảnh trước. Liên
   // kết giữa các cảnh vẫn được đảm bảo vì StateManager (propagateSceneStates) đã kế thừa
   // đúng environment/camera vào CHÍNH các trường render bên dưới — không cần nhắc lại bằng lời.
   const lines: string[] = [];

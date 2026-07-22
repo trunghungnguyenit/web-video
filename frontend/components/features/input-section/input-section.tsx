@@ -13,6 +13,7 @@ import type { CharacterMasterHandle } from '@/components/features/character-mast
 import type { PresetInput } from '@/lib/preset/preset-scripts';
 import type { SourceImageItem } from '@/lib/video-library/video-library';
 import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { getVideoApiKeyForProvider } from '@/lib/veo/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
 import { logAnalyzePipeline } from '@/lib/gemini/pipeline-debug-log';
 import { useProjectSettings } from '@/contexts/project-settings-context';
@@ -111,6 +112,12 @@ export interface InputSectionProps {
   initialInputType?: TabId;
   /** true khi initialInputType đã có giá trị — ẩn nút "Đổi cách nhập", không cho đổi nguồn */
   locked?: boolean;
+  /**
+   * true khi đã từng nhấn "Phân Tích & Tạo Kịch Bản" ở tab "Từ hình ảnh" (item không còn
+   * 'draft') — chốt khoá chế độ "Nhiều ảnh"/"1 ảnh" theo đúng chế độ đã dùng để tạo video,
+   * ẩn nút chế độ còn lại (không cho đổi qua lại nữa).
+   */
+  imageModeLocked?: boolean;
   /** Ref mục 1 — lấy danh sách nhân vật khi gửi Gemini */
   characterMasterRef?: RefObject<CharacterMasterHandle | null>;
   /** Báo tab đang chọn (text/link/image/file) lên component cha — dùng để ẩn/hiện Character Master. null = chưa chọn */
@@ -340,6 +347,7 @@ export function InputSection({
   focusContentKey, focusVoiceSpeedKey, focusSceneStyleKey, onScenesGenerated,
   characterMasterRef, projectId, initialContent = '', onContentChange,
   onActiveTabChange, initialInputType, locked = false, onInputTypeLocked,
+  imageModeLocked = false,
   savedLinkUrl = '', savedLinkDescription = '', onLinkChange,
   savedImageMasterBrief = '', onImageMasterBriefChange,
   savedImageMode, onImageModeChange,
@@ -362,23 +370,34 @@ export function InputSection({
   /** Tài liệu đã lưu qua Storage (path) — không có File thật cho tới khi resubmit cần fetch lại */
   const [restoredDocument, setRestoredDocument] = useState(savedSourceDocument);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [uploadedImages, setUploadedImages] = useState<UploadedImageItem[]>(() =>
-    (savedSourceImages ?? []).map((img) => ({
-      id: img.id,
-      file: null,
-      previewUrl: img.previewUrl ?? null,
-      prompt: img.prompt,
-      label: img.label,
-      voiceHint: img.voiceHint,
-      path: img.path,
-      fileName: img.fileName,
-      mimeType: img.mimeType,
-    })),
-  );
-  const uploadedImagesRef = useRef<UploadedImageItem[]>([]);
-  uploadedImagesRef.current = uploadedImages;
-  const [imageMasterBrief, setImageMasterBrief] = useState(savedImageMasterBrief);
+  /**
+   * 2 danh sách ảnh TÁCH RIÊNG theo chế độ — đổi qua lại "Nhiều ảnh"/"1 ảnh" không được xoá
+   * dữ liệu của chế độ kia (yêu cầu UX). Ảnh cũ chưa có field `mode` (lưu trước khi tách) —
+   * coi như thuộc `savedImageMode` lúc đó, giữ đúng hành vi cũ khi phục hồi dữ liệu.
+   */
+  const seedImages = (mode: 'multi' | 'single'): UploadedImageItem[] =>
+    (savedSourceImages ?? [])
+      .filter((img) => (img.mode ?? savedImageMode ?? 'multi') === mode)
+      .map((img) => ({
+        id: img.id,
+        file: null,
+        previewUrl: img.previewUrl ?? null,
+        prompt: img.prompt,
+        label: img.label,
+        voiceHint: img.voiceHint,
+        path: img.path,
+        fileName: img.fileName,
+        mimeType: img.mimeType,
+      }));
+  const [multiImages, setMultiImages] = useState<UploadedImageItem[]>(() => seedImages('multi'));
+  const [singleImages, setSingleImages] = useState<UploadedImageItem[]>(() => seedImages('single'));
   const [imageMode, setImageMode] = useState<'multi' | 'single'>(savedImageMode ?? 'multi');
+  /** Danh sách/setter của chế độ ẢNH ĐANG HIỂN THỊ — mọi logic bên dưới vẫn dùng như 1 mảng duy nhất */
+  const uploadedImages = imageMode === 'multi' ? multiImages : singleImages;
+  const setUploadedImages = imageMode === 'multi' ? setMultiImages : setSingleImages;
+  const uploadedImagesRef = useRef<UploadedImageItem[]>([]);
+  uploadedImagesRef.current = [...multiImages, ...singleImages];
+  const [imageMasterBrief, setImageMasterBrief] = useState(savedImageMasterBrief);
   const [pendingImageSlotId, setPendingImageSlotId] = useState<string | null>(null);
   const [justApplied, setJustApplied] = useState(false);
   const [savedScript, setSavedScript] = useState(false);
@@ -414,19 +433,26 @@ export function InputSection({
     applyFromPreset(presetData);
     setErrors({});
     setUploadedFile(null);
-    setUploadedImages((prev) => {
+    setMultiImages((prev) => {
+      prev.forEach((img) => revokeImagePreview(img.previewUrl));
+      return [];
+    });
+    setSingleImages((prev) => {
       prev.forEach((img) => revokeImagePreview(img.previewUrl));
       return [];
     });
 
     if (presetData.inputType === 'image' && presetData.imageScenes?.length) {
       setImageMasterBrief(presetData.content);
+      // Kịch bản mẫu luôn là "mỗi ảnh 1 cảnh" — chốt chế độ multi, tránh hiện sai UI nếu
+      // trước đó người dùng đang ở chế độ 'single'.
+      setImageMode('multi');
       setForm((f) => ({
         ...f,
         activeTab: 'image',
         content: presetData.content,
       }));
-      setUploadedImages(
+      setMultiImages(
         presetData.imageScenes.map((scene) => ({
           id: createImageId(),
           file: null,
@@ -505,22 +531,27 @@ export function InputSection({
 
   // Tab "Từ hình ảnh" — meta từng ảnh (prompt/label/voiceHint + path Storage khi đã upload
   // xong) — chỉ gửi ảnh ĐÃ CÓ path (upload xong), tránh lưu ảnh dở dang chưa có gì để phục hồi.
+  // Gộp CẢ 2 chế độ (gắn `mode`) để lưu song song, khôi phục lại đúng chỗ khi mở lại video —
+  // xem seedImages() ở trên.
   useEffect(() => {
     if (form.activeTab !== 'image') return;
-    const meta: SourceImageItem[] = uploadedImages
-      .filter((img): img is UploadedImageItem & { path: string } => Boolean(img.path))
-      .map((img) => ({
-        id: img.id,
-        path: img.path,
-        fileName: img.fileName ?? img.file?.name ?? '',
-        mimeType: img.mimeType ?? img.file?.type ?? '',
-        prompt: img.prompt,
-        label: img.label,
-        voiceHint: img.voiceHint,
-      }));
+    const toMeta = (images: UploadedImageItem[], mode: 'multi' | 'single'): SourceImageItem[] =>
+      images
+        .filter((img): img is UploadedImageItem & { path: string } => Boolean(img.path))
+        .map((img) => ({
+          id: img.id,
+          path: img.path,
+          fileName: img.fileName ?? img.file?.name ?? '',
+          mimeType: img.mimeType ?? img.file?.type ?? '',
+          prompt: img.prompt,
+          label: img.label,
+          voiceHint: img.voiceHint,
+          mode,
+        }));
+    const meta = [...toMeta(multiImages, 'multi'), ...toMeta(singleImages, 'single')];
     const timer = setTimeout(() => onImagesMetaChange?.(meta), 400);
     return () => clearTimeout(timer);
-  }, [uploadedImages, form.activeTab, onImagesMetaChange]);
+  }, [multiImages, singleImages, form.activeTab, onImagesMetaChange]);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const charCount = form.content.length;
@@ -599,19 +630,20 @@ export function InputSection({
     //   return;
     // }
 
-    const isKieProvider = settings.videoProvider === 'kie';
-    const videoApiKey = getApiKey(API_KEY_IDS.kie);
+    // 'veo-gemini' dùng key RIÊNG "Gemini Key Veo 3.1", không phải Gemini API Key kịch bản
+    const isGeminiVeoProvider = settings.videoProvider === 'veo-gemini';
+    const videoApiKey = getVideoApiKeyForProvider(settings.videoProvider);
     if (!videoApiKey) {
       submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
-        submit: isKieProvider
-          ? 'Chưa có Video API Key — nhập key riêng tại mục API Keys để tạo video Grok Imagine.'
+        submit: isGeminiVeoProvider
+          ? 'Chưa có "Gemini Key Veo 3.1" — nhập key riêng tại mục API Keys để tạo video Veo3.1 Gemini.'
           : 'Chưa có Video API Key — nhập key riêng tại mục API Keys để tạo video Veo 3.1.',
       }));
       return;
     }
-    if (!isKieProvider && !settings.veoModel?.trim()) {
+    if (!settings.veoModel?.trim()) {
       submitLockRef.current = false;
       setErrors((p) => ({
         ...p,
@@ -718,7 +750,6 @@ export function InputSection({
         voiceSpeed,
 
         provider: settings.videoProvider,
-        kieMode: settings.kieMode,
         sceneContinuity: settings.sceneContinuity,
 
         // Tab link — YouTube: Gemini đọc qua file_uri
@@ -821,7 +852,11 @@ export function InputSection({
     setUploadedFile(null);
     if (tab !== 'image') {
       setImageMasterBrief('');
-      setUploadedImages((prev) => {
+      setMultiImages((prev) => {
+        prev.forEach((img) => revokeImagePreview(img.previewUrl));
+        return [];
+      });
+      setSingleImages((prev) => {
         prev.forEach((img) => revokeImagePreview(img.previewUrl));
         return [];
       });
@@ -830,17 +865,14 @@ export function InputSection({
     }
   };
 
-  /** Đổi chế độ multi/single — xoá ảnh đã tải (2 chế độ không dùng chung dữ liệu ảnh) */
+  /**
+   * Đổi chế độ multi/single — CHỈ đổi chế độ hiển thị, KHÔNG xoá ảnh/prompt của chế độ kia
+   * (mỗi chế độ giữ riêng danh sách ảnh — xem multiImages/singleImages). Bị khoá vĩnh viễn
+   * sau khi đã nhấn "Phân Tích & Tạo Kịch Bản" (imageModeLocked).
+   */
   const handleImageModeChange = (mode: 'multi' | 'single') => {
-    if (mode === imageMode) return;
+    if (mode === imageMode || imageModeLocked) return;
     setImageMode(mode);
-    setUploadedImages((prev) => {
-      prev.forEach((img) => {
-        revokeImagePreview(img.previewUrl);
-        if (img.path) deleteSourceUpload(img.path);
-      });
-      return [];
-    });
     setErrors((p) => ({ ...p, upload: undefined }));
   };
 
@@ -1251,38 +1283,46 @@ export function InputSection({
                 <div
                   role="tablist"
                   aria-label="Chế độ ảnh"
-                  className="grid grid-cols-2 gap-2"
+                  className={cn('grid gap-2', imageModeLocked ? 'grid-cols-1' : 'grid-cols-2')}
                 >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={imageMode === 'multi'}
-                    onClick={() => handleImageModeChange('multi')}
-                    className={cn(
-                      'px-3 py-2 rounded-lg border text-xs font-semibold text-left transition-colors',
-                      imageMode === 'multi'
-                        ? 'bg-primary/10 border-primary/50 text-primary ring-1 ring-primary/25'
-                        : 'bg-card border-border text-muted-foreground hover:border-primary/30 hover:text-foreground',
-                    )}
-                  >
-                    Nhiều ảnh
-                    <span className="block text-[10px] font-normal opacity-80 mt-0.5">Mỗi ảnh 1 cảnh riêng</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={imageMode === 'single'}
-                    onClick={() => handleImageModeChange('single')}
-                    className={cn(
-                      'px-3 py-2 rounded-lg border text-xs font-semibold text-left transition-colors',
-                      imageMode === 'single'
-                        ? 'bg-primary/10 border-primary/50 text-primary ring-1 ring-primary/25'
-                        : 'bg-card border-border text-muted-foreground hover:border-primary/30 hover:text-foreground',
-                    )}
-                  >
-                    1 ảnh
-                    <span className="block text-[10px] font-normal opacity-80 mt-0.5">Prompt tổng cho cả video</span>
-                  </button>
+                  {(!imageModeLocked || imageMode === 'multi') && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={imageMode === 'multi'}
+                      disabled={imageModeLocked}
+                      onClick={() => handleImageModeChange('multi')}
+                      className={cn(
+                        'px-3 py-2 rounded-lg border text-xs font-semibold text-left transition-colors',
+                        imageMode === 'multi'
+                          ? 'bg-primary/10 border-primary/50 text-primary ring-1 ring-primary/25'
+                          : 'bg-card border-border text-muted-foreground hover:border-primary/30 hover:text-foreground',
+                        imageModeLocked && 'cursor-default',
+                      )}
+                    >
+                      Nhiều ảnh
+                      <span className="block text-[10px] font-normal opacity-80 mt-0.5">Mỗi ảnh 1 cảnh riêng</span>
+                    </button>
+                  )}
+                  {(!imageModeLocked || imageMode === 'single') && (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={imageMode === 'single'}
+                      disabled={imageModeLocked}
+                      onClick={() => handleImageModeChange('single')}
+                      className={cn(
+                        'px-3 py-2 rounded-lg border text-xs font-semibold text-left transition-colors',
+                        imageMode === 'single'
+                          ? 'bg-primary/10 border-primary/50 text-primary ring-1 ring-primary/25'
+                          : 'bg-card border-border text-muted-foreground hover:border-primary/30 hover:text-foreground',
+                        imageModeLocked && 'cursor-default',
+                      )}
+                    >
+                      1 ảnh
+                      <span className="block text-[10px] font-normal opacity-80 mt-0.5">Prompt tổng cho cả video</span>
+                    </button>
+                  )}
                 </div>
 
                 {imageMode === 'single' && (

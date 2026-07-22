@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ok, fail } from '../../utils/api-response';
-import { analyzeContent, describeCharacterSheet } from '../../services/gemini/gemini.service';
+import { analyzeContent, describeCharacterSheet, buildCharacterIdentityText } from '../../services/gemini/gemini.service';
 import type { AnalyzePipelineRequest } from '../../types/pipeline';
 
 interface DescribeCharacterSheetBody {
@@ -57,9 +57,14 @@ geminiRoute.post('/analyze', async (c) => {
     }
 
     const script = await analyzeContent(body);
+    // Mọi tab (không riêng link) — nếu có nhân vật (Mục 1) mà chưa có masterCharacterText
+    // (tab link sẽ tự override bằng masterCastPrompt sau bước xác nhận MasterCastPanel),
+    // tự build khối nhận diện nhân vật để chèn vào mọi cảnh, giữ nhất quán ngoại hình.
+    const masterCharacterText = body.veoInput.masterCharacterText?.trim()
+      || buildCharacterIdentityText(body.geminiInput.characters ?? body.veoInput.characters);
     return ok(c, {
       script,
-      veoInput: body.veoInput,
+      veoInput: { ...body.veoInput, masterCharacterText },
       ttsInput: body.ttsInput,
     });
   } catch (err) {

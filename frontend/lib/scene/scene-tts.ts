@@ -102,7 +102,7 @@ export async function regenerateSceneAssets(
 
   try {
     const videoUrl = await createSceneVideo(
-      { ...next, veoOperationName: undefined, kieTaskId: undefined },
+      { ...next, veoOperationName: undefined },
       veoInput,
       {
         forceNew: true,
@@ -117,7 +117,6 @@ export async function regenerateSceneAssets(
       videoUrl,
       // Thành công — xoá operationId; cảnh sau nối tiếp bằng khung hình cuối của videoUrl này.
       veoOperationName: undefined,
-      kieTaskId: undefined,
       videoPath: undefined,
       status: 'success',
     };
@@ -128,7 +127,6 @@ export async function regenerateSceneAssets(
       ...next,
       videoUrl: undefined,
       veoOperationName: undefined,
-      kieTaskId: undefined,
       status: 'error',
       errorMessage: toUserMessage(err, 'Tạo lại cảnh thất bại — thử lại.'),
     };

@@ -448,9 +448,7 @@ export function SceneGallery({
             onScenesChange((prev) =>
               prev.map((s) =>
                 s.id === id
-                  ? veoInput.provider === 'kie'
-                    ? { ...s, kieTaskId: operationId, status: 'generating' as const }
-                    : { ...s, veoOperationName: operationId, status: 'generating' as const }
+                  ? { ...s, veoOperationName: operationId, status: 'generating' as const }
                   : s,
               ),
             );

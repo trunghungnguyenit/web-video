@@ -96,6 +96,30 @@ function formatCharacters(characters: PipelineCharacter[] | undefined): string {
     .join('\n\n');
 }
 
+/**
+ * Khối "nhận diện nhân vật" chèn vào CUỐI prompt MỌI cảnh (veoInput.masterCharacterText,
+ * xem buildScenePrompt ở frontend) — trước đây field này chỉ được set cho tab link (Gemini
+ * Vision phân tích ảnh Master Cast), khiến các tab khác (đặc biệt tab "Tự nhập nội dung",
+ * nơi Mục 1 "Nhân vật chính" hiển thị) hoàn toàn không có cơ chế củng cố nhất quán ngoại
+ * hình per-scene nào — chỉ dựa vào Gemini "nhớ" đúng khi viết JSON kịch bản.
+ *
+ * Gộp CẢ role/mô tả chi tiết (2 field KHÔNG được lặp lại ở resolveCharacterLine mỗi cảnh vì
+ * quá dài/mang tính tường thuật — xem story-continuity.ts) — chỉ cần xuất hiện 1 lần ở đây.
+ */
+export function buildCharacterIdentityText(characters: PipelineCharacter[] | undefined): string | undefined {
+  const list = characters?.filter((c) => c.name?.trim()) ?? [];
+  if (list.length === 0) return undefined;
+
+  return list
+    .map((c) => {
+      const parts = [c.role, c.traits, c.outfit, c.style, c.description]
+        .map((v) => v?.trim())
+        .filter(Boolean);
+      return parts.length > 0 ? `${c.name.trim()}: ${parts.join(', ')}` : c.name.trim();
+    })
+    .join('\n');
+}
+
 function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest): string {
   // "auto" — không ép số cảnh cố định, để Gemini tự quyết định dựa trên độ dài THẬT của
   // video/nội dung gốc (hữu ích nhất với tab link: video 20s không nên bị ép thành 15 cảnh,
@@ -135,23 +159,19 @@ function buildPrompt({ geminiInput, veoInput, ttsInput }: AnalyzePipelineRequest
     geminiInput.documentFileBase64?.trim()
     && (geminiInput.documentFileMimeType === 'application/pdf' || geminiInput.documentFileName?.toLowerCase().endsWith('.pdf')),
   );
-  const isKieProvider = veoInput.provider === 'kie';
   // Tab "Từ hình ảnh" — chế độ "Nhiều ảnh": mỗi ảnh = 1 cảnh/1 look ĐỘC LẬP (lookbook),
   // KHÔNG phải phim liên tục — quy tắc "giữ nguyên trang phục" của continuity thường SAI ở
   // đây (trang phục phải đổi theo từng ảnh nguồn). Dùng buildLookbookRules() thay thế.
   const isMultiImageMode = geminiInput.inputType === 'image' && geminiInput.imageMode === 'multi';
 
-  const durationRule = isKieProvider
-    ? 'Mỗi cảnh durationSeconds trong khoảng 6–30 (Grok Imagine). Chế độ tự động: chọn số giây phù hợp độ dài voiceover.'
-    : veoInput.sceneDuration === 'auto'
-      ? 'Mỗi cảnh durationSeconds chỉ được 4, 6 hoặc 8 (Veo 3). Chế độ tự động: chọn 4/6/8 phù hợp độ dài voiceover.'
-      : `Mỗi cảnh durationSeconds = ${veoInput.sceneDuration} (cố định — Veo 3 chỉ hỗ trợ 4, 6 hoặc 8 giây).`;
+  // Cả 2 nhà cung cấp đều chạy Veo 3.1 → chung ràng buộc 4/6/8 giây mỗi cảnh
+  const durationRule = veoInput.sceneDuration === 'auto'
+    ? 'Mỗi cảnh durationSeconds chỉ được 4, 6 hoặc 8 (Veo 3). Chế độ tự động: chọn 4/6/8 phù hợp độ dài voiceover.'
+    : `Mỗi cảnh durationSeconds = ${veoInput.sceneDuration} (cố định — Veo 3 chỉ hỗ trợ 4, 6 hoặc 8 giây).`;
 
-  const veoDurationNote = isKieProvider
-    ? '\n- Lưu ý Grok Imagine: thời lượng video mỗi cảnh 6–30 giây.'
-    : veoInput.videoQuality === '1080p'
-      ? '\n- Lưu ý Veo: 1080p bắt buộc mỗi cảnh 8 giây.'
-      : '\n- Lưu ý Veo: thời lượng video mỗi cảnh chỉ 4, 6 hoặc 8 giây.';
+  const veoDurationNote = veoInput.videoQuality === '1080p'
+    ? '\n- Lưu ý Veo: 1080p bắt buộc mỗi cảnh 8 giây.'
+    : '\n- Lưu ý Veo: thời lượng video mỗi cảnh chỉ 4, 6 hoặc 8 giây.';
 
   const videoRules = hasVideoPart
     ? `

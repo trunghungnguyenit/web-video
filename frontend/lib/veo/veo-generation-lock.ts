@@ -1,8 +1,8 @@
 // ─── Khóa chống gọi Veo trùng cho cùng một cảnh / operation ─────────────────
 
-// Promise<unknown> vì Veo và Kie trả về shape khác nhau cho cùng 1 sceneId
-// (generateSceneVideoAsset trả {videoUrl, veoOperationName?}, generateSceneVideoAssetKie
-// trả {videoUrl, kieTaskId?}) — ép kiểu Promise<string> trước đây là sai, chỉ tình cờ chạy được.
+// Promise<unknown> vì hàm tạo cảnh trả object chứ không phải string
+// (generateSceneVideoAsset trả {videoUrl, veoOperationName?}) — ép kiểu Promise<string>
+// trước đây là sai, chỉ tình cờ chạy được.
 const sceneLocks = new Map<string, Promise<unknown>>();
 const operationLocks = new Map<string, Promise<string>>();
 

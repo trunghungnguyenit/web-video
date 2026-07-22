@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import {
-  User, Upload, CheckCircle2, Plus, Trash2, Users,
+  User, Upload, CheckCircle2, Plus, Trash2, Users, AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
@@ -18,6 +18,11 @@ import {
 import { presetCharactersToSaved } from '@/lib/preset/preset-demo-builder';
 
 const MAX_AVATAR_MB = 5;
+/** Giới hạn Veo/Kie API: tối đa 3 ảnh tham chiếu (REFERENCE_2_VIDEO) mỗi lần gọi — xem
+ * collectReferenceImages() ở backend/src/services/veo/veo.service.ts. Nhân vật dư ảnh (tính
+ * theo THỨ TỰ trong danh sách) vẫn được đưa vào kịch bản bình thường, chỉ không có ảnh mồi
+ * giữ ngoại hình cho Veo — vẫn có mô tả text (tên/vai trò/đặc điểm/trang phục) giữ nhất quán. */
+const MAX_REFERENCE_IMAGES = 3;
 
 type CharacterFormField = 'name' | 'role' | 'traits' | 'outfit' | 'description';
 
@@ -197,6 +202,8 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
     const avatarPreview = activeCharacter.avatarDataUrl ?? null;
     const isSavedFlash = savedFlashId === activeId;
     const canAddMore = characters.length < MAX_CHARACTERS;
+    const charactersWithImage = characters.filter((c) => c.avatarDataUrl).length;
+    const extraImageCount = charactersWithImage - MAX_REFERENCE_IMAGES;
 
     return (
       <section className={cn(
@@ -225,6 +232,15 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
           <p className="text-sm text-muted-foreground mt-1.5">
             Thiết lập một hoặc nhiều nhân vật — tất cả sẽ xuất hiện đồng nhất trong các cảnh video.
           </p>
+          {extraImageCount > 0 && (
+            <p className="flex items-start gap-1.5 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1.5 mt-2">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <span>
+                Chỉ {MAX_REFERENCE_IMAGES} ảnh nhân vật đầu tiên được dùng làm ảnh tham chiếu cho Veo —{' '}
+                {extraImageCount} nhân vật còn lại vẫn giữ mô tả (tên/vai trò/đặc điểm/trang phục) nhưng không có ảnh mồi.
+              </span>
+            </p>
+          )}
         </div>
 
         {/* Character strip */}

@@ -15,6 +15,7 @@ import {
   type VideoLibraryStatusFilter,
   type VideoLibraryItem,
 } from '@/lib/video-library/video-library';
+import type { VideoProvider } from '@/contexts/project-settings-context';
 
 const STATUS_LABELS: Record<VideoLibraryStatus, string> = {
   draft: 'Nháp',
@@ -25,11 +26,11 @@ const STATUS_LABELS: Record<VideoLibraryStatus, string> = {
 };
 
 /** Badge nhà cung cấp — tách riêng khỏi veoModelLabel để nhìn rõ khi chạy nhiều luồng song song */
-function ProviderBadge({ provider }: { provider: 'veo' | 'kie' }) {
-  if (provider === 'kie') {
+function ProviderBadge({ provider }: { provider: VideoProvider }) {
+  if (provider === 'veo-gemini') {
     return (
-      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/25">
-        Grok Imagine
+      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+        Veo3.1 Gemini
       </span>
     );
   }

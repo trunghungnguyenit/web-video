@@ -8,6 +8,34 @@ export const VEO_QUALITY_LABELS: Record<string, string> = {
 
 const VEO_GENERATE_MODELS = new Set(['veo3', 'veo3_fast', 'veo3_lite']);
 
+// ─── Nhà cung cấp "Veo3.1 Gemini" (gọi thẳng Google) ─────────────────────────
+// Model id của Google khác hoàn toàn kie.ai (veo3/veo3_fast/veo3_lite). Người dùng đổi
+// qua lại giữa 2 nhà cung cấp thì settings.veoModel còn giữ id của bên kia — nên map
+// tương đương thay vì báo lỗi, để không phải chọn lại model mỗi lần đổi nhà cung cấp.
+const VEO_GEMINI_MODELS = new Set([
+  'veo-3.1-generate-preview',
+  'veo-3.1-fast-generate-preview',
+  'veo-3.1-lite-generate-preview',
+]);
+
+const KIE_TO_GEMINI_MODEL: Record<string, string> = {
+  veo3: 'veo-3.1-generate-preview',
+  veo3_fast: 'veo-3.1-fast-generate-preview',
+  veo3_lite: 'veo-3.1-lite-generate-preview',
+};
+
+export function resolveVeoGeminiModel(veoModel?: string): string {
+  const picked = veoModel?.trim();
+  if (!picked) return 'veo-3.1-fast-generate-preview';
+  if (VEO_GEMINI_MODELS.has(picked)) return picked;
+  return KIE_TO_GEMINI_MODEL[picked] ?? 'veo-3.1-fast-generate-preview';
+}
+
+/** referenceImages (giữ nhân vật nhất quán) không khả dụng trên Veo 3.1 Lite */
+export function supportsGeminiReferenceMode(model: string): boolean {
+  return !model.includes('lite');
+}
+
 export function resolveVeoModel(veoModel?: string): string {
   const picked = veoModel?.trim();
   if (!picked) {

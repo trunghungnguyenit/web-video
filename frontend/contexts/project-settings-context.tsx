@@ -21,7 +21,44 @@ import {
 } from '@/lib/saved-scripts/saved-scripts';
 import { useDefaultVeoModel } from '@/hooks/use-veo-models';
 import { useVeoModels } from '@/contexts/veo-models-context';
-import { supportsVideoExtension } from '@/lib/veo/veo-models';
+import { supportsVideoExtension, VEO_GEMINI_MODEL_OPTIONS } from '@/lib/veo/veo-models';
+
+/**
+ * Nhà cung cấp sinh video:
+ * - 'veo'        Veo 3.1 qua kie.ai (dùng Video API Key của kie.ai)
+ * - 'veo-gemini' Veo 3.1 gọi THẲNG Google Gemini API (dùng key riêng "Gemini Key Veo 3.1")
+ *
+ * Nhà cung cấp 'kie' (Grok Imagine) đã bị GỠ khỏi dự án — xem normalizeVideoProvider()
+ * để biết cách xử lý video cũ còn lưu giá trị này.
+ */
+export type VideoProvider = 'veo' | 'veo-gemini';
+
+/**
+ * 2 nhà cung cấp cùng chạy trên Veo 3.1 — dùng chung ô chọn model, toggle "Tiếp nối cảnh
+ * trước", danh sách chất lượng và toàn bộ luồng tạo cảnh (chỉ khác endpoint + API key ở
+ * backend). Mọi chỗ trước đây kiểm tra `=== 'veo'` cho phần UI/logic Veo đều dùng hàm này.
+ */
+export function isVeoFamilyProvider(provider: VideoProvider | undefined): boolean {
+  return provider === 'veo' || provider === 'veo-gemini';
+}
+
+/**
+ * Video đã lưu TRƯỚC khi gỡ Grok Imagine có thể còn `videoProvider: 'kie'` (và quality
+ * '480p' vốn chỉ Grok hỗ trợ) trong settings JSON — chuẩn hoá về 'veo' lúc đọc để không
+ * rơi vào nhánh nhà cung cấp không còn tồn tại. Áp dụng ở mọi nơi nạp settings đã lưu.
+ */
+export function normalizeVideoProvider(provider: string | undefined): VideoProvider {
+  return provider === 'veo-gemini' ? 'veo-gemini' : 'veo';
+}
+
+/** Chuẩn hoá toàn bộ settings đã lưu — hiện chỉ cần vá nhà cung cấp + chất lượng của Grok cũ */
+export function normalizeVideoSettings(settings: VideoSettings): VideoSettings {
+  const videoProvider = normalizeVideoProvider(settings.videoProvider);
+  const videoQuality = settings.videoQuality === '480p' ? '720p' : settings.videoQuality;
+  return videoProvider === settings.videoProvider && videoQuality === settings.videoQuality
+    ? settings
+    : { ...settings, videoProvider, videoQuality };
+}
 
 export interface VideoSettings {
   language: string;
@@ -33,10 +70,8 @@ export interface VideoSettings {
   veoModel: string;
   voiceSpeed: number;
   sceneStyle: string;
-  /** Nhà cung cấp sinh video — 'veo' (Google Veo 3) hoặc 'kie' (Grok Imagine) */
-  videoProvider: 'veo' | 'kie';
-  /** Chế độ nội dung Grok Imagine — chỉ áp dụng khi videoProvider = 'kie' */
-  kieMode: 'fun' | 'normal' | 'spicy';
+  /** Nhà cung cấp sinh video — xem VideoProvider */
+  videoProvider: VideoProvider;
   /**
    * Scene Continuity — chỉ Veo 3.1 hỗ trợ. Khi bật, mỗi cảnh (trừ cảnh 1) nối tiếp bằng
    * KHUNG HÌNH CUỐI của cảnh liền trước làm khung đầu (/veo/generate FIRST_AND_LAST_FRAMES),
@@ -57,45 +92,23 @@ export const DEFAULT_VIDEO_SETTINGS: VideoSettings = {
   voiceSpeed: 1,
   sceneStyle: 'cinematic',
   videoProvider: 'veo',
-  kieMode: 'normal',
   sceneContinuity: false,
 };
 
 export const VIDEO_PROVIDER_OPTIONS: [string, string][] = [
   ['veo', 'Veo 3.1'],
+  ['veo-gemini', 'Veo3.1 Gemini'],
 ];
-
-export const KIE_MODE_OPTIONS: [string, string][] = [
-  ['normal', 'Normal'],
-  ['fun', 'Fun'],
-  ['spicy', 'Spicy ⚠️'],
-];
-
-/** Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p — không có 1080p */
-export const KIE_VIDEO_QUALITY_OPTIONS: [string, string][] = [
-  ['480p', '480p – Mặc định'],
-  ['720p', '720p – Cao hơn'],
-];
-
-/**
- * Clamp videoQuality theo provider — Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p:
- * sang 'kie' mà quality không hợp lệ → mặc định 480p; quay lại 'veo' mà đang 480p
- * (không hợp lệ với Veo) → về 720p. Dùng chung cho toolbar chính và modal tạo/sửa video.
- */
-export function resolveVideoQualityForProvider(quality: string, provider: 'veo' | 'kie'): string {
-  if (provider === 'kie') {
-    return quality === '480p' || quality === '720p' ? quality : '480p';
-  }
-  return quality === '480p' ? '720p' : quality;
-}
 
 interface ProjectSettingsContextValue {
   settings: VideoSettings;
   patchSettings: (patch: Partial<VideoSettings>) => void;
   applyFromPreset: (input: PresetInput) => void;
+  /** Danh sách model theo ĐÚNG nhà cung cấp đang chọn (kie.ai fetch từ API / Gemini cố định) */
   veoModels: ReturnType<typeof useVeoModels>['models'];
   veoModelsLoading: boolean;
   veoModelsError: string | null;
+  /** Đã có API key phù hợp với nhà cung cấp đang chọn (kie.ai hoặc Gemini) */
   hasVeoKey: boolean;
   sceneDurationOptions: [string, string][];
 }
@@ -116,9 +129,23 @@ export function ProjectSettingsProvider({
   onSettingsChange,
 }: ProjectSettingsProviderProps) {
   const [settings, setSettings] = useState<VideoSettings>(
-    initialSettings ?? DEFAULT_VIDEO_SETTINGS,
+    () => normalizeVideoSettings(initialSettings ?? DEFAULT_VIDEO_SETTINGS),
   );
-  const { models: veoModels, loading: veoModelsLoading, error: veoModelsError, hasKey: hasVeoKey } = useVeoModels();
+  const {
+    models: kieVeoModels,
+    loading: kieVeoModelsLoading,
+    error: kieVeoModelsError,
+    hasKey: hasKieVeoKey,
+    hasVeoGeminiKey,
+  } = useVeoModels();
+
+  // Nhà cung cấp 'veo-gemini' gọi thẳng Google: model là danh sách cố định (không fetch),
+  // và "đã có key" nghĩa là có "Gemini Key Veo 3.1" riêng chứ không phải key kie.ai.
+  const isGeminiVeo = settings.videoProvider === 'veo-gemini';
+  const veoModels = isGeminiVeo ? VEO_GEMINI_MODEL_OPTIONS : kieVeoModels;
+  const veoModelsLoading = isGeminiVeo ? false : kieVeoModelsLoading;
+  const veoModelsError = isGeminiVeo ? null : kieVeoModelsError;
+  const hasVeoKey = isGeminiVeo ? hasVeoGeminiKey : hasKieVeoKey;
   const onSettingsChangeRef = useRef(onSettingsChange);
   onSettingsChangeRef.current = onSettingsChange;
   /** Bỏ qua 1 lần sync sau khi load settings từ bulk parent (đổi project / initialSettings) */
@@ -126,7 +153,7 @@ export function ProjectSettingsProvider({
 
   useEffect(() => {
     skipSyncRef.current = true;
-    setSettings(initialSettings ?? DEFAULT_VIDEO_SETTINGS);
+    setSettings(normalizeVideoSettings(initialSettings ?? DEFAULT_VIDEO_SETTINGS));
     // Chỉ load lại khi đổi bulk — không khi parent echo settings vừa sync
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectKey]);
@@ -156,19 +183,11 @@ export function ProjectSettingsProvider({
     });
   }, [settings.videoQuality]);
 
-  // Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p — đổi provider thì clamp lại videoQuality
-  useEffect(() => {
-    setSettings((prev) => {
-      const next = resolveVideoQualityForProvider(prev.videoQuality, prev.videoProvider);
-      return next === prev.videoQuality ? prev : { ...prev, videoQuality: next };
-    });
-  }, [settings.videoProvider]);
-
   // Scene Continuity chỉ Veo 3.1/3.1 Fast hỗ trợ — đổi sang provider/model khác thì tự tắt
   useEffect(() => {
     setSettings((prev) => {
       if (!prev.sceneContinuity) return prev;
-      const supported = prev.videoProvider === 'veo' && supportsVideoExtension(prev.veoModel);
+      const supported = isVeoFamilyProvider(prev.videoProvider) && supportsVideoExtension(prev.veoModel);
       return supported ? prev : { ...prev, sceneContinuity: false };
     });
   }, [settings.videoProvider, settings.veoModel]);
@@ -188,7 +207,7 @@ export function ProjectSettingsProvider({
       veoModel: input.veoModel ?? '',
       voiceSpeed: input.voiceSpeed ?? prev.voiceSpeed,
       sceneStyle: input.sceneStyleId ?? prev.sceneStyle,
-      // Preset không mang provider/kieMode — giữ nguyên lựa chọn hiện tại của user
+      // Preset không mang nhà cung cấp — giữ nguyên lựa chọn hiện tại của user
     }));
   }, []);
 
