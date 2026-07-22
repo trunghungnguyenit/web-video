@@ -71,7 +71,6 @@ interface SceneRow {
   error_message: string | null;
   audio_duration_seconds: number | null;
   veo_operation_name: string | null;
-  kie_task_id: string | null;
   video_path: string | null;
   audio_path: string | null;
 }
@@ -192,7 +191,6 @@ function toSceneRow(userId: string, projectId: string, s: VideoScene): SceneRow 
     error_message: s.errorMessage ?? null,
     audio_duration_seconds: s.audioDurationSeconds ?? null,
     veo_operation_name: s.veoOperationName ?? null,
-    kie_task_id: s.kieTaskId ?? null,
     video_path: s.videoPath ?? null,
     audio_path: s.audioPath ?? null,
   };
@@ -214,7 +212,6 @@ function fromSceneRow(row: SceneRow): VideoScene {
     audioUrl: undefined,
     audioDurationSeconds: row.audio_duration_seconds ?? undefined,
     veoOperationName: row.veo_operation_name ?? undefined,
-    kieTaskId: row.kie_task_id ?? undefined,
     videoPath: row.video_path ?? undefined,
     audioPath: row.audio_path ?? undefined,
   };

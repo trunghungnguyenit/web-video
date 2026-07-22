@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { API_KEYS_CHANGED_EVENT } from '@/lib/api-keys/api-keys-store';
+import { API_KEY_IDS, API_KEYS_CHANGED_EVENT, getApiKey } from '@/lib/api-keys/api-keys-store';
 import { getVeoApiKey, type VeoModelOption } from '@/lib/veo/veo-models';
 import { fetchVeoModelsCached, invalidateVeoModelsCache } from '@/lib/veo/veo-models-cache';
 import { toUserMessage } from '@/lib/error-messages';
@@ -18,7 +18,10 @@ interface VeoModelsContextValue {
   models: VeoModelOption[];
   loading: boolean;
   error: string | null;
+  /** Đã có Video API Key của kie.ai (nhà cung cấp 'veo') */
   hasKey: boolean;
+  /** Đã có "Gemini Key Veo 3.1" — key riêng của nhà cung cấp 'veo-gemini' */
+  hasVeoGeminiKey: boolean;
   refetch: () => Promise<void>;
 }
 
@@ -30,8 +33,13 @@ export function VeoModelsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasKey, setHasKey] = useState(false);
+  const [hasVeoGeminiKey, setHasVeoGeminiKey] = useState(false);
 
   const fetchModels = useCallback(async (force = false) => {
+    // "Gemini Key Veo 3.1" không cần fetch model (danh sách Veo Gemini cố định ở frontend)
+    // — chỉ theo dõi có/không để UI biết hiện ô chọn model cho nhà cung cấp 'veo-gemini'.
+    setHasVeoGeminiKey(Boolean(getApiKey(API_KEY_IDS.veoGemini).trim()));
+
     const apiKey = getVeoApiKey();
     if (!apiKey) {
       invalidateVeoModelsCache();
@@ -77,9 +85,10 @@ export function VeoModelsProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       hasKey,
+      hasVeoGeminiKey,
       refetch: () => fetchModels(true),
     }),
-    [models, loading, error, hasKey, fetchModels],
+    [models, loading, error, hasKey, hasVeoGeminiKey, fetchModels],
   );
 
   return (

@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
 import { SecretField } from '@/components/ui/secret-field';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
-import { setApiKey } from '@/lib/api-keys/api-keys-store';
+import { API_KEY_IDS, setApiKey } from '@/lib/api-keys/api-keys-store';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { fetchRemoteApiKeys, saveRemoteApiKey } from '@/lib/api-keys/api-keys-remote';
@@ -17,7 +17,7 @@ type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
 interface ApiKeyEntry {
   id: string;
   name: string;
-  service: 'gemini' | 'tts' | 'kie';
+  service: 'gemini' | 'tts' | 'kie' | 'veo-gemini';
   placeholder: string;
   value: string;
   status: KeyStatus;
@@ -28,7 +28,7 @@ interface ApiKeyEntry {
 /**
  * Theo luồng xử lý:
  * Gemini   → tạo kịch bản (script generation)
- * Video    → tạo video từng cảnh (Veo 3.1 lẫn Grok Imagine — dùng chung 1 key)
+ * Video    → tạo video từng cảnh (Veo 3.1 qua kie.ai)
  * TTS      → tạo giọng đọc (ElevenLabs)
  *
  * Backend nhận toàn bộ settings rồi phân phối key cho AI phù hợp.
@@ -36,16 +36,16 @@ interface ApiKeyEntry {
  */
 const INITIAL_KEYS: ApiKeyEntry[] = [
   {
-    id: 'gemini',
+    id: API_KEY_IDS.gemini,
     name: 'Gemini API Key',
     service: 'gemini',
     placeholder: 'AIza...',
     value: '',
     status: 'disconnected',
-    description: 'Tạo kịch bản, phân cảnh và lời thoại (ngôn ngữ, phong cách, thời lượng)',
+    description: 'Tạo kịch bản, phân cảnh và lời thoại (ngôn ngữ, phong cách, thời lượng) — KHÔNG dùng để tạo video',
   },
   {
-    id: 'elevenlabs',
+    id: API_KEY_IDS.elevenlabs,
     name: 'ElevenLabs API Key',
     service: 'tts',
     placeholder: 'sk_...',
@@ -54,20 +54,33 @@ const INITIAL_KEYS: ApiKeyEntry[] = [
     description: 'Tạo giọng đọc từ voiceover — key cần bật quyền Text to Speech trên elevenlabs.io',
   },
   {
-    id: 'kie',
+    id: API_KEY_IDS.kie,
     name: 'Video API Key',
     service: 'kie',
     placeholder: 'Nhập Bearer token API tạo video',
     value: '',
     status: 'disconnected',
-    description: 'Tạo video cảnh — dùng chung cho cả Veo 3.1 và Grok Imagine, chọn nhà cung cấp trong cài đặt',
+    description: 'Tạo video cảnh qua kie.ai — dùng cho nhà cung cấp "Veo 3.1"',
+  },
+  {
+    id: API_KEY_IDS.veoGemini,
+    name: 'Gemini Key Veo 3.1',
+    service: 'veo-gemini',
+    placeholder: 'AIza...',
+    value: '',
+    status: 'disconnected',
+    description: 'Tạo video cảnh khi chọn nhà cung cấp "Veo3.1 Gemini" (gọi thẳng Google) — key riêng, không dùng chung với Gemini API Key',
   },
 ];
 
+/** 2 key tạo video là LỰA CHỌN THAY THẾ nhau — chỉ cần 1 trong 2 là đủ chạy pipeline */
+const VIDEO_KEY_IDS: string[] = [API_KEY_IDS.kie, API_KEY_IDS.veoGemini];
+
 const SERVICE_BADGE: Record<ApiKeyEntry['service'], { label: string; color: string }> = {
-  gemini: { label: 'Gemini', color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
-  tts:    { label: 'TTS',    color: 'text-teal-400 bg-teal-500/10 border-teal-500/30' },
-  kie:    { label: 'Video',  color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+  gemini:       { label: 'Gemini',   color: 'text-blue-400 bg-blue-500/10 border-blue-500/30' },
+  tts:          { label: 'TTS',      color: 'text-teal-400 bg-teal-500/10 border-teal-500/30' },
+  kie:          { label: 'Video',    color: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+  'veo-gemini': { label: 'Veo 3.1',  color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
 };
 
 async function verifyKey(_id: string, value: string): Promise<{ ok: boolean; msg?: string }> {
@@ -187,7 +200,13 @@ export function ApiKeysManagement() {
 
   const connectedCount = keys.filter((k) => k.status === 'connected').length;
   const totalCount = keys.length;
-  const allConnected = connectedCount === totalCount;
+  // "Sẵn sàng tạo video" = đủ key kịch bản + giọng đọc + ÍT NHẤT 1 trong 2 key tạo video
+  // (kie.ai hoặc Veo3.1 Gemini) — không bắt user phải mua/nhập cả 2 nhà cung cấp.
+  const allConnected =
+    keys
+      .filter((k) => !VIDEO_KEY_IDS.includes(k.id))
+      .every((k) => k.status === 'connected')
+    && keys.some((k) => VIDEO_KEY_IDS.includes(k.id) && k.status === 'connected');
 
   if (authLoading) {
     return (

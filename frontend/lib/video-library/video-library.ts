@@ -33,6 +33,12 @@ export interface SourceImageItem {
   voiceHint?: string;
   /** Signed URL — tạo lại mỗi lần load (resolveSourceUploadSignedUrls), KHÔNG lưu DB */
   previewUrl?: string;
+  /**
+   * Chế độ ảnh này thuộc về ('multi' | 'single') — giữ riêng dữ liệu ảnh của 2 chế độ khi
+   * người dùng đổi qua lại mà không mất ảnh/prompt. Ảnh cũ lưu trước khi có field này không
+   * có `mode` — coi như thuộc `imageMode` đã lưu lúc đó (xem input-section.tsx).
+   */
+  mode?: 'multi' | 'single';
 }
 
 /** Kết quả generate cảnh đang "tạo lại" — giữ tách biệt tới khi thành công mới ghi đè field sống */
@@ -161,12 +167,14 @@ export function formatVideoItemCardDate(iso: string): string {
 /** Nhãn hiển thị model/nhà cung cấp video trên card (từ veoInput hoặc settings) */
 export function resolveVeoModelLabel(veoInput: VeoInput | null, settings: VideoSettings): string {
   const provider = veoInput?.provider ?? settings.videoProvider ?? 'veo';
-  if (provider === 'kie') {
-    const mode = veoInput?.kieMode ?? settings.kieMode ?? 'normal';
-    return `Grok Imagine · ${mode}`;
+  const model = veoInput?.veoModel?.trim() || settings.veoModel?.trim();
+
+  if (provider === 'veo-gemini') {
+    // Model id Google dài dòng (veo-3.1-fast-generate-preview) — rút gọn phần biến thể
+    const variant = model?.replace(/^veo-3\.1-?/, '').replace(/-?generate-preview$/, '').trim();
+    return variant ? `Veo3.1 Gemini · ${variant}` : 'Veo3.1 Gemini';
   }
 
-  const model = veoInput?.veoModel?.trim() || settings.veoModel?.trim();
   if (model) {
     const short = model.split('/').pop() ?? model;
     return short.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());

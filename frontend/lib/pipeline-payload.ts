@@ -68,10 +68,12 @@ export interface VeoInput {
    * cho ảnh tham chiếu (KHÔNG lưu vào scene.prompt, chỉ ghép lúc gửi request).
    */
   masterCharacterText?: string;
-  /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
-  provider?: 'veo' | 'kie';
-  /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
-  kieMode?: 'fun' | 'normal' | 'spicy';
+  /**
+   * Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền.
+   * - 'veo'        Veo 3.1 qua kie.ai (Video API Key kie.ai)
+   * - 'veo-gemini' Veo 3.1 gọi THẲNG Google Gemini API (key riêng "Gemini Key Veo 3.1")
+   */
+  provider?: 'veo' | 'veo-gemini';
   /**
    * Scene Continuity — chỉ Veo 3.1. Khi bật, cảnh sau (không phải cảnh 1) dùng KHUNG HÌNH
    * CUỐI của cảnh liền trước làm khung đầu (/veo/generate FIRST_AND_LAST_FRAMES_2_VIDEO),
@@ -151,8 +153,7 @@ export interface BuildPipelineParams {
   inputType: 'text' | 'link' | 'image' | 'file';
   imageMode?: 'multi' | 'single';
   characters: PipelineCharacter[];
-  provider?: 'veo' | 'kie';
-  kieMode?: 'fun' | 'normal' | 'spicy';
+  provider?: VeoInput['provider'];
   sceneContinuity?: boolean;
   sourceVideoUrl?: string;
   videoFileBase64?: string;
@@ -189,16 +190,12 @@ export function buildAnalyzePipeline(params: BuildPipelineParams): AnalyzePipeli
       aspectRatio: params.aspectRatio,
       sceneDuration: params.sceneDuration,
       videoQuality: params.videoQuality,
-      // veoModel chỉ có ý nghĩa khi provider = 'veo' — bỏ qua khi dùng Grok Imagine
-      // để tránh model Veo cũ còn sót trong settings gây hiểu lầm khi đọc log/debug.
-      veoModel: params.provider === 'kie' ? undefined : (params.veoModel || undefined),
+      veoModel: params.veoModel || undefined,
       sceneStyle: params.sceneStyleLabel,
       sceneStyleId: params.sceneStyleId,
       characters,
       provider: params.provider,
-      kieMode: params.kieMode,
-      // Chỉ có ý nghĩa với Veo 3.1 — ignore khi dùng Grok Imagine (kie.ai không hỗ trợ)
-      sceneContinuity: params.provider === 'kie' ? undefined : params.sceneContinuity,
+      sceneContinuity: params.sceneContinuity,
     },
     ttsInput: {
       apiKey: params.ttsApiKey || undefined,

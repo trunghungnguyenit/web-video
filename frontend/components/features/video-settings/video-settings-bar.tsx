@@ -6,13 +6,13 @@ import { SelectVeo } from '@/components/ui/veomodel';
 import { supportsVideoExtension } from '@/lib/veo/veo-models';
 import {
   ASPECT_RATIO_OPTIONS,
-  KIE_MODE_OPTIONS,
-  KIE_VIDEO_QUALITY_OPTIONS,
+  isVeoFamilyProvider,
   LANGUAGE_OPTIONS,
   SCENE_COUNT_OPTIONS,
   useProjectSettings,
   VIDEO_PROVIDER_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
+  type VideoProvider,
 } from '@/contexts/project-settings-context';
 
 interface VideoSettingsBarProps {
@@ -64,7 +64,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
           <select
             id="header-video-provider"
             value={settings.videoProvider}
-            onChange={(e) => patchSettings({ videoProvider: e.target.value as 'veo' | 'kie' })}
+            onChange={(e) => patchSettings({ videoProvider: e.target.value as VideoProvider })}
             className={selectClass}
           >
             {VIDEO_PROVIDER_OPTIONS.map(([v, l]) => (
@@ -73,7 +73,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
           </select>
         </Field>
 
-        {settings.videoProvider === 'veo' && hasVeoKey && (
+        {isVeoFamilyProvider(settings.videoProvider) && hasVeoKey && (
           <Field label="Model Veo" htmlFor="header-veo-model" className="min-w-36">
             <SelectVeo
               id="header-veo-model"
@@ -87,7 +87,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
           </Field>
         )}
 
-        {settings.videoProvider === 'veo' && hasVeoKey && supportsVideoExtension(settings.veoModel) && (
+        {isVeoFamilyProvider(settings.videoProvider) && hasVeoKey && supportsVideoExtension(settings.veoModel) && (
           <Field label="Tiếp nối cảnh trước" className="min-w-[9rem]">
             <button
               type="button"
@@ -117,22 +117,6 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
               </span>
               {settings.sceneContinuity ? 'Bật' : 'Tắt'}
             </button>
-          </Field>
-        )}
-
-        {settings.videoProvider === 'kie' && (
-          <Field label="Chế độ" htmlFor="header-kie-mode" className="min-w-32">
-            <select
-              id="header-kie-mode"
-              value={settings.kieMode}
-              onChange={(e) => patchSettings({ kieMode: e.target.value as 'fun' | 'normal' | 'spicy' })}
-              className={selectClass}
-              title={settings.kieMode === 'spicy' ? 'Spicy có thể tạo nội dung nhạy cảm/gợi dục.' : undefined}
-            >
-              {KIE_MODE_OPTIONS.map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
-              ))}
-            </select>
           </Field>
         )}
 
@@ -197,7 +181,7 @@ export function VideoSettingsBar({ className }: VideoSettingsBarProps) {
             onChange={(e) => patchSettings({ videoQuality: e.target.value })}
             className={selectClass}
           >
-            {(settings.videoProvider === 'kie' ? KIE_VIDEO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS).map(([v, l]) => (
+            {VIDEO_QUALITY_OPTIONS.map(([v, l]) => (
               <option key={v} value={v}>{l}</option>
             ))}
           </select>

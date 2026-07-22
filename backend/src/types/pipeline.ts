@@ -44,7 +44,7 @@ export interface GeminiInput {
   documentFileName?: string;
 }
 
-/** Bước 2 — sinh video từ scene.visual — Veo 3 (mặc định) hoặc Grok Imagine (kie.ai) */
+/** Bước 2 — sinh video từ scene.visual — Veo 3.1 qua kie.ai (mặc định) hoặc gọi thẳng Google */
 export interface VeoInput {
   apiKey?: string;
   aspectRatio: string;
@@ -61,10 +61,20 @@ export interface VeoInput {
    * Gửi kèm mọi cảnh — Veo: instance.image; Kie: image-to-video.
    */
   referenceImage?: { base64: string; mimeType: string };
-  /** Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền */
-  provider?: 'veo' | 'kie';
-  /** Chế độ nội dung Grok Imagine (chỉ áp dụng khi provider = 'kie') */
-  kieMode?: 'fun' | 'normal' | 'spicy';
+  /**
+   * Mô tả nhận diện nhân vật (tên + role/đặc điểm/trang phục/phong cách/mô tả chi tiết) —
+   * chèn vào CUỐI prompt mọi cảnh lúc gửi Veo/Kie (frontend buildScenePrompt) để củng cố
+   * nhất quán ngoại hình xuyên suốt, kể cả những cảnh không gửi kèm ảnh tham chiếu (vd Scene
+   * Continuity chiếm slot ảnh từ cảnh 2 trở đi). Route /gemini/analyze tự tính từ
+   * geminiInput.characters nếu chưa có sẵn (tab link override bằng masterCastPrompt sau đó).
+   */
+  masterCharacterText?: string;
+  /**
+   * Nhà cung cấp sinh video — mặc định 'veo' nếu không truyền.
+   * - 'veo'        Veo 3.1 qua kie.ai (dùng Video API Key của kie.ai)
+   * - 'veo-gemini' Veo 3.1 gọi THẲNG Google Gemini API (key riêng "Gemini Key Veo 3.1")
+   */
+  provider?: 'veo' | 'veo-gemini';
 }
 
 /** Bước 3 — ElevenLabs TTS: tạo audio từ scene.voiceover */

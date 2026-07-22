@@ -35,7 +35,7 @@ export function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
     // rồi tự resume/gọi API ngầm. User phải chủ động bấm "Tạo lại" mới thử lại.
     if (status === 'error') {
       // giữ nguyên
-    } else if ((s.veoOperationName?.trim() || s.kieTaskId?.trim()) && !s.videoUrl) {
+    } else if (s.veoOperationName?.trim() && !s.videoUrl) {
       status = 'generating';
     } else if (status === 'generating') {
       status = s.videoUrl ? 'success' : 'error';
@@ -45,7 +45,7 @@ export function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
 
   let status = item.status;
   if (status === 'analyzing') status = 'draft';
-  if (status === 'generating' && !scenes.some((s) => s.veoOperationName || s.kieTaskId)) {
+  if (status === 'generating' && !scenes.some((s) => s.veoOperationName)) {
     const done = scenes.filter((s) => s.status === 'success').length;
     status = done === scenes.length && scenes.length > 0 ? 'completed' : 'error';
   }

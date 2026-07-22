@@ -38,6 +38,3 @@ function createConcurrencyGate(maxConcurrent: number) {
 
 /** Giới hạn 1 request "bắt đầu tạo" Veo đồng thời — tránh 429 high demand */
 export const withVeoConcurrency = createConcurrencyGate(1);
-
-/** Giới hạn 1 request "bắt đầu tạo" Kie.ai (Grok Imagine) đồng thời — tránh rate limit riêng của kie.ai */
-export const withKieConcurrency = createConcurrencyGate(1);

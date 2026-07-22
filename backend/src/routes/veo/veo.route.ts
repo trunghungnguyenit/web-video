@@ -5,9 +5,24 @@ import {
   pollVideoOperation,
   startVideoGeneration,
 } from '../../services/veo/veo.service';
+import {
+  downloadVideo as downloadGeminiVideo,
+  pollVideoOperation as pollGeminiVideoOperation,
+  startVideoGeneration as startGeminiVideoGeneration,
+} from '../../services/veo/veo-gemini.service';
 import { listVeoModels } from '../../services/veo/veo-models.service';
 import { VeoApiError } from '../../lib/veo-errors';
 import type { VeoInput } from '../../types/pipeline';
+
+/**
+ * 'veo-gemini' = gọi thẳng Google Gemini API (veo-gemini.service.ts) thay vì kie.ai.
+ * poll/download không nhận veoInput nên frontend gửi kèm `provider` riêng ở body.
+ */
+type VideoProvider = VeoInput['provider'];
+
+function isGeminiProvider(provider: VideoProvider): boolean {
+  return provider === 'veo-gemini';
+}
 
 interface StartBody {
   apiKey: string;
@@ -21,13 +36,15 @@ interface StartBody {
 interface PollBody {
   apiKey: string;
   operationName: string;
-  /** '1080p' → sau khi task xong, backend tự gọi thêm get-1080p-video */
+  /** '1080p' → sau khi task xong, backend tự gọi thêm get-1080p-video (chỉ kie.ai) */
   quality?: string;
+  provider?: VideoProvider;
 }
 
 interface DownloadBody {
   apiKey: string;
   videoUri: string;
+  provider?: VideoProvider;
 }
 
 interface ModelsBody {
@@ -81,7 +98,11 @@ veoRoute.post('/generate/start', async (c) => {
       return fail(c, 'Thiếu veoInput.', 400);
     }
 
-    const operationName = await startVideoGeneration({
+    const start = isGeminiProvider(body.veoInput.provider)
+      ? startGeminiVideoGeneration
+      : startVideoGeneration;
+
+    const operationName = await start({
       apiKey: body.apiKey,
       prompt: body.prompt,
       veoInput: body.veoInput,
@@ -110,7 +131,11 @@ veoRoute.post('/operations/poll', async (c) => {
       return fail(c, 'Thiếu operationName.', 400);
     }
 
-    const result = await pollVideoOperation(body.apiKey, body.operationName, body.quality);
+    // Google trực tiếp: resolution nằm ngay trong request generate, không có bước nâng
+    // cấp 1080p riêng như kie.ai → không truyền `quality` vào poll.
+    const result = isGeminiProvider(body.provider)
+      ? await pollGeminiVideoOperation(body.apiKey, body.operationName)
+      : await pollVideoOperation(body.apiKey, body.operationName, body.quality);
     return ok(c, result);
   } catch (err) {
     return veoErrorResponse(c, err);
@@ -132,7 +157,9 @@ veoRoute.post('/generate/download', async (c) => {
       return fail(c, 'Thiếu videoUri.', 400);
     }
 
-    const video = await downloadVideo(body.apiKey, body.videoUri);
+    const video = isGeminiProvider(body.provider)
+      ? await downloadGeminiVideo(body.apiKey, body.videoUri)
+      : await downloadVideo(body.apiKey, body.videoUri);
 
     return new Response(new Uint8Array(video), {
       status: 200,

@@ -10,13 +10,13 @@ import { VoiceSelect } from '@/components/features/voice-select/voice-select';
 import {
   ASPECT_RATIO_OPTIONS,
   DEFAULT_VIDEO_SETTINGS,
-  KIE_MODE_OPTIONS,
-  KIE_VIDEO_QUALITY_OPTIONS,
+  isVeoFamilyProvider,
   LANGUAGE_OPTIONS,
-  resolveVideoQualityForProvider,
+  normalizeVideoSettings,
   SCENE_COUNT_OPTIONS,
   VIDEO_PROVIDER_OPTIONS,
   VIDEO_QUALITY_OPTIONS,
+  type VideoProvider,
   type VideoSettings,
 } from '@/contexts/project-settings-context';
 import { getSceneDurationOptions, normalizeSceneDurationSetting } from '@/lib/saved-scripts/saved-scripts';
@@ -30,6 +30,7 @@ import {
   type VideoLibraryItem,
 } from '@/lib/video-library/video-library';
 import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { getVideoApiKeyForProvider, VEO_GEMINI_MODEL_OPTIONS } from '@/lib/veo/veo-models';
 import { buildAnalyzePipeline, toPipelineCharacters } from '@/lib/pipeline-payload';
 import { resolveSceneStyleLabel } from '@/lib/scene/scene-styles';
 
@@ -68,7 +69,18 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
   const [errors, setErrors] = useState<{ title?: string; content?: string; contentInputType?: string; submit?: string }>({});
   const [saved, setSaved] = useState(false);
 
-  const { models: veoModels, loading: veoModelsLoading, hasKey: hasVeoKey } = useVeoModels();
+  const {
+    models: kieVeoModels,
+    loading: kieVeoModelsLoading,
+    hasKey: hasKieVeoKey,
+    hasVeoGeminiKey,
+  } = useVeoModels();
+
+  // 'veo-gemini' gọi thẳng Google: model cố định ở frontend, "đã có key" = có "Gemini Key Veo 3.1"
+  const isGeminiVeo = settings.videoProvider === 'veo-gemini';
+  const veoModels = isGeminiVeo ? VEO_GEMINI_MODEL_OPTIONS : kieVeoModels;
+  const veoModelsLoading = isGeminiVeo ? false : kieVeoModelsLoading;
+  const hasVeoKey = isGeminiVeo ? hasVeoGeminiKey : hasKieVeoKey;
 
   useDefaultVeoModel(
     veoModels,
@@ -84,7 +96,8 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     if (mode === 'edit' && initialItem) {
       setTitle(initialItem.title);
       setContent(initialItem.inputContent);
-      setSettings({ ...initialItem.settings });
+      // Video cũ có thể còn nhà cung cấp 'kie' (Grok Imagine đã gỡ) — chuẩn hoá về 'veo'
+      setSettings(normalizeVideoSettings({ ...initialItem.settings }));
     } else {
       setTitle('');
       setContent('');
@@ -99,14 +112,6 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       return next === prev.sceneDuration ? prev : { ...prev, sceneDuration: next };
     });
   }, [settings.videoQuality]);
-
-  // Grok Imagine (kie.ai) chỉ hỗ trợ 480p/720p — đổi provider thì clamp lại videoQuality
-  useEffect(() => {
-    setSettings((prev) => {
-      const next = resolveVideoQualityForProvider(prev.videoQuality, prev.videoProvider);
-      return next === prev.videoQuality ? prev : { ...prev, videoQuality: next };
-    });
-  }, [settings.videoProvider]);
 
   if (!open) return null;
   if (mode === 'edit' && !initialItem) return null;
@@ -177,17 +182,17 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     //   setErrors({ submit: 'Chưa có Gemini API Key — vào mục API Keys để nhập và lưu key.' });
     //   return;
     // }
-    const isKieProvider = settings.videoProvider === 'kie';
-    const videoApiKey = getApiKey(API_KEY_IDS.kie);
+    // 'veo-gemini' dùng key RIÊNG "Gemini Key Veo 3.1", không phải Gemini API Key kịch bản
+    const videoApiKey = getVideoApiKeyForProvider(settings.videoProvider);
     if (!videoApiKey) {
       setErrors({
-        submit: isKieProvider
-          ? 'Chưa có Video API Key — nhập key riêng tại mục API Keys.'
+        submit: settings.videoProvider === 'veo-gemini'
+          ? 'Chưa có "Gemini Key Veo 3.1" — nhập key riêng tại mục API Keys để tạo video Veo3.1 Gemini.'
           : 'Chưa có Video API Key — nhập key riêng tại mục API Keys để tạo video Veo 3.1.',
       });
       return;
     }
-    if (!isKieProvider && !settings.veoModel?.trim()) {
+    if (!settings.veoModel?.trim()) {
       setErrors({ submit: 'Chưa chọn model Veo — đợi danh sách model tải xong và chọn trong cài đặt.' });
       return;
     }
@@ -220,7 +225,6 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       voice: settings.voice,
       voiceSpeed: settings.voiceSpeed,
       provider: settings.videoProvider,
-      kieMode: settings.kieMode,
     });
 
     const started = startRegenerate(initialItem.id, {
@@ -349,24 +353,12 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             <Field label="Nhà cung cấp">
               <select
                 value={settings.videoProvider}
-                onChange={(e) => patch({ videoProvider: e.target.value as 'veo' | 'kie' })}
+                onChange={(e) => patch({ videoProvider: e.target.value as VideoProvider })}
                 className={selectClass}
               >
                 {VIDEO_PROVIDER_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
-            {settings.videoProvider === 'kie' && (
-              <Field label="Chế độ">
-                <select
-                  value={settings.kieMode}
-                  onChange={(e) => patch({ kieMode: e.target.value as 'fun' | 'normal' | 'spicy' })}
-                  className={selectClass}
-                  title={settings.kieMode === 'spicy' ? 'Spicy có thể tạo nội dung nhạy cảm/gợi dục.' : undefined}
-                >
-                  {KIE_MODE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-              </Field>
-            )}
             <Field label="Ngôn ngữ">
               <select value={settings.language} onChange={(e) => patch({ language: e.target.value })} className={selectClass}>
                 {LANGUAGE_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -384,7 +376,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
             </Field>
             <Field label="Chất lượng">
               <select value={settings.videoQuality} onChange={(e) => patch({ videoQuality: e.target.value })} className={selectClass}>
-                {(settings.videoProvider === 'kie' ? KIE_VIDEO_QUALITY_OPTIONS : VIDEO_QUALITY_OPTIONS).map(([v, l]) => (
+                {VIDEO_QUALITY_OPTIONS.map(([v, l]) => (
                   <option key={v} value={v}>{l}</option>
                 ))}
               </select>
@@ -399,7 +391,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
                 {sceneDurationOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
             </Field>
-            {settings.videoProvider === 'veo' && hasVeoKey && (
+            {isVeoFamilyProvider(settings.videoProvider) && hasVeoKey && (
               <Field label="Model Veo" className="col-span-2">
                 <SelectVeo
                   showLabel={false}

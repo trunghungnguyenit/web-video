@@ -15,13 +15,19 @@ export interface GenerateSceneVideoPayload {
 export interface PollOperationPayload {
   apiKey: string;
   operationName: string;
-  /** '1080p' → backend tự gọi thêm get-1080p-video sau khi task xong */
+  /** '1080p' → backend tự gọi thêm get-1080p-video sau khi task xong (chỉ kie.ai) */
   quality?: string;
+  /**
+   * Nhà cung cấp — start đọc được từ veoInput, còn poll/download không có veoInput nên
+   * phải gửi riêng để backend biết gọi kie.ai hay Google (xem veo.route.ts).
+   */
+  provider?: VeoInput['provider'];
 }
 
 export interface DownloadVideoPayload {
   apiKey: string;
   videoUri: string;
+  provider?: VeoInput['provider'];
 }
 
 interface ApiResponse<T> {

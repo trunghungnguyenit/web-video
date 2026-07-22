@@ -6,7 +6,6 @@ import { attachAudioToSingleScene } from '@/lib/scene/scene-tts';
 import { createSceneVideo } from '@/lib/scene/scene-video';
 import { getVideoDurationSeconds } from '@/lib/scene/scene-video-duration';
 import { isFatalVeoError, sceneNeedsVeoResume } from '@/lib/veo/veo-generation';
-import { isFatalKieError, sceneNeedsKieResume } from '@/lib/kie/kie-generation';
 import { isSceneStopped, clearSceneStopped, SceneStoppedError } from '@/lib/veo/veo-generation-lock';
 import type { TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { toUserMessage } from '@/lib/error-messages';
@@ -68,7 +67,7 @@ export async function runSceneGenerationQueue(
 
   let scenes: VideoScene[] = initialScenes.map((s) => {
     if (s.status === 'success') return s;
-    if (sceneNeedsVeoResume(s) || sceneNeedsKieResume(s)) return s;
+    if (sceneNeedsVeoResume(s)) return s;
     console.log(`[video-library] Cảnh ${s.id} (status=${s.status}) bị đánh dấu 'generating' trong queue init.`);
     return { ...s, status: 'generating' as const };
   });
@@ -100,7 +99,6 @@ export async function runSceneGenerationQueue(
         status: 'error' as const,
         errorMessage: 'Đã dừng theo yêu cầu.',
         veoOperationName: undefined,
-        kieTaskId: undefined,
       };
       queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: 'Đã dừng theo yêu cầu.' };
       scenes = patchSceneAt(scenes, i, stopped);
@@ -124,7 +122,7 @@ export async function runSceneGenerationQueue(
         // queue: nhảy sang cảnh kế tiếp (continue), các cảnh sau vẫn tạo bình thường.
         const message = toUserMessage(err, 'Tạo giọng đọc (TTS) thất bại — thử lại.');
         // Xoá luôn operationId nếu có sót từ trước — cảnh đã lỗi, không tự resume nữa.
-        working = { ...working, status: 'error' as const, errorMessage: message, veoOperationName: undefined, kieTaskId: undefined };
+        working = { ...working, status: 'error' as const, errorMessage: message, veoOperationName: undefined };
         queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
         scenes = patchSceneAt(scenes, i, working);
         callbacks.onQueueUpdate?.([...queueItems]);
@@ -139,7 +137,7 @@ export async function runSceneGenerationQueue(
 
     // Kiểm tra lại — user có thể đã bấm "Dừng" TRONG lúc TTS đang chạy (cờ dừng chỉ
     // được check ở đầu vòng lặp, trước TTS). Nếu không check lại ở đây,
-    // generateSceneVideoAsset/Kie sắp gọi bên dưới sẽ tự xoá cờ dừng này (clearSceneStopped
+    // generateSceneVideoAsset sắp gọi bên dưới sẽ tự xoá cờ dừng này (clearSceneStopped
     // cho lượt tạo mới) và âm thầm tạo video dù user đã yêu cầu dừng.
     if (isSceneStopped(scene.id)) {
       clearSceneStopped(scene.id);
@@ -148,7 +146,6 @@ export async function runSceneGenerationQueue(
         status: 'error' as const,
         errorMessage: 'Đã dừng theo yêu cầu.',
         veoOperationName: undefined,
-        kieTaskId: undefined,
       };
       queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: 'Đã dừng theo yêu cầu.' };
       scenes = patchSceneAt(scenes, i, stopped);
@@ -176,9 +173,7 @@ export async function runSceneGenerationQueue(
         // để nếu user refresh giữa chừng thì lần load sau resume poll tiếp, không
         // start lại (không tốn thêm 1 lần generate). UI vẫn đang hiện spinner lúc này.
         onOperationStarted: (operationId) => {
-          const patched: VideoScene = veoInput.provider === 'kie'
-            ? { ...working, kieTaskId: operationId, status: 'generating' }
-            : { ...working, veoOperationName: operationId, status: 'generating' };
+          const patched: VideoScene = { ...working, veoOperationName: operationId, status: 'generating' };
           working = patched;
           scenes = patchSceneAt(scenes, i, patched);
           callbacks.onScenesUpdate([...scenes]);
@@ -186,7 +181,7 @@ export async function runSceneGenerationQueue(
         },
       }, previousSceneVideoUrl);
 
-      // Đo lại thời lượng THẬT của video vừa tạo — Veo/Kie có thể trả về clip lệch vài phần
+      // Đo lại thời lượng THẬT của video vừa tạo — Veo có thể trả về clip lệch vài phần
       // giây so với con số đã "xin" lúc generate. Cập nhật durationSeconds đúng bằng độ dài
       // thật NGAY TẠI ĐÂY (nguồn duy nhất) để timeline preview lẫn export MP4 sau này đều tự
       // động dùng đúng số liệu — không còn cảnh nào bị cắt sớm/loop sai vì durationSeconds cũ.
@@ -200,7 +195,6 @@ export async function runSceneGenerationQueue(
         // Xoá operationId — cảnh đã xong, cảnh sau nối tiếp bằng khung hình cuối của videoUrl
         // này (không cần taskId). Giữ lại chỉ khiến sceneNeedsVeoResume hiểu nhầm đang chạy.
         veoOperationName: undefined,
-        kieTaskId: undefined,
         // Video mới sinh — path Storage cũ (nếu có) không còn đại diện đúng nội
         // dung này, phải lưu lại từ đầu qua nút "Lưu video".
         videoPath: undefined,
@@ -217,7 +211,6 @@ export async function runSceneGenerationQueue(
           status: 'error' as const,
           errorMessage: err.message,
           veoOperationName: undefined,
-          kieTaskId: undefined,
         };
         queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: err.message };
         scenes = patchSceneAt(scenes, i, stopped);
@@ -228,14 +221,9 @@ export async function runSceneGenerationQueue(
       }
 
       const rawMessage = err instanceof Error ? err.message : 'Tạo video thất bại';
-      const message = toUserMessage(
-        err,
-        veoInput.provider === 'kie' ? 'Tạo video Grok Imagine thất bại — thử lại.' : 'Tạo video Veo thất bại — thử lại.',
-      );
+      const message = toUserMessage(err, 'Tạo video Veo thất bại — thử lại.');
       const fatalFlag = Boolean((err as Error & { fatal?: boolean }).fatal);
-      const isFatal = veoInput.provider === 'kie'
-        ? isFatalKieError(rawMessage, fatalFlag)
-        : isFatalVeoError(rawMessage, fatalFlag);
+      const isFatal = isFatalVeoError(rawMessage, fatalFlag);
 
       // Lỗi nghiêm trọng (hết quota/billing/API key sai...) — không có ích gì khi
       // thử tiếp các cảnh sau vì chắc chắn cũng lỗi y hệt. Cảnh này VÀ toàn bộ
@@ -245,7 +233,7 @@ export async function runSceneGenerationQueue(
         // Xoá operationId — cảnh đã kết luận LỖI, không được coi là "còn đang chạy"
         // nữa, nếu không lần load sau sceneNeedsVeoResume sẽ hiểu nhầm và tự gọi
         // lại API dù user chưa yêu cầu (tuyệt đối không được tự resume cảnh đã lỗi).
-        finished = { ...working, status: 'error' as const, errorMessage: message, veoOperationName: undefined, kieTaskId: undefined };
+        finished = { ...working, status: 'error' as const, errorMessage: message, veoOperationName: undefined };
         queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
         scenes = patchSceneAt(scenes, i, finished);
 
@@ -256,7 +244,7 @@ export async function runSceneGenerationQueue(
         const stoppedMessage = 'Chưa tạo — đã dừng do lỗi nghiêm trọng ở cảnh trước.';
         scenes = scenes.map((s, j) =>
           j > i && s.status === 'generating'
-            ? { ...s, status: 'error' as const, errorMessage: stoppedMessage, veoOperationName: undefined, kieTaskId: undefined }
+            ? { ...s, status: 'error' as const, errorMessage: stoppedMessage, veoOperationName: undefined }
             : s,
         );
         for (let j = i + 1; j < queueItems.length; j++) {
@@ -274,7 +262,7 @@ export async function runSceneGenerationQueue(
       // badge "Lỗi" + errorMessage, các cảnh phía sau vẫn tiếp tục tạo bình thường.
       // Xoá operationId — dù lỗi tạm, cảnh này đã có kết luận, không tự resume nữa;
       // user phải chủ động bấm "Tạo lại" nếu muốn thử lại (không tự gọi API ngầm).
-      finished = { ...working, status: 'error' as const, errorMessage: message, veoOperationName: undefined, kieTaskId: undefined };
+      finished = { ...working, status: 'error' as const, errorMessage: message, veoOperationName: undefined };
       queueItems[i] = { ...queueItems[i], step: 'error', errorMessage: message };
       scenes = patchSceneAt(scenes, i, finished);
       callbacks.onQueueUpdate?.([...queueItems]);
@@ -292,7 +280,7 @@ export async function runSceneGenerationQueue(
   return scenes;
 }
 
-/** Cảnh cần resume poll sau refresh — Veo hoặc Grok Imagine (kie.ai) */
+/** Cảnh cần resume poll sau refresh — Veo 3.1 (cả 2 nhà cung cấp) */
 export function scenesNeedingVeoResume(scenes: VideoScene[]): VideoScene[] {
-  return scenes.filter((s) => sceneNeedsVeoResume(s) || sceneNeedsKieResume(s));
+  return scenes.filter((s) => sceneNeedsVeoResume(s));
 }

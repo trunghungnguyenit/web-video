@@ -46,7 +46,7 @@ export async function uploadKieImageBase64(params: {
   base64: string;
   mimeType: string;
   fileName?: string;
-  /** Thư mục upload trên Kie temp storage — mặc định 'master-cast' (Grok Imagine); Veo dùng 'veo-scenes' */
+  /** Thư mục upload trên Kie temp storage — Veo truyền 'veo-scenes'; 'master-cast' là default cũ còn giữ làm fallback */
   uploadPath?: string;
 }): Promise<string> {
   const apiKey = params.apiKey.trim();

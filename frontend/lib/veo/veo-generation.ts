@@ -33,14 +33,20 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Poll operations.get — poll ngay lần đầu, sau đó mỗi 10s, timeout 10 phút */
-async function pollUntilDone(apiKey: string, operationName: string, sceneId: string, quality?: string): Promise<string> {
+async function pollUntilDone(
+  apiKey: string,
+  operationName: string,
+  sceneId: string,
+  quality?: string,
+  provider?: VeoInput['provider'],
+): Promise<string> {
   return withOperationPollLock(operationName, async () => {
     for (let i = 0; i < VEO_MAX_POLLS; i++) {
       if (i > 0) await sleep(VEO_POLL_INTERVAL_MS);
 
       if (isSceneStopped(sceneId)) throw new SceneStoppedError();
 
-      const status = await veoService.pollOperation({ apiKey, operationName, quality });
+      const status = await veoService.pollOperation({ apiKey, operationName, quality, provider });
 
       if (status.error) {
         throw new Error(status.error);
@@ -156,8 +162,8 @@ export async function generateSceneVideoAsset(
 
     // Không bọc try/catch riêng — pollUntilDone/downloadVideo throw gì thì để nguyên
     // vậy propagate lên caller (scene-generation-queue.ts tự phân loại fatal/stop/retry).
-    const videoUri = await pollUntilDone(apiKey, operationName, scene.id, veoInput.videoQuality);
-    const blob = await veoService.downloadVideo({ apiKey, videoUri });
+    const videoUri = await pollUntilDone(apiKey, operationName, scene.id, veoInput.videoQuality, veoInput.provider);
+    const blob = await veoService.downloadVideo({ apiKey, videoUri, provider: veoInput.provider });
     const videoUrl = URL.createObjectURL(blob);
     // Thành công → xoá veoOperationName (không còn cần resume-poll cảnh này). Cảnh sau
     // nối tiếp bằng KHUNG HÌNH CUỐI của videoUrl này, không cần taskId nữa.

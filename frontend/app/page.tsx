@@ -226,6 +226,7 @@ function VideoDetailView({
                 initialInputType={activeItem.initialInputType}
                 locked={Boolean(activeItem.initialInputType)}
                 onInputTypeLocked={handleInputTypeLocked}
+                imageModeLocked={activeItem.status !== 'draft'}
                 onContentChange={handleContentChange}
                 savedLinkUrl={activeItem.linkUrl}
                 savedLinkDescription={activeItem.linkDescription}

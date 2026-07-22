@@ -774,7 +774,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           script,
           veoInput.sceneDuration,
           veoInput.videoQuality,
-          veoInput.provider,
         );
 
         // Tab "Từ hình ảnh" — gắn đúng ảnh[i] vào scenes[i] theo thứ tự, để Veo
@@ -873,7 +872,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
           script,
           veoInput.sceneDuration,
           veoInput.videoQuality,
-          veoInput.provider,
         );
 
         runSceneGeneration(itemId, {
@@ -996,7 +994,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
         hasVideoUrl: Boolean(s.videoUrl),
         hasVideoPath: Boolean(s.videoPath),
         veoOperationName: s.veoOperationName,
-        kieTaskId: s.kieTaskId,
       })),
     })));
 
@@ -1007,7 +1004,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       const needResume = scenesNeedingVeoResume(item.scenes);
       if (needResume.length === 0) continue;
 
-      console.log(`[video-library] RESUME TRIGGERED cho project "${item.title}" (${item.id}) — cảnh cần resume:`, needResume.map((s) => ({ id: s.id, status: s.status, veoOperationName: s.veoOperationName, kieTaskId: s.kieTaskId })));
+      console.log(`[video-library] RESUME TRIGGERED cho project "${item.title}" (${item.id}) — cảnh cần resume:`, needResume.map((s) => ({ id: s.id, status: s.status, veoOperationName: s.veoOperationName })));
 
       resumedItemsRef.current.add(item.id);
 
