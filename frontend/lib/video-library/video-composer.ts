@@ -1,16 +1,15 @@
-// ─── Ghép cảnh + BGM + phụ đề → xuất MP4 (FFmpeg.wasm client-side) ──────────
+// ─── Ghép cảnh + BGM → xuất MP4 (FFmpeg.wasm client-side) ──────────────────
 
 import type { VideoScene } from '@/lib/scene/scenes';
 import { recalculateSceneTimings } from '@/lib/scene/scenes';
-import { buildSrtFromScenes } from '@/lib/scene/subtitle-utils';
 import { createScenePlaceholderVideo } from '@/lib/scene/scene-video-placeholder';
+import { getVideoDurationSeconds } from '@/lib/scene/scene-video-duration';
 import { fetchFile, getFFmpeg } from '@/lib/video-library/ffmpeg-client';
 
 export interface VideoRenderOptions {
   scenes: VideoScene[];
   bgmFile?: File | null;
   bgmVolume?: number;
-  includeSubtitles?: boolean;
   /** false = không trộn ElevenLabs TTS — chỉ giữ audio trong file video */
   includeTts?: boolean;
   onProgress?: (percent: number, message: string) => void;
@@ -29,6 +28,28 @@ function readyScenes(scenes: VideoScene[]): VideoScene[] {
   );
 }
 
+/**
+ * Đo lại thời lượng THẬT của video từng cảnh — video Veo/Kie trả về không nhất thiết khớp
+ * chính xác con số đã "xin" lúc generate. durationSeconds của cảnh có video thật giờ LUÔN
+ * lấy đúng bằng độ dài thật này (không phải con số dự kiến ban đầu nữa) — vì ensureSceneClip
+ * bên dưới không còn cắt/loop video thật nữa, nên mọi chỗ khác (audio track, phụ đề, tổng
+ * thời lượng) phải tính theo đúng con số thật này để không bị lệch.
+ */
+async function withRealVideoDurations(scenes: VideoScene[]): Promise<VideoScene[]> {
+  return Promise.all(
+    scenes.map(async (s) => {
+      if (!s.videoUrl) return s;
+      try {
+        const real = await getVideoDurationSeconds(s.videoUrl);
+        return { ...s, durationSeconds: real };
+      } catch {
+        // Không đo được (blob lỗi, CORS...) — giữ nguyên durationSeconds đã có, không chặn render.
+        return s;
+      }
+    }),
+  );
+}
+
 /** Chuẩn hóa clip cảnh → MP4 H.264 qua FFmpeg (placeholder nếu thiếu videoUrl). Giữ audio native (Veo SFX) nếu có. */
 async function ensureSceneClip(
   ffmpeg: Awaited<ReturnType<typeof getFFmpeg>>,
@@ -38,6 +59,10 @@ async function ensureSceneClip(
   const outName = `clip_${index}.mp4`;
   const inName = `input_${index}.webm`;
 
+  // Placeholder (chưa có video thật) là clip TỰ TẠO — cố ý khớp đúng durationSeconds. Video
+  // THẬT thì giữ NGUYÊN VẸN toàn bộ độ dài gốc, không cắt không loop — chỉ chuẩn hoá định
+  // dạng (codec/độ phân giải/fps) để ghép nối tin cậy được với các cảnh khác.
+  const hasRealVideo = Boolean(scene.videoUrl);
   let sourceUrl = scene.videoUrl;
   if (!sourceUrl) {
     sourceUrl = await createScenePlaceholderVideo(scene);
@@ -46,14 +71,14 @@ async function ensureSceneClip(
   await ffmpeg.writeFile(inName, await fetchFile(sourceUrl));
 
   const commonVideo = [
-    '-stream_loop', '-1',
+    ...(hasRealVideo ? [] : ['-stream_loop', '-1']),
     '-i', inName,
     '-c:v', 'libx264',
     '-preset', 'ultrafast',
     '-pix_fmt', 'yuv420p',
     '-s', '1280x720',
     '-r', '30',
-    '-t', String(scene.durationSeconds),
+    ...(hasRealVideo ? [] : ['-t', String(scene.durationSeconds)]),
   ];
 
   // Ưu tiên giữ audio gốc (SFX Veo). Không có track audio → thêm silent.
@@ -131,21 +156,25 @@ async function buildVoiceTrack(
   return 'voice_track.aac';
 }
 
-/** Ghép các cảnh + BGM + phụ đề SRT → xuất blob MP4 client-side */
+/** Ghép các cảnh + BGM → xuất blob MP4 client-side */
 export async function composeVideo(options: VideoRenderOptions): Promise<VideoRenderResult> {
   const {
     scenes,
     bgmFile,
     bgmVolume = 30,
-    includeSubtitles = true,
     includeTts = true,
     onProgress,
   } = options;
 
-  const timeline = readyScenes(scenes);
-  if (timeline.length === 0) {
+  const filteredScenes = readyScenes(scenes);
+  if (filteredScenes.length === 0) {
     throw new Error('Không có cảnh video hoàn thiện để render. Hãy tạo cảnh ở mục 3 trước.');
   }
+
+  onProgress?.(1, 'Đang kiểm tra thời lượng thật của từng cảnh...');
+  // Nâng durationSeconds đúng bằng độ dài THẬT nếu video dài hơn dự kiến — rồi tính lại
+  // timeStart/timeEnd theo con số đã đúng này, để phụ đề/audio/tổng thời lượng khớp thật.
+  const timeline = recalculateSceneTimings(await withRealVideoDurations(filteredScenes));
 
   const totalDuration = timeline.reduce((sum, s) => sum + s.durationSeconds, 0);
   onProgress?.(2, 'Đang tải FFmpeg...');
@@ -176,27 +205,6 @@ export async function composeVideo(options: VideoRenderOptions): Promise<VideoRe
   await ffmpeg.deleteFile('concat.txt');
 
   let currentVideo = 'combined.mp4';
-
-  if (includeSubtitles) {
-    onProgress?.(58, 'Thêm phụ đề & lời thoại TTS...');
-    const srt = buildSrtFromScenes(timeline);
-    await ffmpeg.writeFile('subs.srt', srt);
-
-    try {
-      await ffmpeg.exec([
-        '-i', currentVideo,
-        '-vf', "subtitles=subs.srt:force_style='FontName=Arial,FontSize=22,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=3,Alignment=2,MarginV=40'",
-        '-c:v', 'libx264', '-preset', 'ultrafast',
-        'with_subs.mp4',
-      ]);
-      await ffmpeg.deleteFile('subs.srt');
-      if (currentVideo !== 'combined.mp4') await ffmpeg.deleteFile(currentVideo);
-      currentVideo = 'with_subs.mp4';
-    } catch {
-      await ffmpeg.deleteFile('subs.srt');
-      onProgress?.(62, 'Phụ đề embed — dùng lời thoại trong clip video');
-    }
-  }
 
   onProgress?.(72, includeTts ? 'Tạo track lời thoại TTS...' : 'Bỏ qua TTS — dùng audio trong video...');
   const voiceTrack = includeTts ? await buildVoiceTrack(ffmpeg, timeline) : null;

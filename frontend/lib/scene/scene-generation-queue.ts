@@ -4,6 +4,7 @@ import type { VideoScene } from '@/lib/scene/scenes';
 import { recalculateSceneTimings } from '@/lib/scene/scenes';
 import { attachAudioToSingleScene } from '@/lib/scene/scene-tts';
 import { createSceneVideo } from '@/lib/scene/scene-video';
+import { getVideoDurationSeconds } from '@/lib/scene/scene-video-duration';
 import { isFatalVeoError, sceneNeedsVeoResume } from '@/lib/veo/veo-generation';
 import { isFatalKieError, sceneNeedsKieResume } from '@/lib/kie/kie-generation';
 import { isSceneStopped, clearSceneStopped, SceneStoppedError } from '@/lib/veo/veo-generation-lock';
@@ -185,10 +186,17 @@ export async function runSceneGenerationQueue(
         },
       }, previousSceneVideoUrl);
 
+      // Đo lại thời lượng THẬT của video vừa tạo — Veo/Kie có thể trả về clip lệch vài phần
+      // giây so với con số đã "xin" lúc generate. Cập nhật durationSeconds đúng bằng độ dài
+      // thật NGAY TẠI ĐÂY (nguồn duy nhất) để timeline preview lẫn export MP4 sau này đều tự
+      // động dùng đúng số liệu — không còn cảnh nào bị cắt sớm/loop sai vì durationSeconds cũ.
+      const realDurationSeconds = await getVideoDurationSeconds(videoUrl).catch(() => working.durationSeconds);
+
       // Thành công — hiện video thật đã tạo xong, hết spinner.
       finished = {
         ...working,
         videoUrl,
+        durationSeconds: realDurationSeconds,
         // Xoá operationId — cảnh đã xong, cảnh sau nối tiếp bằng khung hình cuối của videoUrl
         // này (không cần taskId). Giữ lại chỉ khiến sceneNeedsVeoResume hiểu nhầm đang chạy.
         veoOperationName: undefined,

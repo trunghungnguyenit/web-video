@@ -51,7 +51,6 @@ export interface PresetDemoScene {
 
 /** Cấu hình timeline demo — mục 4 */
 export interface PresetTimelineDemo {
-  includeSubtitles: boolean;
   bgmPresetName: string;
   bgmVolume: number;
   voiceSpeed: number;

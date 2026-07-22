@@ -7,7 +7,6 @@ import {
   Trash2,
   Plus,
   CheckSquare,
-  Download,
   RotateCw,
   SquareCheck,
   Save,
@@ -116,14 +115,6 @@ export function SceneToolbar({
         >
           <Plus className="w-3.5 h-3.5" />
           Thêm
-        </button>
-        <button
-          onClick={() => onBulkAction('download')}
-          disabled={selectedCount === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-foreground hover:bg-card hover:border-primary/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Download className="w-3.5 h-3.5" />
-          Tải
         </button>
         <button
           onClick={() => onBulkAction('save-videos')}

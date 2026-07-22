@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Play, Pause, SkipBack, ZoomIn, ZoomOut, Volume2, Download,
   Music, Upload, CheckCircle2, AlertCircle, ChevronDown, ChevronUp,
-  Loader2, Film, Subtitles, Mic2, Sparkles,
+  Loader2, Film, Mic2, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
@@ -113,7 +113,6 @@ export function TimelineEditor({
 
   const [transitionSec, setTransitionSec] = useState(0.6);
   const [frontIsA, setFrontIsA] = useState(true);
-  const [includeSubtitles, setIncludeSubtitles] = useState(true);
   const [isRendering, setIsRendering] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const [renderMessage, setRenderMessage] = useState('');
@@ -132,7 +131,6 @@ export function TimelineEditor({
 
   useEffect(() => {
     if (!timelineDefaults) return;
-    setIncludeSubtitles(timelineDefaults.includeSubtitles);
     setBgmVolume(timelineDefaults.bgmVolume);
     const track = PRESET_TRACKS.find((t) => t.name === timelineDefaults.bgmPresetName);
     if (track) {
@@ -392,15 +390,6 @@ export function TimelineEditor({
     void applySceneMedia(scene, { animate: false, offset, playing: false });
   }, [playhead, isPlaying, readyScenes, applySceneMedia]);
 
-  const handlePreviewVideoLoop = useCallback((e: React.SyntheticEvent<HTMLVideoElement>) => {
-    const frontVideo = frontVideoIsA.current ? previewARef.current : previewBRef.current;
-    if (e.currentTarget !== frontVideo || !isPlaying) return;
-
-    // Video Veo ngắn hơn cảnh — loop cho đến khi playhead sang cảnh tiếp theo
-    e.currentTarget.currentTime = 0;
-    void e.currentTarget.play();
-  }, [isPlaying]);
-
   const validateAndSetAudio = (file: File) => {
     setUploadError(null);
     const okMime = ACCEPTED_AUDIO.includes(file.type);
@@ -447,7 +436,6 @@ export function TimelineEditor({
         scenes: readyScenes,
         bgmFile: uploadedFile,
         bgmVolume,
-        includeSubtitles,
         includeTts: playNarration,
         onProgress: (pct, msg) => {
           setRenderProgress(pct);
@@ -483,7 +471,7 @@ export function TimelineEditor({
     } finally {
       setIsRendering(false);
     }
-  }, [readyScenes, uploadedFile, bgmVolume, includeSubtitles, playNarration]);
+  }, [readyScenes, uploadedFile, bgmVolume, playNarration]);
 
   if (scenes.length === 0) {
     return (
@@ -514,7 +502,7 @@ export function TimelineEditor({
           4. CHỈNH SỬA VIDEO
         </h2>
         <p className="text-xs text-muted-foreground mt-1">
-          FFmpeg · {readyScenes.length} cảnh · {formatDuration(totalDuration)} · Ghép nhạc · Phụ đề TTS · Tải MP4
+          FFmpeg · {readyScenes.length} cảnh · {formatDuration(totalDuration)} · Ghép nhạc · Tải MP4
         </p>
       </div>
 
@@ -535,7 +523,6 @@ export function TimelineEditor({
                   )}
                   muted={false}
                   playsInline
-                  onEnded={handlePreviewVideoLoop}
                 />
                 <video
                   ref={previewBRef}
@@ -545,7 +532,6 @@ export function TimelineEditor({
                   )}
                   muted={false}
                   playsInline
-                  onEnded={handlePreviewVideoLoop}
                 />
               </>
             ) : (
@@ -692,27 +678,6 @@ export function TimelineEditor({
             </div>
           )}
 
-          {/* Subtitle track — chỉ hiện khi bật Phụ đề */}
-          {includeSubtitles && (
-            <div className="flex border-b border-border min-w-[600px]">
-              <div className="w-28 flex-shrink-0 px-4 py-3 border-r border-border bg-background/30">
-                <span className="block text-xs font-semibold text-foreground">Subtitle</span>
-                <span className="block text-[10px] text-muted-foreground">Bật</span>
-              </div>
-              <div className="flex-1 px-3 py-2.5 flex items-center gap-1.5 overflow-x-auto min-h-[44px]">
-                {readyScenes.map((scene) => (
-                  <div
-                    key={scene.id}
-                    style={{ flex: `${scene.durationSeconds} 0 60px` }}
-                    className="h-9 min-w-[48px] bg-accent/10 border border-accent/20 rounded-lg px-2 flex items-center"
-                  >
-                    <span className="text-[10px] text-accent/80 truncate">Sub {scene.index}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* BGM track */}
           <div ref={bgmSectionRef} className="flex border-b border-border min-w-[600px]">
             <button
@@ -841,11 +806,6 @@ export function TimelineEditor({
                     : 'Tắt — chỉ nghe tiếng trong video'}
                 </span>
               </span>
-            </label>
-            <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card cursor-pointer hover:border-primary/30">
-              <input type="checkbox" checked={includeSubtitles} onChange={(e) => setIncludeSubtitles(e.target.checked)} className="accent-primary" />
-              <Subtitles className="w-4 h-4 text-primary" />
-              <span className="text-xs font-medium">Phụ đề + lời thoại TTS</span>
             </label>
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card text-xs text-muted-foreground">
               <Mic2 className="w-4 h-4" />

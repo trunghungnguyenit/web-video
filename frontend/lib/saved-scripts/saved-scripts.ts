@@ -39,6 +39,7 @@ export const LANGUAGE_LABELS: Record<string, string> = {
 };
 
 export const SCENE_COUNT_LABELS: Record<string, string> = {
+  auto: 'Tự động (theo độ dài video/nội dung)',
   '3': '3 cảnh',
   '5': '5 cảnh',
   '8': '8 cảnh',
