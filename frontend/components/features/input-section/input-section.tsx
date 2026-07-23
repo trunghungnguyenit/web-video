@@ -688,9 +688,14 @@ export function InputSection({
                 : form.content;
 
     const styleLabel = SCENE_STYLES.find((s) => s.id === sceneStyle)?.label ?? sceneStyle;
-    const characters = toPipelineCharacters(characterMasterRef?.current?.getCharacters() ?? []);
 
     try {
+      // Truyền provider — 'veo' (kie.ai) gửi thẳng URL ảnh đã lưu, 'veo-gemini' mới cần tải
+      // lại thành base64 (Google không nhận URL kie.ai). Await cùng các bước resolve ảnh/file khác.
+      const characters = await toPipelineCharacters(
+        characterMasterRef?.current?.getCharacters() ?? [],
+        settings.videoProvider,
+      );
       // Đọc 1 ảnh đã upload thành base64 — từ File thật (vừa chọn) HOẶC phục hồi từ Storage
       // (chỉ có path/previewUrl, không có File — fetch lại bytes qua signed URL; previewUrl
       // có thể đã hết hạn sau 1 giờ nên fallback lấy signed URL mới).

@@ -1,93 +1,77 @@
-// ─── Lưu API key Gemini / Veo / ElevenLabs trong localStorage ─────────────────
+// ─── Lưu API key Gemini / Veo / ElevenLabs — bảng user_api_keys (Supabase) ────
+// Bắt buộc đăng nhập mới dùng được — không có chế độ khách/localStorage nữa.
+// Giữ nguyên toàn bộ hàm public (getApiKey/setApiKey/API_KEY_IDS...) để không phải sửa
+// hàng chục nơi đang gọi trực tiếp — chỉ đổi cách lưu trữ bên trong từ localStorage sang
+// cache trong bộ nhớ, nạp 1 lần khi đăng nhập (xem loadApiKeysFromRemote, gọi từ auth-context.tsx).
 
-import { readJSON, writeJSON, removeItem } from '@/lib/local-storage';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { fetchRemoteApiKeys } from '@/lib/api-keys/api-keys-remote';
 
-/** Key localStorage chứa object `{ gemini, veo, elevenlabs }` */
-const STORAGE_KEY = 'web-video-api-keys';
-
-/** Id key TTS cũ (Google TTS) — migrate sang ElevenLabs khi đọc */
-const LEGACY_TTS_KEY = 'google-tts';
-
-/** Id key ElevenLabs hiện tại */
-const TTS_KEY_ID = 'elevenlabs';
-
-/**
- * Đọc toàn bộ API keys từ localStorage.
- * - SSR: trả `{}` (không có `window`).
- * - Tự migrate key cũ `google-tts` → `elevenlabs` nếu cần.
- */
-function readAll(): Record<string, string> {
-  const all = readJSON<Record<string, string>>(STORAGE_KEY, {});
-
-  // Migrate key cũ Google TTS → ElevenLabs
-  if (all[LEGACY_TTS_KEY] && !all[TTS_KEY_ID]) {
-    all[TTS_KEY_ID] = all[LEGACY_TTS_KEY];
-    delete all[LEGACY_TTS_KEY];
-    writeJSON(STORAGE_KEY, all);
-  }
-
-  return all;
-}
+// Re-export từ module riêng (không import gì khác) — api-keys-remote.ts cũng cần
+// API_KEY_IDS, import thẳng từ đây thay vì từ api-keys-remote.ts sẽ tạo VÒNG LẶP
+// import (lỗi "Cannot access before initialization" lúc build production).
+export { API_KEY_IDS } from '@/lib/api-keys/api-key-ids';
 
 /**
- * Ghi toàn bộ object keys vào localStorage (thay thế bản cũ).
- * Không dispatch event — caller (`setApiKey`) tự phát sau khi ghi.
- */
-function writeAll(keys: Record<string, string>): void {
-  writeJSON(STORAGE_KEY, keys);
-}
-
-/**
- * Id chuẩn dùng trong UI & pipeline — tránh hard-code string rải rác. Không còn `veo`
- * riêng — Veo 3.1 giờ dùng chung key `kie` (xem frontend/lib/veo/veo-models.ts).
- *
- * `veoGemini` = "Gemini Key Veo 3.1" — key RIÊNG cho nhà cung cấp "Veo3.1 Gemini" (gọi
- * thẳng Google), TÁCH BIỆT hoàn toàn với `gemini` (chỉ dùng tạo kịch bản/phân cảnh/lời
- * thoại). Tách riêng để quota/billing tạo video không đụng vào key phân tích kịch bản.
- */
-export const API_KEY_IDS = {
-  gemini: 'gemini',
-  elevenlabs: TTS_KEY_ID,
-  kie: 'kie',
-  veoGemini: 'veo-gemini',
-} as const;
-
-/**
- * CustomEvent phát sau khi user lưu/xóa key.
- * Hook `useVeoModels` và màn API Keys lắng nghe để reload model / cập nhật UI.
+ * CustomEvent phát sau khi key thay đổi (user lưu/xóa tay, HOẶC vừa nạp xong từ Supabase
+ * lúc đăng nhập). Hook `useVeoModels` và màn API Keys lắng nghe để reload model / cập nhật UI.
  */
 export const API_KEYS_CHANGED_EVENT = 'web-video-api-keys-changed';
 
-/**
- * Lấy một API key theo id (`gemini` | `veo` | `elevenlabs`).
- * @returns Chuỗi key đã trim, hoặc `''` nếu chưa lưu.
- */
-export function getApiKey(id: string): string {
-  return readAll()[id] ?? '';
-}
+/** Cache trong bộ nhớ — nạp từ Supabase lúc đăng nhập, KHÔNG persist qua localStorage nữa */
+let cache: Record<string, string> = {};
+/** true sau khi đã nạp xong (hoặc thử nạp xong) lần đầu từ Supabase cho phiên đăng nhập hiện tại */
+let ready = false;
 
-/**
- * Lưu hoặc xóa API key theo id.
- * - `value` rỗng → xóa key khỏi store.
- * - Sau khi ghi → dispatch `API_KEYS_CHANGED_EVENT`.
- */
-export function setApiKey(id: string, value: string): void {
-  const all = readAll();
-  if (value.trim()) all[id] = value.trim();
-  else delete all[id];
-  writeAll(all);
+function dispatchChanged(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(API_KEYS_CHANGED_EVENT));
   }
 }
 
+/** true khi đã nạp xong key từ Supabase (hoặc chưa đăng nhập nên không có gì để nạp) */
+export function isApiKeysReady(): boolean {
+  return ready;
+}
+
 /**
- * Xóa sạch toàn bộ API key khỏi localStorage — gọi khi đăng xuất để key của
- * tài khoản vừa thoát không còn dùng được nữa (tránh rò rỉ sang phiên sau).
- * Chỉ dispatch 1 lần `API_KEYS_CHANGED_EVENT` thay vì gọi setApiKey lặp lại.
+ * Nạp toàn bộ key đã lưu của tài khoản từ Supabase — gọi 1 lần khi phát hiện đăng nhập
+ * (auth-context.tsx). Lỗi mạng/Supabase chưa cấu hình → giữ cache rỗng, không throw ra
+ * ngoài (không nên chặn cả app chỉ vì tải key lỗi).
  */
+export async function loadApiKeysFromRemote(supabase: SupabaseClient, userId: string): Promise<void> {
+  try {
+    cache = await fetchRemoteApiKeys(supabase, userId);
+  } catch (err) {
+    console.error('[api-keys] Tải key từ Supabase thất bại:', err);
+    cache = {};
+  } finally {
+    ready = true;
+    dispatchChanged();
+  }
+}
+
+/** Xóa sạch cache key khỏi bộ nhớ — gọi khi đăng xuất để key tài khoản cũ không rò sang phiên sau */
 export function clearAllApiKeys(): void {
-  if (typeof window === 'undefined') return;
-  removeItem(STORAGE_KEY);
-  window.dispatchEvent(new CustomEvent(API_KEYS_CHANGED_EVENT));
+  cache = {};
+  ready = false;
+  dispatchChanged();
+}
+
+/** Lấy 1 API key theo id (`gemini` | `kie` | `elevenlabs` | `veo-gemini`) — đọc từ cache trong bộ nhớ */
+export function getApiKey(id: string): string {
+  return cache[id] ?? '';
+}
+
+/**
+ * Cập nhật cache trong bộ nhớ (đồng bộ, giống hệt chữ ký cũ khi còn dùng localStorage) —
+ * KHÔNG tự gọi Supabase ở đây. Nơi gọi (vd ApiKeysManagement) tự lưu Supabase riêng qua
+ * `saveRemoteApiKey` rồi mới gọi hàm này để mirror lại cho các chỗ khác trong app đọc
+ * đồng bộ (input-section, voice-select, veo-models-context...) mà không cần sửa sang async.
+ */
+export function setApiKey(id: string, value: string): void {
+  const trimmed = value.trim();
+  if (trimmed) cache[id] = trimmed;
+  else delete cache[id];
+  dispatchChanged();
 }

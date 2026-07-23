@@ -5,7 +5,7 @@ import { CheckCircle2, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 
-function GoogleIcon({ className }: { className?: string }) {
+export function GoogleIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#4285F4" d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.63h6.47a5.54 5.54 0 0 1-2.4 3.63v3h3.88c2.27-2.09 3.57-5.17 3.57-8.81Z" />

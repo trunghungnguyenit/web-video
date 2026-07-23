@@ -10,7 +10,12 @@ export interface SavedCharacter {
   style: string;
   createdAt: string;
   updatedAt: string;
-  /** Ảnh tham chiếu nhân vật (data URL base64) — làm ảnh mồi cho Veo giữ nhất quán ngoại hình qua các cảnh. Chỉ tồn tại trong phiên làm việc, không đồng bộ Supabase. */
+  /**
+   * Ảnh tham chiếu nhân vật — dùng làm ảnh mồi cho Veo/Kie giữ nhất quán ngoại hình qua các
+   * cảnh. Là URL công khai đã upload lên kie.ai (không phải base64) — đồng bộ Supabase
+   * (video_characters.avatar_url) nên còn lại sau F5/đăng nhập máy khác. Base64 local tạm
+   * thời chỉ xuất hiện trong lúc đang upload (xem CharacterMaster.handleAvatarChange).
+   */
   avatarDataUrl?: string;
 }
 

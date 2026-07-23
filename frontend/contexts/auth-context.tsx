@@ -15,7 +15,7 @@ import type { User } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { toUserMessage } from '@/lib/error-messages';
 import { licenseService } from '@/services/license/license.service';
-import { clearAllApiKeys } from '@/lib/api-keys/api-keys-store';
+import { clearAllApiKeys, loadApiKeysFromRemote } from '@/lib/api-keys/api-keys-store';
 
 interface AuthContextValue {
   user: User | null;
@@ -41,6 +41,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [signingOut, setSigningOut] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
   const [justSignedIn, setJustSignedIn] = useState(false);
+  /** Đã nạp API Keys từ Supabase cho đúng user này chưa — tránh nạp lặp mỗi lần user object đổi tham chiếu */
+  const apiKeysLoadedForRef = useRef<string | null>(null);
+  /** Đã hiện toast "Đã đăng nhập" cho lượt redirect OAuth này chưa — chỉ hiện ĐÚNG 1 LẦN, dù
+   *  `onAuthStateChange` có bắn thêm SIGNED_IN sau đó (đổi tab, refresh token...) */
+  const oauthToastShownRef = useRef(false);
+
+  // Nạp API Keys ngay khi phát hiện đăng nhập — không cần user tự mở màn "API Keys"
+  // mới có key khả dụng cho phần còn lại của app (tạo kịch bản/video cần đọc key ngay).
+  useEffect(() => {
+    const supabase = supabaseRef.current;
+    if (!supabase || !user) return;
+    if (apiKeysLoadedForRef.current === user.id) return;
+    apiKeysLoadedForRef.current = user.id;
+    void loadApiKeysFromRemote(supabase, user.id);
+  }, [user]);
 
   useEffect(() => {
     const supabase = supabaseRef.current;
@@ -65,7 +80,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(session?.access_token ?? null);
       setLoading(false);
       setSigningIn(false);
-      if (event === 'SIGNED_IN' && hadOAuthCode) {
+      if (event === 'SIGNED_IN' && hadOAuthCode && !oauthToastShownRef.current) {
+        oauthToastShownRef.current = true;
         setJustSignedIn(true);
         setTimeout(() => setJustSignedIn(false), 4000);
       }
@@ -125,10 +141,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) {
         setSignInError(toUserMessage(error, 'Đăng xuất thất bại — thử lại.'));
       } else {
-        // Xóa API key của tài khoản vừa thoát khỏi localStorage — chạy ở đây
-        // (không phải trong component riêng) để luôn có hiệu lực bất kể đang
-        // mở trang nào, tránh rò rỉ key sang phiên đăng nhập sau.
+        // Xóa cache API key của tài khoản vừa thoát — chạy ở đây (không phải trong
+        // component riêng) để luôn có hiệu lực bất kể đang mở trang nào, tránh rò rỉ
+        // key sang phiên đăng nhập sau. Reset ref để lần đăng nhập sau tự nạp lại.
         clearAllApiKeys();
+        apiKeysLoadedForRef.current = null;
       }
     } catch (err) {
       setSignInError(toUserMessage(err, 'Đăng xuất thất bại — thử lại.'));

@@ -3,7 +3,7 @@
 // Chỉ đồng bộ dữ liệu văn bản/cấu hình (không phải blob video/audio — vẫn ở
 // `blob:` URL tạm trong RAM như hiện tại, mất khi F5, chưa upload lên Storage).
 // KHÔNG đồng bộ ttsInput/veoInput vì hai object này chứa apiKey cá nhân của
-// người dùng — apiKey chỉ được lưu ở localStorage (frontend/lib/api-keys-store.ts).
+// người dùng — apiKey lưu riêng ở bảng user_api_keys (frontend/lib/api-keys/api-keys-store.ts).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SourceImageItem, VideoLibraryItem } from '@/lib/video-library/video-library';
@@ -38,6 +38,9 @@ interface ProjectRow {
   applied_input: VideoLibraryItem['appliedInput'];
   timeline: VideoLibraryItem['timelineDemo'];
   bgm_path: string | null;
+  // Prompt mô tả dàn nhân vật (tab link) + URL ảnh tham chiếu (đã upload kie.ai — KHÔNG base64)
+  master_cast_prompt: string | null;
+  master_cast_image_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -53,6 +56,8 @@ interface CharacterRow {
   outfit: string;
   description: string;
   style: string;
+  /** URL ảnh nhân vật đã upload kie.ai (file-base64-upload) — KHÔNG phải base64 */
+  avatar_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +107,10 @@ function toProjectRow(userId: string, item: VideoLibraryItem): ProjectRow {
     applied_input: item.appliedInput,
     timeline: item.timelineDemo,
     bgm_path: null,
+    master_cast_prompt: item.masterCastPrompt ?? null,
+    // URL kie.ai (chuỗi ngắn) — nếu vẫn còn base64 cũ (data:...) từ trước khi có upload
+    // thì bỏ qua, không ghi base64 lên Supabase (tránh phình DB như localStorage trước đây)
+    master_cast_image_url: item.masterCastImageDataUrl?.startsWith('data:') ? null : item.masterCastImageDataUrl ?? null,
     created_at: item.createdAt,
     updated_at: item.updatedAt,
   };
@@ -134,6 +143,8 @@ function fromProjectRow(row: ProjectRow): Omit<VideoLibraryItem, 'characters' | 
     settings: { ...DEFAULT_VIDEO_SETTINGS, ...(row.settings ?? {}) },
     appliedInput: row.applied_input ?? null,
     timelineDemo: row.timeline ?? null,
+    masterCastPrompt: row.master_cast_prompt ?? undefined,
+    masterCastImageDataUrl: row.master_cast_image_url ?? undefined,
     // Không đồng bộ — chỉ tồn tại trong phiên làm việc hiện tại
     ttsInput: null,
     veoInput: null,
@@ -157,6 +168,8 @@ function toCharacterRow(userId: string, projectId: string, position: number, c: 
     outfit: c.outfit,
     description: c.description,
     style: c.style,
+    // URL kie.ai — base64 cũ (data:...) từ trước khi có upload thì bỏ qua, không ghi lên Supabase
+    avatar_url: c.avatarDataUrl?.startsWith('data:') ? null : c.avatarDataUrl ?? null,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
   };
@@ -171,6 +184,7 @@ function fromCharacterRow(row: CharacterRow): SavedCharacter {
     outfit: row.outfit,
     description: row.description,
     style: row.style,
+    avatarDataUrl: row.avatar_url ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

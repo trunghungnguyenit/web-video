@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Loader2, Sparkles } from 'lucide-react';
 import { Sidebar, MobileNav, type AppView, type CreativeToolId } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import { InputSection, type TabId } from '@/components/features/input-section';
@@ -22,6 +22,7 @@ import { VideoLibraryProvider, useVideoLibrary } from '@/contexts/video-library-
 import { VeoModelsProvider } from '@/contexts/veo-models-context';
 import { ProjectSettingsProvider, type VideoSettings } from '@/contexts/project-settings-context';
 import { useAuth } from '@/contexts/auth-context';
+import { GoogleIcon } from '@/components/features/settings/general-settings';
 import { createClient } from '@/lib/supabase/client';
 import {
   fetchRemoteSavedScripts,
@@ -338,7 +339,7 @@ function VideoDetailView({
 }
 
 export default function Page() {
-  const { user } = useAuth();
+  const { user, loading: authLoading, signingIn, signInWithGoogle } = useAuth();
   const supabaseRef = useRef(createClient());
   const scriptsSyncedForUserRef = useRef<string | null>(null);
 
@@ -468,6 +469,47 @@ export default function Page() {
     setSidebarOpen(false);
     setSelectedPreset(preset);
   };
+
+  // Bắt buộc đăng nhập mới dùng được app — API Key và toàn bộ dữ liệu giờ lưu theo tài
+  // khoản Supabase (không còn chế độ khách/localStorage), nên chặn hẳn UI chính tại đây.
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background px-4">
+        <div className="w-full max-w-sm bg-card border border-border rounded-2xl p-8 text-center space-y-5 shadow-lg">
+          <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center mx-auto">
+            <Sparkles className="w-6 h-6 text-primary-foreground" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground">Đăng nhập để tiếp tục</h1>
+            <p className="text-sm text-muted-foreground mt-1.5">
+              Cần đăng nhập bằng Google để dùng AI Video Studio — API Key và video của bạn được lưu an toàn theo tài khoản.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={signInWithGoogle}
+            disabled={signingIn}
+            className="w-full flex items-center justify-center gap-2.5 px-4 py-2.5 bg-background border border-border hover:border-primary/40 hover:bg-muted/30 rounded-lg text-sm font-semibold text-foreground transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {signingIn ? (
+              <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+            ) : (
+              <GoogleIcon className="w-4 h-4" />
+            )}
+            {signingIn ? 'Đang chuyển tới Google...' : 'Đăng nhập bằng Google'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <VideoLibraryProvider>

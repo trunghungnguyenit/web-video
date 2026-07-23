@@ -19,6 +19,7 @@ import type { VideoSettings } from '@/contexts/project-settings-context';
 import { DEFAULT_VIDEO_SETTINGS } from '@/contexts/project-settings-context';
 import type { AnalyzePipelineRequest, PipelineCharacter, TtsInput, VeoInput } from '@/lib/pipeline-payload';
 import { parseDataUrl } from '@/lib/pipeline-payload';
+import { fetchUrlAsBase64 } from '@/lib/blob-to-base64';
 import { runSceneGenerationQueue, scenesNeedingVeoResume } from '@/lib/scene/scene-generation-queue';
 import { normalizeSceneDurationSetting } from '@/lib/saved-scripts/saved-scripts';
 import { buildDemoScenesFromPreset } from '@/lib/preset/preset-demo-builder';
@@ -32,11 +33,8 @@ import {
   type CreateVideoItemOptions,
   type VideoLibraryItem,
 } from '@/lib/video-library/video-library';
-import {
-  loadVideoLibraryPersist,
-  saveVideoLibraryPersist,
-  normalizeItemOnLoad,
-} from '@/lib/video-library/video-library-persist';
+import { normalizeItemOnLoad } from '@/lib/video-library/video-library-persist';
+import { rebuildGenerationInputs } from '@/lib/video-library/rebuild-generation-inputs';
 import { toUserMessage } from '@/lib/error-messages';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
@@ -94,7 +92,7 @@ interface VideoLibraryContextValue {
   /** Sửa nội dung/settings 1 video đã có & tạo lại cảnh — giữ cảnh cũ tới khi xong */
   startRegenerate: (itemId: string, input: AnalyzeInput) => boolean;
   /** Xác nhận preview tab link (sau khi xem/sửa Master Cast) — thật sự bắt đầu gọi TTS/Veo */
-  confirmLinkGeneration: (itemId: string, imageDataUrl?: string) => boolean;
+  confirmLinkGeneration: (itemId: string, imageDataUrl?: string) => Promise<boolean>;
   /** Upload video/audio cảnh (blob:) của project active lên Supabase Storage */
   saveActiveSceneVideos: () => Promise<{ saved: number; failed: number }>;
   /** Xoá file Storage của các cảnh vừa bị xoá khỏi mục 3 */
@@ -135,7 +133,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
   const initial = useMemo(() => [createInitialVideoItem()], []);
   const [items, setItems] = useState<VideoLibraryItem[]>(initial);
   const [activeItemId, setActiveItemId] = useState(initial[0].id);
-  const [persistReady, setPersistReady] = useState(false);
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const activeItemIdRef = useRef(activeItemId);
@@ -156,16 +153,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
   const pushRunningRef = useRef(false);
   /** items đổi tiếp trong lúc push đang chạy — chạy thêm đúng 1 lượt nữa sau khi xong */
   const pushDirtyRef = useRef(false);
-
-  // Luôn nạp localStorage trước — có UI ngay, không chờ auth resolve
-  useEffect(() => {
-    const stored = loadVideoLibraryPersist();
-    if (stored) {
-      setItems(stored.items);
-      setActiveItemId(stored.activeItemId);
-    }
-    setPersistReady(true);
-  }, []);
 
   // Có tài khoản đăng nhập → đồng bộ Supabase: tài khoản đã có dữ liệu thì tải về
   // (Supabase thành nguồn sự thật), tài khoản mới thì đẩy dữ liệu cục bộ hiện có lên 1 lần.
@@ -239,21 +226,18 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!persistReady) return;
     const supabase = supabaseRef.current;
-    const useRemote = Boolean(user) && remoteReady && Boolean(supabase);
+    // Chưa đăng nhập, chưa có Supabase client, hoặc đang đồng bộ lần đầu (remote
+    // chưa sẵn sàng) → bỏ qua lượt lưu này, tránh ghi đè dữ liệu cloud bằng state
+    // cũ trong lúc đang race với fetch. Không còn nhánh localStorage — Supabase
+    // là nguồn dữ liệu duy nhất.
+    if (!user || !remoteReady || !supabase) return;
 
     const timer = window.setTimeout(() => {
-      if (useRemote && supabase && user) {
-        runPushToRemote(supabase, user.id);
-      } else if (!user) {
-        saveVideoLibraryPersist(itemsRef.current, activeItemIdRef.current);
-      }
-      // user tồn tại nhưng remote chưa sẵn sàng (đang đồng bộ lần đầu) → bỏ qua lượt
-      // lưu này, tránh ghi đè dữ liệu cloud bằng state cũ trong lúc đang race với fetch.
+      runPushToRemote(supabase, user.id);
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [items, activeItemId, persistReady, user, remoteReady, runPushToRemote]);
+  }, [items, activeItemId, user, remoteReady, runPushToRemote]);
 
   const activeItem = useMemo(
     () => items.find((p) => p.id === activeItemId) ?? items[0],
@@ -563,29 +547,6 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
             }));
           }
         },
-        onPersistScenes: (scenes) => {
-          if (epochRef.current.get(itemId) !== epoch) return;
-          if (!persistReady) return;
-          const next = mode === 'live'
-            ? patchItem(itemsRef.current, itemId, {
-                scenes,
-                scenesDone: countScenesDone(scenes),
-                scenesTotal: scenes.length,
-                status: 'generating',
-              })
-            : patchItem(itemsRef.current, itemId, (p) => ({
-                pendingRegeneration: p.pendingRegeneration
-                  ? {
-                      ...p.pendingRegeneration,
-                      scenes,
-                      scenesDone: countScenesDone(scenes),
-                      scenesTotal: scenes.length,
-                    }
-                  : null,
-              }));
-          itemsRef.current = next;
-          saveVideoLibraryPersist(next, activeItemIdRef.current);
-        },
         onScenesUpdate: (scenes) => {
           if (epochRef.current.get(itemId) !== epoch) return;
           if (mode === 'live') {
@@ -667,7 +628,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     }).finally(() => {
       inFlightRef.current.delete(itemId);
     });
-  }, [updateItem, persistReady]);
+  }, [updateItem]);
 
   /**
    * Demo mục 3 & 4 không cần API key — bỏ qua bước gọi Gemini, dùng thẳng
@@ -901,27 +862,42 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
    * + Scene Continuity nối khung hình cuối cho cảnh 2+ nếu user bật) — trước đây chặn cứng
    * ở đây khiến luồng "chỉ link + prompt, không ảnh" không thể chạy được.
    */
-  const confirmLinkGeneration = useCallback((itemId: string, imageDataUrl?: string): boolean => {
+  const confirmLinkGeneration = useCallback(async (itemId: string, imageDataUrl?: string): Promise<boolean> => {
     const item = itemsRef.current.find((p) => p.id === itemId);
     if (!item?.pendingLinkReview) return false;
     if (item.status === 'analyzing' || item.status === 'generating') return false;
     if (analyzeInFlightRef.current.has(itemId)) return false;
+    // Set NGAY trước await (fetch ảnh) — chặn gọi chồng lấn nếu user bấm xác nhận 2 lần
+    // liên tiếp trong lúc đang tải ảnh, trước đây set sau parseDataUrl (đồng bộ) nên không
+    // có race; giờ có await nên phải set sớm để giữ đúng bảo vệ cũ.
+    analyzeInFlightRef.current.add(itemId);
 
     // Ưu tiên ảnh truyền trực tiếp từ panel (tránh race state); fallback item đã lưu
     const rawImage = imageDataUrl?.trim() || item.masterCastImageDataUrl;
-    const image = parseDataUrl(rawImage);
+    const provider = item.pendingLinkReview.veoInput.provider ?? 'veo';
+
+    // rawImage giờ thường là URL kie.ai (không phải base64). Provider 'veo' (kie.ai) gửi
+    // THẲNG url — không cần tải về base64 rồi để backend upload lại thừa. 'veo-gemini'
+    // (Google) bắt buộc base64 inline nên phải tải về. Base64 local (data:...) chỉ còn
+    // xảy ra trong lúc đang upload — luôn tải/parse trực tiếp bất kể provider.
+    let image: { base64?: string; mimeType?: string; url?: string } | undefined;
+    if (rawImage?.startsWith('data:')) {
+      image = parseDataUrl(rawImage);
+    } else if (rawImage && provider !== 'veo-gemini') {
+      image = { url: rawImage };
+    } else if (rawImage) {
+      image = await fetchUrlAsBase64(rawImage);
+    }
 
     console.log('[master-cast/confirm]', {
       itemId,
-      provider: item.pendingLinkReview.veoInput.provider ?? 'veo',
+      provider,
       hasImageArg: Boolean(imageDataUrl?.trim()),
       hasItemImage: Boolean(item.masterCastImageDataUrl),
-      hasParsedImage: Boolean(image),
+      hasImage: Boolean(image),
       imageMime: image?.mimeType ?? null,
-      imageBytesApprox: image ? Math.round((image.base64.length * 3) / 4) : 0,
+      hasImageUrl: Boolean(image?.url),
     });
-
-    analyzeInFlightRef.current.add(itemId);
 
     const epoch = (generationEpochRef.current.get(itemId) ?? 0) + 1;
     generationEpochRef.current.set(itemId, epoch);
@@ -934,7 +910,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     const veoInput: VeoInput = {
       ...result.veoInput,
       // Không có ảnh → referenceImage undefined, cảnh 1 rơi về TEXT_2_VIDEO như tab file/text.
-      referenceImage: image ? { base64: image.base64, mimeType: image.mimeType } : undefined,
+      referenceImage: image,
       masterCharacterText,
       characters: image
         ? [
@@ -948,6 +924,7 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
               style: 'Realistic',
               imageBase64: image.base64,
               imageMimeType: image.mimeType,
+              imageUrl: image.url,
             } satisfies PipelineCharacter,
           ]
         : (result.veoInput.characters ?? []).filter((c) => c.name !== 'Master Cast'),
@@ -956,9 +933,9 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
     console.log('[master-cast/confirm] Gắn referenceImage + Master Cast character (nếu có ảnh) — sẽ gửi kèm mỗi cảnh.', {
       characters: (veoInput.characters ?? []).map((c) => ({
         name: c.name,
-        hasImage: Boolean(c.imageBase64),
+        hasImage: Boolean(c.imageBase64 || c.imageUrl),
       })),
-      hasReferenceImage: Boolean(veoInput.referenceImage?.base64),
+      hasReferenceImage: Boolean(veoInput.referenceImage),
       hasMasterCharacterText: Boolean(masterCharacterText),
     });
 
@@ -967,63 +944,80 @@ export function VideoLibraryProvider({ children }: { children: ReactNode }) {
       pendingLinkReview: null,
       masterCastImageDataUrl: rawImage,
     });
-    runSceneGeneration(itemId, { ...result, veoInput }, epoch);
+    // runSceneGeneration tự ghi đè item.masterCastPrompt = result.masterCastPrompt (bản GỐC
+    // Gemini phân tích script lần đầu, TRƯỚC khi có ảnh). Phải override lại bằng bản HIỆN TẠI
+    // (item.masterCastPrompt — đã cập nhật bởi Gemini Vision phân tích ảnh hoặc user tự sửa),
+    // nếu không panel sẽ hiện lùi về prompt cũ ngay sau khi bấm xác nhận.
+    runSceneGeneration(itemId, { ...result, veoInput, masterCastPrompt: item.masterCastPrompt }, epoch);
     return true;
   }, [updateItem, runSceneGeneration]);
 
-  // Resume poll Veo sau refresh — chỉ chạy 1 lần khi load persist, không gọi predictLongRunning lại
+  // Resume poll Veo sau refresh — chỉ chạy sau khi Supabase (nguồn dữ liệu duy nhất)
+  // đã tải xong, không gọi predictLongRunning lại dựa trên state khởi tạo rỗng/cũ.
   useEffect(() => {
-    if (!persistReady) return;
-    // Có tài khoản đăng nhập thì Supabase mới là nguồn dữ liệu đúng — localStorage
-    // (persistReady bật ngay khi mount, trước cả khi fetch Supabase xong) có thể còn
-    // giữ bản ghi CŨ (vd. cảnh chụp lúc còn "generating", trong khi thực tế đã
-    // "success" và đã lưu video từ lâu). Nếu xét resume ngay lúc này sẽ tự gọi lại
-    // API dựa trên dữ liệu lỗi thời — đợi remoteReady để chắc chắn itemsRef.current
-    // đã là dữ liệu Supabase mới nhất trước khi quyết định cảnh nào cần resume.
-    if (user && !remoteReady) return;
+    if (!user || !remoteReady) return;
 
-    console.log('[video-library] resume-check chạy — items:', itemsRef.current.map((it) => ({
-      id: it.id,
-      title: it.title,
-      itemStatus: it.status,
-      hasTtsInput: Boolean(it.ttsInput),
-      hasVeoInput: Boolean(it.veoInput),
-      scenes: it.scenes.map((s) => ({
-        id: s.id,
-        status: s.status,
-        hasVideoUrl: Boolean(s.videoUrl),
-        hasVideoPath: Boolean(s.videoPath),
-        veoOperationName: s.veoOperationName,
-      })),
-    })));
+    void (async () => {
+      console.log('[video-library] resume-check chạy — items:', itemsRef.current.map((it) => ({
+        id: it.id,
+        title: it.title,
+        itemStatus: it.status,
+        hasTtsInput: Boolean(it.ttsInput),
+        hasVeoInput: Boolean(it.veoInput),
+        scenes: it.scenes.map((s) => ({
+          id: s.id,
+          status: s.status,
+          hasVideoUrl: Boolean(s.videoUrl),
+          hasVideoPath: Boolean(s.videoPath),
+          veoOperationName: s.veoOperationName,
+        })),
+      })));
 
-    for (const item of itemsRef.current) {
-      if (resumedItemsRef.current.has(item.id)) continue;
-      if (analyzeInFlightRef.current.has(item.id)) continue;
-      if (!item.ttsInput || !item.veoInput) continue;
-      const needResume = scenesNeedingVeoResume(item.scenes);
-      if (needResume.length === 0) continue;
+      for (const item of itemsRef.current) {
+        if (resumedItemsRef.current.has(item.id)) continue;
+        if (analyzeInFlightRef.current.has(item.id)) continue;
 
-      console.log(`[video-library] RESUME TRIGGERED cho project "${item.title}" (${item.id}) — cảnh cần resume:`, needResume.map((s) => ({ id: s.id, status: s.status, veoOperationName: s.veoOperationName })));
+        let ttsInput = item.ttsInput;
+        let veoInput = item.veoInput;
 
-      resumedItemsRef.current.add(item.id);
+        // ttsInput/veoInput KHÔNG đồng bộ Supabase (chứa apiKey cá nhân) — sau khi Supabase
+        // nạp lại items (F5/đăng nhập máy khác) 2 field này luôn về null dù project đã có
+        // cảnh. Dựng lại từ dữ liệu không nhạy cảm đã lưu (settings/characters/masterCast...)
+        // + apiKey hiện tại — để cả resume poll lẫn nút "Tạo lại" cảnh lỗi dùng lại được.
+        if ((!ttsInput || !veoInput) && item.scenes.length > 0) {
+          const rebuilt = await rebuildGenerationInputs(item);
+          if (rebuilt) {
+            ttsInput = rebuilt.ttsInput;
+            veoInput = rebuilt.veoInput;
+            updateItem(item.id, { ttsInput, veoInput });
+          }
+        }
 
-      const epoch = (generationEpochRef.current.get(item.id) ?? 0) + 1;
-      generationEpochRef.current.set(item.id, epoch);
-      analyzeInFlightRef.current.add(item.id);
+        if (!ttsInput || !veoInput) continue;
+        const needResume = scenesNeedingVeoResume(item.scenes);
+        if (needResume.length === 0) continue;
 
-      runSceneGeneration(item.id, {
-        scenes: item.scenes,
-        sourceContent: item.inputContent,
-        sceneCount: item.settings.sceneCount,
-        language: item.settings.language,
-        aspectRatio: item.veoInput.aspectRatio,
-        sceneDuration: item.veoInput.sceneDuration,
-        veoInput: item.veoInput,
-        ttsInput: item.ttsInput,
-      }, epoch, { resumeOnly: true });
-    }
-  }, [persistReady, remoteReady, user, runSceneGeneration]);
+        console.log(`[video-library] RESUME TRIGGERED cho project "${item.title}" (${item.id}) — cảnh cần resume:`, needResume.map((s) => ({ id: s.id, status: s.status, veoOperationName: s.veoOperationName })));
+
+        resumedItemsRef.current.add(item.id);
+
+        const epoch = (generationEpochRef.current.get(item.id) ?? 0) + 1;
+        generationEpochRef.current.set(item.id, epoch);
+        analyzeInFlightRef.current.add(item.id);
+
+        runSceneGeneration(item.id, {
+          scenes: item.scenes,
+          sourceContent: item.inputContent,
+          sceneCount: item.settings.sceneCount,
+          language: item.settings.language,
+          aspectRatio: veoInput.aspectRatio,
+          sceneDuration: veoInput.sceneDuration,
+          veoInput,
+          ttsInput,
+        }, epoch, { resumeOnly: true });
+      }
+    })();
+  }, [remoteReady, user, runSceneGeneration, updateItem]);
 
   const value = useMemo(
     () => ({

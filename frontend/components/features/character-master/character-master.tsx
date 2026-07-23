@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useImperativeHandle, forwardRef, useCallback } from 'react';
 import {
-  User, Upload, CheckCircle2, Plus, Trash2, Users, AlertTriangle,
+  User, Upload, CheckCircle2, Plus, Trash2, Users, AlertTriangle, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
@@ -16,8 +16,8 @@ import {
   validateCharacterFields,
 } from '@/lib/character/saved-characters';
 import { presetCharactersToSaved } from '@/lib/preset/preset-demo-builder';
+import { uploadReferenceImageFile, validateReferenceImageFile } from '@/lib/veo/upload-reference-image';
 
-const MAX_AVATAR_MB = 5;
 /** Giới hạn Veo/Kie API: tối đa 3 ảnh tham chiếu (REFERENCE_2_VIDEO) mỗi lần gọi — xem
  * collectReferenceImages() ở backend/src/services/veo/veo.service.ts. Nhân vật dư ảnh (tính
  * theo THỨ TỰ trong danh sách) vẫn được đưa vào kịch bản bình thường, chỉ không có ảnh mồi
@@ -62,6 +62,7 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
     const [savedFlashId, setSavedFlashId] = useState<string | null>(null);
     const [justApplied, setJustApplied] = useState(false);
     const [errors, setErrors] = useState<{ name?: string; description?: string; avatar?: string }>({});
+    const [uploadingAvatarId, setUploadingAvatarId] = useState<string | null>(null);
 
     const activeCharacter = characters.find((c) => c.id === activeId) ?? characters[0];
 
@@ -114,12 +115,9 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
       e.target.value = '';
       if (!file || !activeCharacter) return;
 
-      if (!file.type.startsWith('image/')) {
-        setErrors((prev) => ({ ...prev, avatar: 'File phải là hình ảnh (JPG, PNG, WebP...).' }));
-        return;
-      }
-      if (file.size > MAX_AVATAR_MB * 1024 * 1024) {
-        setErrors((prev) => ({ ...prev, avatar: `Ảnh quá lớn — tối đa ${MAX_AVATAR_MB}MB.` }));
+      const validationError = validateReferenceImageFile(file);
+      if (validationError) {
+        setErrors((prev) => ({ ...prev, avatar: validationError }));
         return;
       }
 
@@ -128,12 +126,30 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
       reader.onload = () => {
         const dataUrl = reader.result;
         if (typeof dataUrl !== 'string') return;
+        // Preview ngay bằng base64 local — không đợi upload xong mới thấy ảnh.
         setCharacters((prev) =>
           prev.map((c) =>
             c.id === activeCharacterId ? { ...c, avatarDataUrl: dataUrl, updatedAt: new Date().toISOString() } : c,
           ),
         );
         setErrors((prev) => ({ ...prev, avatar: undefined }));
+
+        // Upload lên kie.ai lấy URL bền vững — thay base64 để lưu Supabase (base64 không
+        // đồng bộ, mất khi F5). Giữ nguyên preview base64 nếu upload lỗi (best-effort).
+        setUploadingAvatarId(activeCharacterId);
+        uploadReferenceImageFile(file)
+          .then((url) => {
+            setCharacters((prev) =>
+              prev.map((c) => (c.id === activeCharacterId ? { ...c, avatarDataUrl: url } : c)),
+            );
+          })
+          .catch((err) => {
+            setErrors((prev) => ({
+              ...prev,
+              avatar: err instanceof Error ? err.message : 'Upload ảnh lên kie.ai thất bại — vẫn dùng tạm ảnh local.',
+            }));
+          })
+          .finally(() => setUploadingAvatarId(null));
       };
       reader.onerror = () => {
         setErrors((prev) => ({ ...prev, avatar: 'Không đọc được file ảnh — thử lại.' }));
@@ -351,6 +367,12 @@ export const CharacterMaster = forwardRef<CharacterMasterHandle, CharacterMaster
               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <Upload className="w-6 h-6 text-white" />
               </div>
+              {uploadingAvatarId === activeCharacter.id && (
+                <span className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/70 text-[11px] font-medium text-white">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Đang lưu ảnh...
+                </span>
+              )}
             </button>
             <p className="text-[10px] text-muted-foreground leading-relaxed md:max-w-[9rem]">
               Ảnh tham chiếu — dùng để giữ nhân vật nhất quán qua các cảnh khi tạo video.

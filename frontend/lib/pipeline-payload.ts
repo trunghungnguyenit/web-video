@@ -1,6 +1,7 @@
 // ─── Gom form → geminiInput / veoInput / ttsInput gửi backend ─────────────────
 
 import type { SavedCharacter } from '@/lib/character/saved-characters';
+import { fetchUrlAsBase64 } from '@/lib/blob-to-base64';
 
 export interface PipelineCharacter {
   name: string;
@@ -12,6 +13,12 @@ export interface PipelineCharacter {
   /** Ảnh tham chiếu (base64, không kèm prefix data URL) — gửi làm ảnh mồi cho Veo giữ nhất quán ngoại hình qua các cảnh */
   imageBase64?: string;
   imageMimeType?: string;
+  /**
+   * URL ảnh đã có sẵn (đã upload kie.ai từ trước, lưu Supabase) — ưu tiên gửi THẲNG cho
+   * provider 'veo' (kie.ai), tránh vòng tải-về-rồi-upload-lại thừa. Không dùng được cho
+   * 'veo-gemini' (Google cần base64 inline).
+   */
+  imageUrl?: string;
 }
 
 /** Tách data URL (`data:image/png;base64,xxx`) thành base64 thuần + mimeType — undefined nếu không parse được */
@@ -58,10 +65,11 @@ export interface VeoInput {
   sceneStyleId?: string;
   characters?: PipelineCharacter[];
   /**
-   * Ảnh Master Cast / tham chiếu đồng nhất nhân vật (tab link).
-   * Gửi kèm mọi cảnh — Veo: instance.image; Kie: image-to-video.
+   * Ảnh Master Cast / tham chiếu đồng nhất nhân vật (tab link). Gửi kèm mọi cảnh. `url`
+   * (đã upload kie.ai từ trước) ưu tiên gửi thẳng cho provider 'veo' — chỉ cần base64 khi
+   * chưa có url bền vững hoặc dùng 'veo-gemini' (Google cần base64 inline).
    */
-  referenceImage?: { base64: string; mimeType: string };
+  referenceImage?: { base64?: string; mimeType?: string; url?: string };
   /**
    * Mô tả nhân vật do Gemini Vision phân tích trực tiếp từ ảnh Character Sheet
    * (tab link) — chèn vào ĐẦU prompt mọi cảnh lúc gửi Veo/Kie để củng cố thêm
@@ -116,23 +124,41 @@ export interface AnalyzePipelineRequest {
   veoInput: VeoInput;
   ttsInput: TtsInput;
 }
-/** Chuyển đổi danh sách nhân vật từ SavedCharacter sang PipelineCharacter */
-export function toPipelineCharacters(list: SavedCharacter[]): PipelineCharacter[] {
-  return list
-    .filter((c) => c.name.trim())
-    .map((c) => {
-      const image = parseDataUrl(c.avatarDataUrl);
-      return {
+/**
+ * Chuyển đổi danh sách nhân vật từ SavedCharacter sang PipelineCharacter. avatarDataUrl giờ
+ * thường là URL kie.ai (không phải base64) — với provider 'veo' (kie.ai), gửi THẲNG url,
+ * không cần tải về base64 rồi để backend upload lại thừa. 'veo-gemini' (Google) bắt buộc
+ * base64 inline nên vẫn phải tải về (fetchUrlAsBase64). Base64 local (data:...) chỉ còn xảy
+ * ra trong lúc đang upload — luôn tải/parse trực tiếp bất kể provider.
+ */
+export async function toPipelineCharacters(
+  list: SavedCharacter[],
+  provider: VeoInput['provider'] = 'veo',
+): Promise<PipelineCharacter[]> {
+  const named = list.filter((c) => c.name.trim());
+  return Promise.all(
+    named.map(async (c) => {
+      const base = {
         name: c.name.trim(),
         role: c.role.trim(),
         traits: c.traits.trim(),
         outfit: c.outfit.trim(),
         description: c.description.trim(),
         style: c.style.trim() || 'Realistic',
-        imageBase64: image?.base64,
-        imageMimeType: image?.mimeType,
       };
-    });
+
+      if (!c.avatarDataUrl) return base;
+
+      if (!c.avatarDataUrl.startsWith('data:') && provider !== 'veo-gemini') {
+        return { ...base, imageUrl: c.avatarDataUrl };
+      }
+
+      const image = c.avatarDataUrl.startsWith('data:')
+        ? parseDataUrl(c.avatarDataUrl)
+        : await fetchUrlAsBase64(c.avatarDataUrl);
+      return { ...base, imageBase64: image?.base64, imageMimeType: image?.mimeType };
+    }),
+  );
 }
 
 export interface BuildPipelineParams {

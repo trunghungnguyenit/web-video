@@ -182,7 +182,7 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
               value={prompt}
               onChange={(e) => { setPrompt(e.target.value); setErrors((p) => ({ ...p, prompt: undefined })); }}
               rows={4}
-              maxLength={500}
+              maxLength={2000}
               placeholder="Mô tả hình ảnh / chuyển động cho AI tạo video..."
               className={cn(
                 'w-full px-3 py-2 bg-background border rounded-lg text-sm text-foreground resize-none focus:outline-none focus:ring-1 transition-colors',
@@ -202,7 +202,7 @@ function SceneEditModal({ scene, onClose, onSave, onRegenerate, isRegenerating }
               value={voice}
               onChange={(e) => { setVoice(e.target.value); setErrors((p) => ({ ...p, voice: undefined })); }}
               rows={3}
-              maxLength={400}
+              maxLength={1000}
               placeholder="Lời thoại / narration cho cảnh này..."
               className={cn(
                 'w-full px-3 py-2 bg-background border rounded-lg text-sm text-foreground resize-none focus:outline-none focus:ring-1 transition-colors',

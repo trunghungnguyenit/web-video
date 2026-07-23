@@ -1,12 +1,5 @@
 // ─── Dữ liệu kịch bản mẫu (preset) — nhân vật, input, demo 4 mục ────────────
 
-import { PRESET_DEMO_TIMELINES } from '@/lib/preset/preset-demos';
-import {
-  STICKMAN_DEMO_SCENES,
-  STICKMAN_MASTER_BRIEF,
-  stickmanImageScenes,
-} from '@/lib/preset/preset-stickman-war';
-
 export interface PresetCharacter {
   name: string;
   role: string;
@@ -74,39 +67,5 @@ export interface PresetScript {
   timeline: PresetTimelineDemo;
 }
 
-const CHAR_STICKMAN_COMMANDER: PresetCharacter = {
-  name: 'Người Chỉ Huy',
-  role: 'Lãnh đạo bộ lạc',
-  traits: 'Dũng cảm · Thông minh · Có chiến thuật · Không bỏ rơi đồng đội',
-  outfit: 'Giáp da cổ đại, mũ chiến binh, giáo dài, khiên lớn',
-  description:
-    'Stickman người que 2D tối giản — chỉ huy bộ lạc sa mạc. Giữ đồng nhất ngoại hình mọi cảnh: kích thước cơ thể, vũ khí, trang phục, màu sắc, phong cách người que.',
-  style: 'Stickman Primitive',
-};
-
 /** Danh sách kịch bản mẫu đầy đủ — dùng cho preset picker và demo */
-export const PRESET_SCRIPTS: PresetScript[] = [
-  {
-    id: 5,
-    title: 'Stickman Chiến Tranh',
-    desc: 'Có ảnh · 10 cảnh · người que 2D',
-    badge: '⚔️ Stickman / Ảnh',
-    character: CHAR_STICKMAN_COMMANDER,
-    characters: [CHAR_STICKMAN_COMMANDER],
-    input: {
-      content: STICKMAN_MASTER_BRIEF,
-      language: 'vi',
-      sceneCount: '10',
-      voice: 'male-pro',
-      aspectRatio: '16:9',
-      sceneDuration: '6',
-      videoQuality: '720p',
-      voiceSpeed: 1,
-      sceneStyleId: '2d-explainer',
-      inputType: 'image',
-      imageScenes: stickmanImageScenes(),
-    },
-    demoScenes: STICKMAN_DEMO_SCENES,
-    timeline: PRESET_DEMO_TIMELINES[5],
-  },
-];
+export const PRESET_SCRIPTS: PresetScript[] = [];

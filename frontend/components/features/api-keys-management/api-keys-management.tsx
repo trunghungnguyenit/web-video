@@ -6,11 +6,10 @@ import { cn } from '@/lib/utils';
 import { FieldError } from '@/components/ui/field-error';
 import { SecretField } from '@/components/ui/secret-field';
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard';
-import { API_KEY_IDS, setApiKey } from '@/lib/api-keys/api-keys-store';
+import { API_KEY_IDS, API_KEYS_CHANGED_EVENT, getApiKey, isApiKeysReady, setApiKey } from '@/lib/api-keys/api-keys-store';
 import { useAuth } from '@/contexts/auth-context';
 import { createClient } from '@/lib/supabase/client';
-import { fetchRemoteApiKeys, saveRemoteApiKey } from '@/lib/api-keys/api-keys-remote';
-import { toUserMessage } from '@/lib/error-messages';
+import { saveRemoteApiKey } from '@/lib/api-keys/api-keys-remote';
 
 type KeyStatus = 'connected' | 'disconnected' | 'verifying' | 'error';
 
@@ -93,43 +92,32 @@ async function verifyKey(_id: string, value: string): Promise<{ ok: boolean; msg
 export function ApiKeysManagement() {
   const { user, loading: authLoading } = useAuth();
   const supabaseRef = useRef(createClient());
-  const syncedForUserRef = useRef<string | null>(null);
 
   const [keys, setKeys] = useState<ApiKeyEntry[]>(INITIAL_KEYS);
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Record<string, string>>({});
   const { copiedId, copy: copyToClipboard } = useCopyToClipboard();
-  const [loadError, setLoadError] = useState('');
+  const [keysReady, setKeysReady] = useState(isApiKeysReady());
 
-  // Tải key đã lưu của tài khoản từ Supabase, đồng thời đồng bộ vào localStorage
-  // (api-keys-store.ts) để phần còn lại của app — vốn đọc key qua localStorage
-  // đồng bộ (input-section, voice-select, veo-models-context...) — dùng được ngay
-  // mà không phải sửa lại toàn bộ các nơi đó sang gọi async.
+  // auth-context.tsx đã tự nạp key từ Supabase vào cache (api-keys-store.ts) ngay khi
+  // đăng nhập — ở đây chỉ cần đọc lại cache đó để hiển thị, không tự fetch Supabase
+  // riêng nữa (tránh gọi trùng lặp). Đồng bộ lại mỗi khi cache đổi (API_KEYS_CHANGED_EVENT).
   useEffect(() => {
-    if (authLoading || !user) return;
-    if (syncedForUserRef.current === user.id) return;
-    const supabase = supabaseRef.current;
-    if (!supabase) return;
-
-    syncedForUserRef.current = user.id;
-    setLoadError('');
-
-    fetchRemoteApiKeys(supabase, user.id)
-      .then((remote) => {
-        for (const k of INITIAL_KEYS) {
-          setApiKey(k.id, remote[k.id] ?? '');
-        }
-        setKeys((prev) =>
-          prev.map((k) => {
-            const value = remote[k.id];
-            return value
-              ? { ...k, value, status: 'connected' as const }
-              : { ...k, value: '', status: 'disconnected' as const };
-          }),
-        );
-      })
-      .catch((err) => setLoadError(toUserMessage(err, 'Không tải được API Keys — thử lại.')));
-  }, [user, authLoading]);
+    const syncFromCache = () => {
+      setKeysReady(isApiKeysReady());
+      setKeys((prev) =>
+        prev.map((k) => {
+          const value = getApiKey(k.id);
+          return value
+            ? { ...k, value, status: 'connected' as const }
+            : { ...k, value: '', status: 'disconnected' as const };
+        }),
+      );
+    };
+    syncFromCache();
+    window.addEventListener(API_KEYS_CHANGED_EVENT, syncFromCache);
+    return () => window.removeEventListener(API_KEYS_CHANGED_EVENT, syncFromCache);
+  }, []);
 
   const toggleVisibility = (id: string) =>
     setVisibility((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -239,7 +227,12 @@ export function ApiKeysManagement() {
 
   return (
     <section className="space-y-6">
-      {loadError && <FieldError>{loadError}</FieldError>}
+      {!keysReady && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Đang tải API Keys từ tài khoản...
+        </p>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-bold text-primary uppercase tracking-widest">
           QUẢN LÝ API KEYS

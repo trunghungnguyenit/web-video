@@ -123,19 +123,28 @@ export async function pollVideoOperation(
   });
 }
 
+/** Ảnh tham chiếu — hoặc đã có URL bền vững (kie.ai, ưu tiên dùng thẳng), hoặc còn base64 (phải upload) */
+type ReferenceImageSource = { url: string } | { base64: string; mimeType: string };
+
 /**
  * Gom tối đa 3 ảnh tham chiếu cho REFERENCE_2_VIDEO — referenceImage (Master Cast, ảnh
  * chung đại diện cả dàn nhân vật) luôn ưu tiên slot đầu, sau đó tới ảnh riêng của từng
- * nhân vật (PipelineCharacter.imageBase64). Loại trùng theo nội dung base64 để không gửi
- * lặp cùng 1 ảnh 2 lần (vd Master Cast character giả lập mang cùng ảnh với referenceImage).
+ * nhân vật. Mỗi ảnh ưu tiên `imageUrl`/`referenceImage.url` (đã upload kie.ai từ trước,
+ * lưu Supabase) — dùng THẲNG, không upload lại; chỉ upload từ base64 khi chưa có URL bền
+ * vững. Loại trùng theo URL hoặc 200 ký tự đầu base64 để không gửi lặp cùng 1 ảnh 2 lần.
  */
 function collectReferenceImages(
   veoInput: GenerateSceneVideoParams['veoInput'],
-): Array<{ base64: string; mimeType: string }> {
-  const images: Array<{ base64: string; mimeType: string }> = [];
+): ReferenceImageSource[] {
+  const images: ReferenceImageSource[] = [];
   const seen = new Set<string>();
 
-  const add = (base64?: string, mimeType?: string) => {
+  const addUrl = (url?: string) => {
+    if (!url || images.length >= 3 || seen.has(url)) return;
+    seen.add(url);
+    images.push({ url });
+  };
+  const addBase64 = (base64?: string, mimeType?: string) => {
     if (!base64 || !mimeType || images.length >= 3) return;
     // So khớp theo 1 đoạn đầu base64 là đủ để phát hiện trùng ảnh — không cần hash toàn bộ.
     const key = base64.slice(0, 200);
@@ -143,10 +152,14 @@ function collectReferenceImages(
     seen.add(key);
     images.push({ base64, mimeType });
   };
+  const addImage = (url?: string, base64?: string, mimeType?: string) => {
+    if (url) addUrl(url);
+    else addBase64(base64, mimeType);
+  };
 
-  add(veoInput.referenceImage?.base64, veoInput.referenceImage?.mimeType);
+  addImage(veoInput.referenceImage?.url, veoInput.referenceImage?.base64, veoInput.referenceImage?.mimeType);
   for (const c of veoInput.characters ?? []) {
-    add(c.imageBase64, c.imageMimeType);
+    addImage(c.imageUrl, c.imageBase64, c.imageMimeType);
   }
 
   return images;
@@ -192,15 +205,19 @@ export async function startVideoGeneration(params: GenerateSceneVideoParams): Pr
       model = 'veo3_fast';
     }
     durationSeconds = 8;
+    // Ảnh đã có URL bền vững (kie.ai, lưu Supabase) → dùng THẲNG, không upload lại; chỉ
+    // upload từ base64 khi chưa có URL (vd ảnh vừa chọn, chưa kịp upload xong).
     imageUrls = await Promise.all(
       referenceImages.map((img, i) =>
-        uploadKieImageBase64({
-          apiKey,
-          base64: img.base64,
-          mimeType: img.mimeType,
-          uploadPath: 'veo-scenes',
-          fileName: `veo-ref-${i}-${Date.now()}.${img.mimeType.includes('png') ? 'png' : 'jpg'}`,
-        }),
+        'url' in img
+          ? Promise.resolve(img.url)
+          : uploadKieImageBase64({
+              apiKey,
+              base64: img.base64,
+              mimeType: img.mimeType,
+              uploadPath: 'veo-scenes',
+              fileName: `veo-ref-${i}-${Date.now()}.${img.mimeType.includes('png') ? 'png' : 'jpg'}`,
+            }),
       ),
     );
   }

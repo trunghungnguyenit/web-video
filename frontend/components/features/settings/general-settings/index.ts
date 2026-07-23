@@ -1,1 +1,1 @@
-export { GeneralSettings } from './general-settings';
+export { GeneralSettings, GoogleIcon } from './general-settings';

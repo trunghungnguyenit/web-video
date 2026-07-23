@@ -235,8 +235,8 @@ export function Sidebar({
           />
         </div>
 
-        {/* Preset scripts — hidden when collapsed */}
-        {!collapsed && (
+        {/* Preset scripts — hidden when collapsed hoặc chưa có preset nào */}
+        {!collapsed && PRESET_SCRIPTS.length > 0 && (
           <>
             <div className="mx-2 my-2 border-t border-sidebar-border/60" />
             <div className="px-2 pb-2">
