@@ -53,6 +53,25 @@ class VeoService {
     throw err;
   }
 
+  /**
+   * POST /api/veo/upload-image — upload ảnh Master Cast/avatar nhân vật lên kie.ai,
+   * trả URL công khai để lưu bền vững (Supabase) thay vì base64 trong localStorage.
+   */
+  async uploadImage(payload: { apiKey: string; base64: string; mimeType: string; fileName?: string }): Promise<string> {
+    const res = await fetchApi('/api/veo/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const json = (await res.json()) as ApiResponse<{ url: string }>;
+    if (!res.ok || !json.success || !json.data?.url) {
+      throw new Error(json.error ?? `Upload ảnh lỗi (${res.status}).`);
+    }
+
+    return json.data.url;
+  }
+
   /** POST /api/veo/models — danh sách model Veo theo API Key */
   async listModels(apiKey: string): Promise<VeoModelOption[]> {
     const res = await fetchApi('/api/veo/models', {

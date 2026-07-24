@@ -106,7 +106,11 @@ export interface VideoLibraryItem {
    * và user có thể sửa tay sau đó — sửa gì thì đúng cái đó được gửi đi tạo video.
    */
   masterCastPrompt?: string;
-  /** Ảnh tham chiếu dàn nhân vật — user tự upload (data URL base64) */
+  /**
+   * Ảnh tham chiếu dàn nhân vật user tự upload — URL công khai đã upload lên kie.ai (không
+   * phải base64), đồng bộ Supabase (video_projects.master_cast_image_url) nên còn lại sau
+   * F5/đăng nhập máy khác. Base64 local tạm thời chỉ xuất hiện trong lúc đang upload.
+   */
   masterCastImageDataUrl?: string;
   /** Kết quả phân tích tab link đang chờ xác nhận — chưa gọi TTS/Veo, chỉ hiện preview để xem/upload ảnh */
   pendingLinkReview?: SceneGenerationResult | null;

@@ -6,8 +6,7 @@ import { FieldError } from '@/components/ui/field-error';
 import { parseDataUrl } from '@/lib/pipeline-payload';
 import { getApiKey, API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
 import { geminiService } from '@/services/gemini/gemini.service';
-
-const MAX_MASTER_CAST_IMAGE_MB = 5;
+import { uploadReferenceImageFile, validateReferenceImageFile } from '@/lib/veo/upload-reference-image';
 
 interface MasterCastPanelProps {
   prompt: string;
@@ -41,6 +40,7 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
   imageRef.current = imageDataUrl;
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   /**
    * Vision phân tích ĐÚNG ảnh vừa upload — kết quả ghi THẲNG vào ô prompt (thay vì 1 field
@@ -69,15 +69,13 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
 
   const applyImageFile = async (file: File | null | undefined) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setError('File phải là hình ảnh (JPG, PNG, WebP...).');
-      return;
-    }
-    if (file.size > MAX_MASTER_CAST_IMAGE_MB * 1024 * 1024) {
-      setError(`Ảnh quá lớn — tối đa ${MAX_MASTER_CAST_IMAGE_MB}MB.`);
+    const validationError = validateReferenceImageFile(file);
+    if (validationError) {
+      setError(validationError);
       return;
     }
     try {
+      // Hiện preview ngay bằng base64 local — không đợi upload xong mới thấy ảnh.
       const dataUrl = await readImageFile(file);
       imageRef.current = dataUrl;
       onImageChange(dataUrl);
@@ -85,6 +83,20 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
       void analyzeCharacterSheet(dataUrl);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không đọc được file ảnh — thử lại.');
+      return;
+    }
+
+    // Upload lên kie.ai lấy URL bền vững — thay thế base64 local để lưu Supabase (base64
+    // không đồng bộ, mất khi F5). Giữ nguyên preview base64 nếu upload lỗi (best-effort).
+    setUploading(true);
+    try {
+      const url = await uploadReferenceImageFile(file);
+      imageRef.current = url;
+      onImageChange(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload ảnh lên kie.ai thất bại — vẫn dùng tạm ảnh local.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -142,10 +154,10 @@ export function MasterCastPanel({ prompt, onPromptChange, imageDataUrl, onImageC
               <span className="text-[10px] font-normal opacity-80">Click tải lên hoặc Ctrl+V dán</span>
             </span>
           )}
-          {analyzing && (
+          {(analyzing || uploading) && (
             <span className="absolute inset-0 flex items-center justify-center gap-1.5 bg-black/70 text-[11px] font-medium text-white">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              Gemini đang phân tích nhân vật...
+              {uploading ? 'Đang lưu ảnh...' : 'Gemini đang phân tích nhân vật...'}
             </span>
           )}
         </button>

@@ -11,6 +11,7 @@ import {
   startVideoGeneration as startGeminiVideoGeneration,
 } from '../../services/veo/veo-gemini.service';
 import { listVeoModels } from '../../services/veo/veo-models.service';
+import { uploadKieImageBase64 } from '../../services/kie/kie-files.service';
 import { VeoApiError } from '../../lib/veo-errors';
 import type { VeoInput } from '../../types/pipeline';
 
@@ -51,6 +52,13 @@ interface ModelsBody {
   apiKey: string;
 }
 
+interface UploadImageBody {
+  apiKey: string;
+  base64: string;
+  mimeType: string;
+  fileName?: string;
+}
+
 function veoErrorResponse(c: Parameters<typeof fail>[0], err: unknown) {
   const message = err instanceof Error ? err.message : 'Lỗi khi gọi Veo';
   const fatal = err instanceof VeoApiError ? err.fatal : false;
@@ -75,6 +83,37 @@ veoRoute.post('/models', async (c) => {
     return ok(c, { models });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Lỗi khi lấy danh sách model Veo';
+    return fail(c, message, 500);
+  }
+});
+
+/**
+ * POST /api/veo/upload-image
+ * Upload ảnh Master Cast / avatar nhân vật lên kie.ai (file-base64-upload) → trả URL
+ * công khai, dùng để lưu bền vững (Supabase) thay vì base64 trong localStorage.
+ */
+veoRoute.post('/upload-image', async (c) => {
+  try {
+    const body = await c.req.json<UploadImageBody>();
+
+    if (!body.apiKey?.trim()) {
+      return fail(c, 'Thiếu Kie API Key — nhập tại mục API Keys.', 400);
+    }
+    if (!body.base64?.trim()) {
+      return fail(c, 'Thiếu dữ liệu ảnh.', 400);
+    }
+
+    const url = await uploadKieImageBase64({
+      apiKey: body.apiKey,
+      base64: body.base64,
+      mimeType: body.mimeType,
+      fileName: body.fileName,
+      uploadPath: 'master-cast',
+    });
+
+    return ok(c, { url });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Lỗi khi upload ảnh';
     return fail(c, message, 500);
   }
 });

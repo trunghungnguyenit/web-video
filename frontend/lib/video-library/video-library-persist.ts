@@ -1,32 +1,9 @@
-// ─── Lưu metadata Kho video (kịch bản, operation Veo…) — không lưu blob video ─
+// ─── Chuẩn hoá item Kho video khi nạp từ Supabase — dọn trạng thái "treo" ────
+// Không còn lưu localStorage — Supabase là nguồn dữ liệu duy nhất (xem video-library-context.tsx).
 
 import type { VideoLibraryItem } from '@/lib/video-library/video-library';
-import type { VideoScene } from '@/lib/scene/scenes';
-import { readJSON, writeJSON } from '@/lib/local-storage';
 
-const STORAGE_KEY = 'web-video-video-library-v1';
-/** Key cũ (thời "Bulk List") — chỉ đọc fallback 1 lần, không xoá để tránh mất dữ liệu */
-const LEGACY_STORAGE_KEY = 'web-video-bulk-projects-v1';
-
-export interface VideoLibraryPersistSnapshot {
-  items: VideoLibraryItem[];
-  activeItemId: string;
-}
-
-interface LegacyBulkPersistSnapshot {
-  projects: VideoLibraryItem[];
-  activeProjectId: string;
-}
-
-function stripBlobUrls(scenes: VideoScene[]): VideoScene[] {
-  return scenes.map((s) => ({
-    ...s,
-    videoUrl: s.videoUrl?.startsWith('blob:') ? undefined : s.videoUrl,
-    audioUrl: s.audioUrl?.startsWith('blob:') ? undefined : s.audioUrl,
-  }));
-}
-
-/** Dọn trạng thái "treo" (generating mồ côi, không operation, không video) khi nạp item — dùng cho cả localStorage lẫn Supabase */
+/** Dọn trạng thái "treo" (generating mồ côi, không operation, không video) khi nạp item từ Supabase */
 export function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
   const scenes = item.scenes.map((s) => {
     let status = s.status;
@@ -62,48 +39,4 @@ export function normalizeItemOnLoad(item: VideoLibraryItem): VideoLibraryItem {
     pendingRegeneration: null,
     regenerateError: undefined,
   };
-}
-
-function loadLegacyBulkPersist(): VideoLibraryPersistSnapshot | null {
-  const parsed = readJSON<LegacyBulkPersistSnapshot | null>(LEGACY_STORAGE_KEY, null);
-  if (!parsed?.projects?.length) return null;
-  return { items: parsed.projects, activeItemId: parsed.activeProjectId };
-}
-
-export function loadVideoLibraryPersist(): VideoLibraryPersistSnapshot | null {
-  if (typeof window === 'undefined') return null;
-
-  const parsed = readJSON<VideoLibraryPersistSnapshot | null>(STORAGE_KEY, null);
-  if (parsed) {
-    if (!parsed.items?.length) return null;
-    const items = parsed.items.map(normalizeItemOnLoad);
-    const activeItemId = items.some((p) => p.id === parsed.activeItemId)
-      ? parsed.activeItemId
-      : items[0].id;
-    return { items, activeItemId };
-  }
-
-  const legacy = loadLegacyBulkPersist();
-  if (!legacy) return null;
-
-  const items = legacy.items.map(normalizeItemOnLoad);
-  const activeItemId = items.some((p) => p.id === legacy.activeItemId)
-    ? legacy.activeItemId
-    : items[0].id;
-
-  // Ghi ngay vào key mới — lần load sau không cần fallback nữa
-  saveVideoLibraryPersist(items, activeItemId);
-
-  return { items, activeItemId };
-}
-
-export function saveVideoLibraryPersist(items: VideoLibraryItem[], activeItemId: string): void {
-  const snapshot: VideoLibraryPersistSnapshot = {
-    items: items.map((p) => ({
-      ...p,
-      scenes: stripBlobUrls(p.scenes),
-    })),
-    activeItemId,
-  };
-  writeJSON(STORAGE_KEY, snapshot);
 }

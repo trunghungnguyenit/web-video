@@ -2,7 +2,7 @@
 // Bắt buộc đăng nhập mới dùng được mục này (không có chế độ khách).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { API_KEY_IDS } from '@/lib/api-keys/api-keys-store';
+import { API_KEY_IDS } from '@/lib/api-keys/api-key-ids';
 
 interface UserApiKeysRow {
   user_id: string;
@@ -20,8 +20,8 @@ interface UserApiKeysRow {
 const COLUMN_BY_ID: Record<string, keyof Omit<UserApiKeysRow, 'user_id'>> = {
   [API_KEY_IDS.gemini]: 'gemini_key',
   [API_KEY_IDS.elevenlabs]: 'elevenlabs_key',
-  [API_KEY_IDS.kie]: 'kie_key',
   [API_KEY_IDS.veoGemini]: 'veo_key',
+  [API_KEY_IDS.kie]: 'kie_key',
 };
 
 /** Tải toàn bộ key đã lưu của tài khoản — trả `{}` nếu chưa từng lưu key nào */

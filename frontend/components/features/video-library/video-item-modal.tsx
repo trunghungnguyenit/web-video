@@ -159,7 +159,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const handleSaveAndRegenerate = () => {
+  const handleSaveAndRegenerate = async () => {
     if (!initialItem) return;
     const name = title.trim();
     if (!name) {
@@ -206,7 +206,7 @@ export function VideoItemModal({ mode, open, onClose, onCreate, initialItem }: V
       aspectRatio: settings.aspectRatio,
     });
 
-    const characters = toPipelineCharacters(initialItem.characters);
+    const characters = await toPipelineCharacters(initialItem.characters, settings.videoProvider);
     const pipeline = buildAnalyzePipeline({
       geminiApiKey: geminiKey,
       veoApiKey: videoApiKey,

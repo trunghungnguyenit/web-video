@@ -24,8 +24,6 @@ export interface SceneQueueItem {
 export interface SceneQueueCallbacks {
   onScenesUpdate: (scenes: VideoScene[]) => void;
   onQueueUpdate?: (items: SceneQueueItem[]) => void;
-  /** Lưu ngay veoOperationName — tránh mất khi refresh trong debounce persist */
-  onPersistScenes?: (scenes: VideoScene[]) => void;
   /** Dừng toàn queue khi Billing/Quota */
   onFatalError?: (message: string) => void;
   /** Kiểm tra epoch — return false để hủy queue */
@@ -151,7 +149,6 @@ export async function runSceneGenerationQueue(
       scenes = patchSceneAt(scenes, i, stopped);
       callbacks.onQueueUpdate?.([...queueItems]);
       callbacks.onScenesUpdate([...scenes]);
-      callbacks.onPersistScenes?.([...scenes]);
       continue;
     }
 
@@ -177,7 +174,6 @@ export async function runSceneGenerationQueue(
           working = patched;
           scenes = patchSceneAt(scenes, i, patched);
           callbacks.onScenesUpdate([...scenes]);
-          callbacks.onPersistScenes?.([...scenes]);
         },
       }, previousSceneVideoUrl);
 
@@ -216,7 +212,6 @@ export async function runSceneGenerationQueue(
         scenes = patchSceneAt(scenes, i, stopped);
         callbacks.onQueueUpdate?.([...queueItems]);
         callbacks.onScenesUpdate([...scenes]);
-        callbacks.onPersistScenes?.([...scenes]);
         continue;
       }
 
@@ -267,7 +262,6 @@ export async function runSceneGenerationQueue(
       scenes = patchSceneAt(scenes, i, finished);
       callbacks.onQueueUpdate?.([...queueItems]);
       callbacks.onScenesUpdate([...scenes]);
-      callbacks.onPersistScenes?.([...scenes]);
       continue;
     }
 

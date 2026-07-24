@@ -133,10 +133,10 @@ export async function generateSceneVideoAsset(
       const basePrompt = buildScenePrompt(scene.prompt, veoInput.masterCharacterText);
       const prompt = continuityFrame ? `${basePrompt}\n\n[${CONTINUITY_FRAME_NOTE}]` : basePrompt;
 
-      const referenceImage = veoInput.referenceImage?.base64 && veoInput.referenceImage?.mimeType
+      const referenceImage = veoInput.referenceImage?.url || (veoInput.referenceImage?.base64 && veoInput.referenceImage?.mimeType)
         ? veoInput.referenceImage
         : undefined;
-      const characterImage = veoInput.characters?.find((c) => c.imageBase64 && c.imageMimeType);
+      const characterImage = veoInput.characters?.find((c) => c.imageUrl || (c.imageBase64 && c.imageMimeType));
       console.log('[veo/generate] Master Cast / continuity check:', {
         sceneId: scene.id,
         hasSceneSourceImage: Boolean(scene.sourceImageBase64),
